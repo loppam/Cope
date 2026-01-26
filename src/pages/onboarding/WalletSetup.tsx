@@ -1,0 +1,123 @@
+import { useState } from "react";
+import { useNavigate } from "react-router";
+import { Button } from "@/components/Button";
+import { Card } from "@/components/Card";
+import { ArrowLeft, Sparkles, Shield, Loader2 } from "lucide-react";
+import { generateWallet } from "@/lib/wallet";
+import { useAuth } from "@/contexts/AuthContext";
+import { encrypt, generateEncryptionKey } from "@/lib/encryption";
+import { toast } from "sonner";
+
+export function WalletSetup() {
+  const navigate = useNavigate();
+  const { user, updateWallet } = useAuth();
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E] flex flex-col">
+      <div className="p-4">
+        <Button variant="icon" onClick={() => navigate(-1)}>
+          <ArrowLeft className="w-5 h-5" />
+        </Button>
+      </div>
+
+      <div className="flex-1 flex flex-col p-6 max-w-md mx-auto w-full">
+        <div className="mb-8">
+          <h1 className="text-2xl font-bold mb-2">Setup Wallet</h1>
+          <p className="text-white/60">Choose how you want to get started</p>
+        </div>
+
+        <div className="space-y-4">
+          <Card
+            className="cursor-pointer hover:border-[#12d585]/50 transition-colors"
+            onClick={async () => {
+              if (!user) {
+                toast.error('Please sign in first');
+                return;
+              }
+
+              setIsGenerating(true);
+              try {
+                // Generate new wallet
+                const wallet = generateWallet();
+                
+                // Generate encryption key for this user
+                const encryptionKey = generateEncryptionKey(user.uid);
+                
+                // Encrypt mnemonic and secret key
+                const encryptedMnemonic = await encrypt(wallet.mnemonic, encryptionKey);
+                const encryptedSecretKey = await encrypt(JSON.stringify(Array.from(wallet.secretKey)), encryptionKey);
+                
+                // Save to Firebase with encrypted credentials
+                await updateWallet(wallet.publicKey, 0, encryptedMnemonic, encryptedSecretKey);
+                
+                toast.success('Wallet generated successfully!', {
+                  duration: 5000,
+                });
+                
+                // Navigate to fund page with mnemonic in state (for display only)
+                navigate("/wallet/fund", { 
+                  state: { 
+                    mnemonic: wallet.mnemonic,
+                    publicKey: wallet.publicKey,
+                    isNewWallet: true 
+                  } 
+                });
+              } catch (error: any) {
+                console.error('Error generating wallet:', error);
+                toast.error(error.message || 'Failed to generate wallet');
+              } finally {
+                setIsGenerating(false);
+              }
+            }}
+          >
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-[16px] bg-gradient-to-br from-[#12d585]/20 to-[#08b16b]/20 flex items-center justify-center flex-shrink-0">
+                <Sparkles className="w-6 h-6 text-[#12d585]" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold mb-1">Generate New Wallet</h3>
+                <p className="text-sm text-white/60 mb-3">
+                  Easy setup. We'll create a secure wallet for you.
+                </p>
+                {isGenerating ? (
+                  <div className="flex items-center gap-2 text-[#12d585] text-xs">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>Generating...</span>
+                  </div>
+                ) : (
+                  <span className="inline-block px-3 py-1 rounded-full bg-[#12d585]/10 text-[#12d585] text-xs font-medium">
+                    Recommended
+                  </span>
+                )}
+              </div>
+            </div>
+          </Card>
+
+          <Card
+            className="cursor-pointer hover:border-white/20 transition-colors"
+            onClick={() => navigate("/auth/import-wallet")}
+          >
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-[16px] bg-white/5 flex items-center justify-center flex-shrink-0">
+                <Shield className="w-6 h-6 text-white/70" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold mb-1">Import Existing Wallet</h3>
+                <p className="text-sm text-white/60">
+                  Use your existing wallet's private key or seed phrase
+                </p>
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        <div className="mt-8 p-4 rounded-[16px] bg-[#FFB84D]/10 border border-[#FFB84D]/20">
+          <p className="text-sm text-[#FFB84D]">
+            ⚠️ Never share your private key or seed phrase with anyone.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}

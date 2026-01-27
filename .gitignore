@@ -46,3 +46,4 @@ workbox-*.js.map
 sw.js.map
 dev-dist/
 dev-sw.js
+.vercel

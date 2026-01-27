@@ -1,7 +1,7 @@
 // Authentication Context for managing user state
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User } from 'firebase/auth';
-import { onAuthStateChange, signInWithTwitter, handleRedirectResult, signOutUser, getUserProfile, updateUserWallet, updateUserBalance, updateUserProfile, addWalletToWatchlist, removeWalletFromWatchlist, getWatchlist, WatchedWallet, removeUserWallet } from '@/lib/auth';
+import { onAuthStateChange, signInWithTwitter, handleRedirectResult, signOutUser, getUserProfile, updateUserWallet, updateUserBalance, updateUserProfile, addWalletToWatchlist, removeWalletFromWatchlist, getWatchlist, WatchedWallet, removeUserWallet, getFirebaseCallbackUrl } from '@/lib/auth';
 import { toast } from 'sonner';
 
 interface AuthContextType {
@@ -108,6 +108,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         toast.error('Twitter OAuth not configured. Check Firebase Console → Authentication → Twitter', {
           duration: 5000,
         });
+      } else if (errorMessage.includes('blocked') || errorMessage.includes('suspicious') || errorMessage.includes('prevented')) {
+        const callbackUrl = getFirebaseCallbackUrl();
+        toast.error(
+          `Twitter blocked the login. Add this callback URL to Twitter Developer Portal: ${callbackUrl}. See TWITTER_OAUTH_MOBILE_FIX.md for details.`,
+          { duration: 10000 }
+        );
       } else if (!errorMessage.includes('cancelled')) {
         toast.error(errorMessage);
       }

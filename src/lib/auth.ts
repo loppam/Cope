@@ -14,6 +14,15 @@ import { auth, db } from './firebase';
 // Twitter OAuth Provider
 const twitterProvider = new TwitterAuthProvider();
 
+// Get the Firebase callback URL that needs to be configured in Twitter Developer Portal
+export function getFirebaseCallbackUrl(): string {
+  const authDomain = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN;
+  if (!authDomain) {
+    return 'Please set VITE_FIREBASE_AUTH_DOMAIN in your .env file';
+  }
+  return `https://${authDomain}/__/auth/handler`;
+}
+
 // Detect if user is on a mobile device
 function isMobileDevice(): boolean {
   if (typeof window === 'undefined') return false;
@@ -81,6 +90,12 @@ export async function signInWithTwitter(): Promise<User | void> {
   } catch (error: any) {
     console.error('Twitter sign-in error:', error);
     
+    // Check if error message contains Twitter's suspicious login message
+    const errorMessage = error.message || '';
+    if (errorMessage.includes('suspicious') || errorMessage.includes('blocked') || errorMessage.includes('prevented')) {
+      throw new Error('Twitter blocked the login attempt. Please check TWITTER_OAUTH_MOBILE_FIX.md for configuration steps. You may need to wait 24 hours before trying again.');
+    }
+    
     // Handle specific error cases
     if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/redirect-cancelled-by-user') {
       throw new Error('Sign-in was cancelled');
@@ -115,6 +130,13 @@ export async function handleRedirectResult(): Promise<User | null> {
     return null;
   } catch (error: any) {
     console.error('Error handling redirect result:', error);
+    
+    // Check if error message contains Twitter's suspicious login message
+    const errorMessage = error.message || '';
+    if (errorMessage.includes('suspicious') || errorMessage.includes('blocked') || errorMessage.includes('prevented')) {
+      throw new Error('Twitter blocked the login attempt. Please check TWITTER_OAUTH_MOBILE_FIX.md for configuration steps. You may need to wait 24 hours before trying again.');
+    }
+    
     throw error;
   }
 }

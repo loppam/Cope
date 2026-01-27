@@ -1,7 +1,7 @@
 // Authentication Context for managing user state
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User } from 'firebase/auth';
-import { onAuthStateChange, signInWithTwitter, signOutUser, getUserProfile, updateUserWallet, updateUserBalance, updateUserProfile, addWalletToWatchlist, removeWalletFromWatchlist, getWatchlist, WatchedWallet, removeUserWallet } from '@/lib/auth';
+import { onAuthStateChange, signInWithTwitter, handleRedirectResult, signOutUser, getUserProfile, updateUserWallet, updateUserBalance, updateUserProfile, addWalletToWatchlist, removeWalletFromWatchlist, getWatchlist, WatchedWallet, removeUserWallet } from '@/lib/auth';
 import { toast } from 'sonner';
 
 interface AuthContextType {
@@ -33,6 +33,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [userProfile, setUserProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [watchlist, setWatchlist] = useState<WatchedWallet[]>([]);
+
+  // Handle redirect result when user returns from Twitter OAuth (mobile)
+  useEffect(() => {
+    const checkRedirectResult = async () => {
+      try {
+        const redirectUser = await handleRedirectResult();
+        if (redirectUser) {
+          toast.success('Successfully signed in with Twitter');
+        }
+      } catch (error: any) {
+        console.error('Error handling redirect result:', error);
+        if (error.message && !error.message.includes('no redirect')) {
+          toast.error(error.message || 'Failed to complete sign-in');
+        }
+      }
+    };
+
+    checkRedirectResult();
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChange(async (currentUser) => {
@@ -73,8 +92,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const handleSignInWithTwitter = async () => {
     try {
       setLoading(true);
-      await signInWithTwitter();
-      toast.success('Successfully signed in with Twitter');
+      const result = await signInWithTwitter();
+      // On mobile, signInWithTwitter returns void (redirect happens)
+      // On desktop, it returns the user
+      if (result) {
+        toast.success('Successfully signed in with Twitter');
+      }
+      // On mobile, the redirect will happen and handleRedirectResult will handle it
     } catch (error: any) {
       console.error('Sign-in error:', error);
       const errorMessage = error.message || 'Failed to sign in with Twitter';
@@ -84,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         toast.error('Twitter OAuth not configured. Check Firebase Console → Authentication → Twitter', {
           duration: 5000,
         });
-      } else {
+      } else if (!errorMessage.includes('cancelled')) {
         toast.error(errorMessage);
       }
       throw error;

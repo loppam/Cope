@@ -1,6 +1,8 @@
 // Authentication utilities for Twitter OAuth
 import {
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signOut,
   onAuthStateChanged,
   User,
@@ -12,9 +14,60 @@ import { auth, db } from './firebase';
 // Twitter OAuth Provider
 const twitterProvider = new TwitterAuthProvider();
 
-// Sign in with Twitter
-export async function signInWithTwitter(): Promise<User> {
+// Detect if user is on a mobile device
+function isMobileDevice(): boolean {
+  if (typeof window === 'undefined') return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+    (window.innerWidth <= 768 && window.innerHeight <= 1024);
+}
+
+// Helper function to save user profile data
+async function saveUserProfile(user: User, credential: any): Promise<void> {
+  // Extract Twitter handle from displayName
+  let xHandle = '';
+  if (user.displayName) {
+    xHandle = user.displayName.startsWith('@') 
+      ? user.displayName 
+      : `@${user.displayName}`;
+  } else if (user.email) {
+    xHandle = `@${user.email.split('@')[0]}`;
+  } else {
+    xHandle = `@user_${user.uid.slice(0, 8)}`;
+  }
+
+  const twitterData = {
+    uid: user.uid,
+    displayName: user.displayName,
+    email: user.email,
+    photoURL: user.photoURL,
+    xHandle: xHandle,
+    avatar: user.photoURL,
+    providerId: credential.providerId,
+    walletAddress: null,
+    balance: 0,
+    walletConnected: false,
+    isNew: true,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+
+  const userRef = doc(db, 'users', user.uid);
+  await setDoc(userRef, twitterData, { merge: true });
+}
+
+// Sign in with Twitter - uses redirect on mobile, popup on desktop
+export async function signInWithTwitter(): Promise<User | void> {
   try {
+    // Use redirect on mobile devices to avoid popup blocking
+    if (isMobileDevice()) {
+      await signInWithRedirect(auth, twitterProvider);
+      // Note: signInWithRedirect doesn't return a user immediately
+      // The user will be redirected to Twitter, then back to the app
+      // We handle the redirect result in handleRedirectResult()
+      return;
+    }
+
+    // Use popup on desktop
     const result = await signInWithPopup(auth, twitterProvider);
     const user = result.user;
     const credential = TwitterAuthProvider.credentialFromResult(result);
@@ -23,52 +76,13 @@ export async function signInWithTwitter(): Promise<User> {
       throw new Error('Failed to get Twitter credential');
     }
 
-    // Extract Twitter handle from displayName
-    // Twitter displayName from OAuth is usually the username without @
-    let xHandle = '';
-    if (user.displayName) {
-      // If it already has @, use it; otherwise add @
-      xHandle = user.displayName.startsWith('@') 
-        ? user.displayName 
-        : `@${user.displayName}`;
-    } else if (user.email) {
-      // Fallback: extract from email
-      xHandle = `@${user.email.split('@')[0]}`;
-    } else {
-      // Last resort: use uid
-      xHandle = `@user_${user.uid.slice(0, 8)}`;
-    }
-
-    // Get Twitter user info - complete user profile
-    const twitterData = {
-      uid: user.uid,
-      displayName: user.displayName,
-      email: user.email,
-      photoURL: user.photoURL,
-      xHandle: xHandle, // Twitter handle
-      avatar: user.photoURL, // Profile picture
-      providerId: credential.providerId,
-      // Wallet data (will be set later during wallet setup)
-      walletAddress: null,
-      balance: 0, // SOL balance
-      // Status
-      walletConnected: false,
-      isNew: true, // Flag to track if user needs wallet setup
-      // Timestamps
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    };
-
-    // Save/update user profile in Firestore
-    const userRef = doc(db, 'users', user.uid);
-    await setDoc(userRef, twitterData, { merge: true });
-
+    await saveUserProfile(user, credential);
     return user;
   } catch (error: any) {
     console.error('Twitter sign-in error:', error);
     
     // Handle specific error cases
-    if (error.code === 'auth/popup-closed-by-user') {
+    if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/redirect-cancelled-by-user') {
       throw new Error('Sign-in was cancelled');
     } else if (error.code === 'auth/account-exists-with-different-credential') {
       throw new Error('An account already exists with a different sign-in method');
@@ -79,6 +93,29 @@ export async function signInWithTwitter(): Promise<User> {
     } else {
       throw new Error(error.message || 'Failed to sign in with Twitter');
     }
+  }
+}
+
+// Handle redirect result when user returns from Twitter OAuth
+export async function handleRedirectResult(): Promise<User | null> {
+  try {
+    const result = await getRedirectResult(auth);
+    if (result) {
+      const user = result.user;
+      const credential = TwitterAuthProvider.credentialFromResult(result);
+      
+      if (!credential) {
+        console.error('Failed to get Twitter credential from redirect');
+        return null;
+      }
+
+      await saveUserProfile(user, credential);
+      return user;
+    }
+    return null;
+  } catch (error: any) {
+    console.error('Error handling redirect result:', error);
+    throw error;
   }
 }
 

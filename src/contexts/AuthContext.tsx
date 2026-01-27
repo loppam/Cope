@@ -1,7 +1,7 @@
 // Authentication Context for managing user state
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User } from 'firebase/auth';
-import { onAuthStateChange, signInWithTwitter, signOutUser, getUserProfile, updateUserWallet, updateUserBalance, updateUserProfile, addWalletToWatchlist, removeWalletFromWatchlist, getWatchlist, WatchedWallet } from '@/lib/auth';
+import { onAuthStateChange, signInWithTwitter, signOutUser, getUserProfile, updateUserWallet, updateUserBalance, updateUserProfile, addWalletToWatchlist, removeWalletFromWatchlist, getWatchlist, WatchedWallet, removeUserWallet } from '@/lib/auth';
 import { toast } from 'sonner';
 
 interface AuthContextType {
@@ -20,6 +20,7 @@ interface AuthContextType {
   updateBalance: (balance: number) => Promise<void>;
   updateProfile: (updates: Record<string, any>) => Promise<void>;
   refreshProfile: () => Promise<void>;
+  removeWallet: () => Promise<void>;
   addToWatchlist: (walletAddress: string, walletData?: { nickname?: string; matched?: number; totalInvested?: number; totalRemoved?: number; profitMargin?: number }) => Promise<void>;
   removeFromWatchlist: (walletAddress: string) => Promise<void>;
   watchlist: WatchedWallet[];
@@ -40,6 +41,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (currentUser) {
         // Fetch user profile from Firestore
         const profile = await getUserProfile(currentUser.uid);
+        
+        // For existing users without isNew field: set it based on walletAddress
+        // If they have a walletAddress, they're not new
+        if (profile && profile.isNew === undefined && profile.walletAddress) {
+          // Existing user with wallet - update isNew to false (migrate existing users)
+          try {
+            await updateUserProfile(currentUser.uid, { isNew: false });
+            profile.isNew = false;
+          } catch (error) {
+            console.warn('Failed to update isNew flag:', error);
+            // Continue anyway - the ProtectedRoute will check walletAddress
+          }
+        }
+        
         setUserProfile(profile);
         // Load watchlist
         const userWatchlist = await getWatchlist(currentUser.uid);
@@ -188,6 +203,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const handleRemoveWallet = async () => {
+    if (!user) throw new Error('User not authenticated');
+    try {
+      await removeUserWallet(user.uid);
+      await refreshProfile();
+      toast.success('Wallet removed successfully');
+    } catch (error: any) {
+      console.error('Remove wallet error:', error);
+      toast.error(error.message || 'Failed to remove wallet');
+      throw error;
+    }
+  };
+
   const value: AuthContextType = {
     user,
     userProfile,
@@ -199,6 +227,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     updateBalance: handleUpdateBalance,
     updateProfile: handleUpdateProfile,
     refreshProfile,
+    removeWallet: handleRemoveWallet,
     addToWatchlist: handleAddToWatchlist,
     removeFromWatchlist: handleRemoveFromWatchlist,
     watchlist,

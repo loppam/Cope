@@ -4,8 +4,8 @@ import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { ArrowLeft, ExternalLink, Star, TrendingUp, Activity, Loader2 } from 'lucide-react';
 import { shortenAddress } from '@/lib/utils';
-import { getWalletAnalytics, WalletAnalytics } from '@/lib/birdeye';
-import { ScannerWallet } from '@/lib/birdeye';
+import { getWalletAnalytics, WalletAnalytics } from '@/lib/solanatracker';
+import { ScannerWallet } from '@/lib/solanatracker';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -18,10 +18,43 @@ export function ScannerWalletDetail() {
   const { address } = useParams();
   const location = useLocation();
   const walletState = location.state as WalletState | null;
+  const { addToWatchlist, watchlist, isAuthenticated } = useAuth();
   const [analytics, setAnalytics] = useState<WalletAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isCoping, setIsCoping] = useState(false);
 
   const walletAddress = address || walletState?.address || '';
+  
+  const isWatched = watchlist.some(w => w.address === walletAddress);
+  
+  const handleCope = async () => {
+    if (!isAuthenticated) {
+      toast.error('Please sign in to COPE wallets');
+      return;
+    }
+
+    if (isWatched) {
+      toast.info('Wallet is already in your watchlist');
+      return;
+    }
+
+    try {
+      setIsCoping(true);
+      await addToWatchlist(walletAddress, {
+        matched: walletState?.matched,
+        totalInvested: walletState?.totalInvested,
+        totalRemoved: walletState?.totalRemoved,
+        profitMargin: walletState?.totalInvested && walletState?.totalRemoved
+          ? ((walletState.totalRemoved - walletState.totalInvested) / walletState.totalInvested) * 100
+          : undefined,
+      });
+      toast.success('Wallet added to watchlist!');
+    } catch (error) {
+      // Error already handled in addToWatchlist
+    } finally {
+      setIsCoping(false);
+    }
+  };
 
   useEffect(() => {
     if (!walletAddress) {

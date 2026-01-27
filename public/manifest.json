@@ -110,5 +110,11 @@
       "text": "text",
       "url": "url"
     }
+  },
+  "prefer_related_applications": false,
+  "related_applications": [],
+  "iarc_rating_id": "",
+  "edge_side_panel": {
+    "preferred_width": 400
   }
 }

@@ -53,6 +53,7 @@ export async function signInWithTwitter(): Promise<User> {
       balance: 0, // SOL balance
       // Status
       walletConnected: false,
+      isNew: true, // Flag to track if user needs wallet setup
       // Timestamps
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -155,6 +156,7 @@ export async function updateUserWallet(
       walletAddress,
       balance,
       walletConnected: true,
+      isNew: false, // Wallet is now set up, user is no longer new
       updatedAt: serverTimestamp(),
     };
 
@@ -208,6 +210,30 @@ export async function updateUserProfile(uid: string, updates: Record<string, any
     return true;
   } catch (error) {
     console.error('Error updating user profile:', error);
+    throw error;
+  }
+}
+
+// Remove wallet (delete wallet and reset isNew flag)
+export async function removeUserWallet(uid: string) {
+  try {
+    const userRef = doc(db, 'users', uid);
+    await setDoc(
+      userRef,
+      {
+        walletAddress: null,
+        balance: 0,
+        walletConnected: false,
+        isNew: true, // Reset to new user state
+        encryptedMnemonic: null,
+        encryptedSecretKey: null,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+    return true;
+  } catch (error) {
+    console.error('Error removing user wallet:', error);
     throw error;
   }
 }

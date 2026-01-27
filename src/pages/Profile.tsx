@@ -1,20 +1,50 @@
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
-import { Twitter, Wallet, Settings, LogOut, ExternalLink } from 'lucide-react';
+import { Twitter, Wallet, Settings, LogOut, ExternalLink, Trash2, RefreshCw } from 'lucide-react';
 import { shortenAddress } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import { getSolBalance } from '@/lib/rpc';
+import { toast } from 'sonner';
 
 export function Profile() {
   const navigate = useNavigate();
-  const { user, userProfile, signOut, loading } = useAuth();
+  const { user, userProfile, signOut, removeWallet, loading } = useAuth();
+  const [isRemovingWallet, setIsRemovingWallet] = useState(false);
+  const [balance, setBalance] = useState<number>(userProfile?.balance || 0);
+  const [isRefreshingBalance, setIsRefreshingBalance] = useState(false);
 
   // Get user data from Firebase or use defaults
   const xHandle = userProfile?.xHandle || userProfile?.displayName || user?.displayName || '@user';
   const avatar = userProfile?.avatar || userProfile?.photoURL || user?.photoURL || '';
   const walletAddress = userProfile?.walletAddress || null;
-  const balance = userProfile?.balance || 0;
   const walletConnected = userProfile?.walletConnected || false;
+
+  // Fetch real-time balance using RPC
+  const fetchBalance = async () => {
+    if (!walletAddress) return;
+    
+    setIsRefreshingBalance(true);
+    try {
+      const solBalance = await getSolBalance(walletAddress);
+      setBalance(solBalance);
+    } catch (error) {
+      console.error('Error fetching balance:', error);
+      // Keep the stored balance if RPC fails
+    } finally {
+      setIsRefreshingBalance(false);
+    }
+  };
+
+  // Fetch balance on mount and when wallet address changes
+  useEffect(() => {
+    if (walletAddress) {
+      fetchBalance();
+    } else {
+      setBalance(0);
+    }
+  }, [walletAddress]);
 
   return (
     <div className="p-6 max-w-[720px] mx-auto">
@@ -56,7 +86,17 @@ export function Profile() {
               </div>
               <div className="flex items-center justify-between text-sm mt-2">
                 <span className="text-white/60">Balance</span>
-                <span className="font-medium">{balance.toFixed(4)} SOL</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{balance.toFixed(4)} SOL</span>
+                  <button
+                    onClick={fetchBalance}
+                    disabled={isRefreshingBalance}
+                    className="p-1 hover:bg-white/10 rounded transition-colors disabled:opacity-50"
+                    title="Refresh balance"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isRefreshingBalance ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
               </div>
             </>
           ) : (
@@ -101,6 +141,33 @@ export function Profile() {
             <div className="flex items-center gap-3">
               <ExternalLink className="w-5 h-5 text-white/70" />
               <span className="font-medium">View on Explorer</span>
+            </div>
+          </Card>
+        )}
+
+        {walletAddress && (
+          <Card 
+            className="cursor-pointer hover:border-[#FF4757]/20 border-[#FF4757]/10"
+            onClick={async () => {
+              if (!confirm('Are you sure you want to remove your wallet? You will need to set it up again.')) {
+                return;
+              }
+              setIsRemovingWallet(true);
+              try {
+                await removeWallet();
+                navigate('/auth/wallet-setup');
+              } catch (error) {
+                console.error('Remove wallet error:', error);
+              } finally {
+                setIsRemovingWallet(false);
+              }
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <Trash2 className="w-5 h-5 text-[#FF4757]" />
+              <span className="font-medium text-[#FF4757]">
+                {isRemovingWallet ? 'Removing...' : 'Remove Wallet'}
+              </span>
             </div>
           </Card>
         )}

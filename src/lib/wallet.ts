@@ -1,6 +1,7 @@
 // Solana wallet utilities
 import { Keypair } from '@solana/web3.js';
 import { mnemonicToSeedSync, generateMnemonic, validateMnemonic } from 'bip39';
+import bs58 from 'bs58';
 
 /**
  * Generate a new Solana wallet from mnemonic
@@ -52,41 +53,103 @@ export function importWalletFromPrivateKey(privateKey: string | number[]): { pub
     let secretKey: Uint8Array;
     
     if (typeof privateKey === 'string') {
-      // Try to parse as base64
+      const trimmed = privateKey.trim();
+      
+      // Try base58 first (most common format for Solana private keys from wallets like Phantom)
       try {
-        // Use browser's atob for base64 decoding
-        const binaryString = atob(privateKey);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
+        const decoded = bs58.decode(trimmed);
+        // Base58 decoded key should be 64 bytes (32 private + 32 public) or 32 bytes (seed)
+        if (decoded.length === 64) {
+          secretKey = decoded;
+        } else if (decoded.length === 32) {
+          // If it's 32 bytes, we need to create a keypair from seed
+          const keypair = Keypair.fromSeed(decoded);
+          secretKey = keypair.secretKey;
+        } else {
+          throw new Error(`Invalid base58 key length: ${decoded.length} bytes (expected 32 or 64)`);
         }
-        secretKey = bytes;
-      } catch {
-        // If base64 fails, try as JSON array string
+      } catch (base58Error: any) {
+        // If base58 fails, try JSON array string (format: [1,2,3,...])
         try {
-          const parsed = JSON.parse(privateKey);
-          secretKey = new Uint8Array(parsed);
-        } catch {
-          throw new Error('Invalid private key format');
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            const arrayKey = new Uint8Array(parsed);
+            if (arrayKey.length === 64) {
+              secretKey = arrayKey;
+            } else if (arrayKey.length === 32) {
+              const keypair = Keypair.fromSeed(arrayKey);
+              secretKey = keypair.secretKey;
+            } else {
+              throw new Error(`Invalid JSON array length: ${arrayKey.length} bytes (expected 32 or 64)`);
+            }
+          } else {
+            throw new Error('JSON is not an array');
+          }
+        } catch (jsonError: any) {
+          // If JSON fails, try base64
+          try {
+            const binaryString = atob(trimmed);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+            if (bytes.length === 64) {
+              secretKey = bytes;
+            } else if (bytes.length === 32) {
+              const keypair = Keypair.fromSeed(bytes);
+              secretKey = keypair.secretKey;
+            } else {
+              throw new Error(`Invalid base64 key length: ${bytes.length} bytes (expected 32 or 64)`);
+            }
+          } catch (base64Error: any) {
+            // Provide helpful error message
+            const errorMsg = `Invalid private key format. Tried:
+- Base58: ${base58Error?.message || 'failed'}
+- JSON array: ${jsonError?.message || 'failed'}
+- Base64: ${base64Error?.message || 'failed'}
+
+Please provide your private key in one of these formats:
+1. Base58 string (from Phantom/Solflare wallets)
+2. JSON array: [1,2,3,...] (64 numbers)
+3. Base64 string`;
+            throw new Error(errorMsg);
+          }
         }
       }
     } else {
-      secretKey = new Uint8Array(privateKey);
+      // Array of numbers
+      const arrayKey = new Uint8Array(privateKey);
+      if (arrayKey.length === 64) {
+        secretKey = arrayKey;
+      } else if (arrayKey.length === 32) {
+        const keypair = Keypair.fromSeed(arrayKey);
+        secretKey = keypair.secretKey;
+      } else {
+        throw new Error(`Invalid array length: ${arrayKey.length} bytes (expected 32 or 64)`);
+      }
     }
     
-    if (secretKey.length !== 64) {
-      throw new Error('Invalid private key length. Expected 64 bytes');
+    // Validate length - Solana secret keys are 64 bytes
+    if (secretKey.length === 64) {
+      // Perfect - 64 byte secret key
+      const keypair = Keypair.fromSecretKey(secretKey);
+      return {
+        publicKey: keypair.publicKey.toBase58(),
+        secretKey: Array.from(keypair.secretKey),
+      };
+    } else if (secretKey.length === 32) {
+      // 32 bytes - treat as seed and derive keypair
+      const keypair = Keypair.fromSeed(secretKey);
+      return {
+        publicKey: keypair.publicKey.toBase58(),
+        secretKey: Array.from(keypair.secretKey),
+      };
+    } else {
+      throw new Error(`Invalid private key length. Expected 32 or 64 bytes, got ${secretKey.length}`);
     }
-    
-    const keypair = Keypair.fromSecretKey(secretKey);
-    
-    return {
-      publicKey: keypair.publicKey.toBase58(),
-      secretKey: Array.from(keypair.secretKey),
-    };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error importing wallet from private key:', error);
-    throw new Error('Failed to import wallet. Please check your private key.');
+    throw new Error(error.message || 'Failed to import wallet. Please check your private key format.');
   }
 }
 

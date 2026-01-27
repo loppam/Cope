@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
@@ -9,15 +9,24 @@ import { toast } from "sonner";
 
 export function ConnectX() {
   const navigate = useNavigate();
-  const { signInWithTwitter } = useAuth();
+  const { signInWithTwitter, userProfile, loading } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
+
+  // Redirect if already authenticated and wallet is set up
+  useEffect(() => {
+    if (!loading && userProfile && userProfile.isNew === false) {
+      navigate("/app/home", { replace: true });
+    }
+  }, [userProfile, loading, navigate]);
 
   const handleTwitterSignIn = async () => {
     try {
       setIsLoading(true);
       await signInWithTwitter();
-      // Navigate to wallet setup after successful sign-in
-      navigate("/auth/wallet-setup");
+      // After sign-in, AuthContext will update userProfile
+      // ProtectedRoute will handle redirect based on isNew flag
+      // If isNew is true, it will redirect to wallet-setup
+      // If isNew is false, user will go to app
     } catch (error: any) {
       // Error is already handled in AuthContext with toast
       console.error("Twitter sign-in failed:", error);

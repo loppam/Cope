@@ -4,7 +4,7 @@ import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { ArrowLeft, Filter, ExternalLink, Star } from 'lucide-react';
 import { shortenAddress } from '@/lib/utils';
-import { ScannerWallet } from '@/lib/birdeye';
+import { ScannerWallet } from '@/lib/solanatracker';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
@@ -23,7 +23,7 @@ export function ScannerResults() {
   const { addToWatchlist, watchlist, isAuthenticated } = useAuth();
   const [copingWallets, setCopingWallets] = useState<Set<string>>(new Set());
 
-  // Use real wallets from Birdeye or fallback to empty
+  // Use real wallets from SolanaTracker or fallback to empty
   const wallets = state?.wallets || [];
   const matchedCount = wallets.length;
 

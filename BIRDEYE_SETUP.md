@@ -189,3 +189,5 @@ const analytics = await getWalletAnalytics('wallet_address...');
 G1HebpFP5J7HLynzrJfwKurQwsi817hkGL4ogjtUBAGS
 
 73iDnLaQDL84PDDubzTFSa2awyHFQYHbBRU9tfTopump
+
+CODEX API KEY - ea66c1a68896085f4929e54bea124194f19ce2c6

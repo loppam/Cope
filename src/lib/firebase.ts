@@ -12,6 +12,7 @@ const firebaseConfig = {
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID, // Optional: for Analytics
 };
 
 // Initialize Firebase
@@ -26,14 +27,23 @@ if (getApps().length === 0) {
 export const auth: Auth = getAuth(app);
 export const db: Firestore = getFirestore(app);
 
-// Initialize Analytics (only in browser environment)
+// Initialize Analytics (only in browser environment and if measurementId is provided)
+// Analytics is optional and errors are caught to prevent app crashes
 let analytics: Analytics | null = null;
-if (typeof window !== 'undefined') {
-  isSupported().then((supported) => {
-    if (supported) {
-      analytics = getAnalytics(app);
+if (typeof window !== 'undefined' && firebaseConfig.measurementId) {
+  // Initialize analytics asynchronously to avoid blocking app startup
+  (async () => {
+    try {
+      const supported = await isSupported();
+      if (supported) {
+        analytics = getAnalytics(app);
+        console.log('[Firebase] Analytics initialized');
+      }
+    } catch (error) {
+      // Silently fail - analytics is optional
+      console.warn('[Firebase] Analytics initialization skipped:', error);
     }
-  });
+  })();
 }
 export { analytics };
 

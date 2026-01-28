@@ -45,6 +45,8 @@ function isMobileDevice(): boolean {
 }
 
 // Helper function to save user profile data
+// IMPORTANT: This function preserves existing wallet data - it only sets wallet fields
+// if they don't already exist (for new users only)
 async function saveUserProfile(user: User, credential: any): Promise<void> {
   // Extract Twitter handle from displayName
   let xHandle = "";
@@ -58,7 +60,17 @@ async function saveUserProfile(user: User, credential: any): Promise<void> {
     xHandle = `@user_${user.uid.slice(0, 8)}`;
   }
 
-  const twitterData = {
+  // Check if user already exists and has wallet data
+  const userRef = doc(db, "users", user.uid);
+  const existingDoc = await getDoc(userRef);
+  const existingData = existingDoc.exists() ? existingDoc.data() : null;
+
+  // Only set wallet fields if user doesn't exist or doesn't have a wallet
+  // This prevents overwriting existing wallet data on login
+  const hasExistingWallet =
+    existingData?.walletAddress && existingData?.encryptedSecretKey;
+
+  const twitterData: any = {
     uid: user.uid,
     displayName: user.displayName,
     email: user.email,
@@ -66,16 +78,26 @@ async function saveUserProfile(user: User, credential: any): Promise<void> {
     xHandle: xHandle,
     avatar: user.photoURL,
     providerId: credential.providerId,
-    walletAddress: null,
-    balance: 0,
-    walletConnected: false,
-    isNew: true,
-    isPublic: true, // Default to public - users can make private later
-    createdAt: serverTimestamp(),
+    isPublic:
+      existingData?.isPublic !== undefined ? existingData.isPublic : true, // Preserve existing or default to public
     updatedAt: serverTimestamp(),
   };
 
-  const userRef = doc(db, "users", user.uid);
+  // Only set wallet-related fields for NEW users (no existing wallet)
+  // This prevents overwriting wallet data when existing users log in
+  if (!hasExistingWallet) {
+    twitterData.walletAddress = null;
+    twitterData.balance = 0;
+    twitterData.walletConnected = false;
+    twitterData.isNew = true;
+  }
+  // If user already exists, preserve their wallet fields (don't include them in update)
+
+  // Only set createdAt for new users
+  if (!existingDoc.exists()) {
+    twitterData.createdAt = serverTimestamp();
+  }
+
   await setDoc(userRef, twitterData, { merge: true });
 }
 
@@ -314,6 +336,8 @@ export function isAuthenticated(): boolean {
 }
 
 // Update user wallet information
+// This function ensures all wallet-related fields are set consistently
+// for both generated and imported wallets
 export async function updateUserWallet(
   uid: string,
   walletAddress: string,
@@ -322,25 +346,61 @@ export async function updateUserWallet(
   encryptedSecretKey?: string,
 ) {
   try {
+    // Validate wallet address is provided
+    if (
+      !walletAddress ||
+      typeof walletAddress !== "string" ||
+      walletAddress.trim() === ""
+    ) {
+      throw new Error(
+        "Wallet address is required and must be a non-empty string",
+      );
+    }
+
     const userRef = doc(db, "users", uid);
+
+    // Always set all wallet-related fields explicitly for consistency
+    // This ensures generated and imported wallets have the same structure
     const updateData: any = {
-      walletAddress,
-      balance,
-      walletConnected: true,
+      walletAddress: walletAddress.trim(), // Explicitly set wallet address (trimmed)
+      balance: balance || 0, // Explicitly set balance (default to 0)
+      walletConnected: true, // Wallet is connected - always true when wallet is set up
       isNew: false, // Wallet is now set up, user is no longer new
       isPublic: true, // Default to public if not already set
       updatedAt: serverTimestamp(),
+      // Always include encrypted credentials fields for consistency
+      // Set to null if not provided (e.g., when importing from private key without mnemonic)
+      encryptedMnemonic: encryptedMnemonic || null,
+      encryptedSecretKey: encryptedSecretKey || null,
     };
 
-    // Only include encrypted credentials if provided
-    if (encryptedMnemonic) {
-      updateData.encryptedMnemonic = encryptedMnemonic;
-    }
-    if (encryptedSecretKey) {
-      updateData.encryptedSecretKey = encryptedSecretKey;
+    // Use setDoc with merge to ensure atomic update of all fields
+    // This prevents partial updates that could leave the document in an inconsistent state
+    await setDoc(userRef, updateData, { merge: true });
+
+    // Verify the update succeeded by reading back the document
+    const updatedDoc = await getDoc(userRef);
+    if (!updatedDoc.exists()) {
+      throw new Error("Failed to verify wallet update: document not found");
     }
 
-    await setDoc(userRef, updateData, { merge: true });
+    const updatedData = updatedDoc.data();
+    if (updatedData.walletAddress !== walletAddress.trim()) {
+      throw new Error(
+        `Wallet update verification failed: walletAddress mismatch`,
+      );
+    }
+
+    if (updatedData.walletConnected !== true) {
+      throw new Error(
+        "Wallet update verification failed: walletConnected is not true",
+      );
+    }
+
+    if (updatedData.isNew !== false) {
+      throw new Error("Wallet update verification failed: isNew is not false");
+    }
+
     return true;
   } catch (error) {
     console.error("Error updating user wallet:", error);

@@ -207,16 +207,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     encryptedSecretKey?: string,
   ) => {
     if (!user) throw new Error("User not authenticated");
+
+    // Validate inputs before proceeding
+    if (
+      !walletAddress ||
+      typeof walletAddress !== "string" ||
+      walletAddress.trim() === ""
+    ) {
+      throw new Error("Wallet address is required and must be a valid string");
+    }
+
+    if (!encryptedSecretKey || typeof encryptedSecretKey !== "string") {
+      throw new Error("Encrypted secret key is required");
+    }
+
     try {
       await updateUserWallet(
         user.uid,
-        walletAddress,
+        walletAddress.trim(),
         balance,
         encryptedMnemonic,
         encryptedSecretKey,
       );
-      // Refresh profile after update
+
+      // Refresh profile after update to verify the update succeeded
       await refreshProfile();
+
+      // Verify the update was successful
+      const profile = await getUserProfile(user.uid);
+      if (!profile) {
+        throw new Error("Failed to verify wallet update: profile not found");
+      }
+
+      if (profile.walletAddress !== walletAddress.trim()) {
+        throw new Error(
+          `Wallet update verification failed: expected ${walletAddress.trim()}, got ${profile.walletAddress}`,
+        );
+      }
+
+      if (profile.walletConnected !== true) {
+        throw new Error(
+          "Wallet update verification failed: walletConnected is not true",
+        );
+      }
+
+      if (profile.isNew !== false) {
+        throw new Error(
+          "Wallet update verification failed: isNew is not false",
+        );
+      }
+
       toast.success("Wallet updated successfully");
     } catch (error: any) {
       console.error("Update wallet error:", error);

@@ -1,13 +1,26 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router';
-import { Card } from '@/components/Card';
-import { TrendingUp, TrendingDown, DollarSign, RefreshCw, Loader2 } from 'lucide-react';
-import { formatCurrency, formatPercentage, shortenAddress } from '@/lib/utils';
-import { useAuth } from '@/contexts/AuthContext';
-import { getWalletPnLSummary, getWalletPnL, TokenPnLData, getWalletPositions, TokenSearchResult, getSolPrice } from '@/lib/solanatracker';
-import { getSolBalance } from '@/lib/rpc';
-import { apiCache } from '@/lib/cache';
-import { toast } from 'sonner';
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router";
+import { Card } from "@/components/Card";
+import {
+  TrendingUp,
+  TrendingDown,
+  DollarSign,
+  RefreshCw,
+  Loader2,
+} from "lucide-react";
+import { formatCurrency, formatPercentage, shortenAddress } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  getWalletPnLSummary,
+  getWalletPnL,
+  TokenPnLData,
+  getWalletPositions,
+  TokenSearchResult,
+  getSolPrice,
+} from "@/lib/solanatracker";
+import { getSolBalance } from "@/lib/rpc";
+import { apiCache } from "@/lib/cache";
+import { toast } from "sonner";
 
 interface Position {
   mint: string;
@@ -48,13 +61,15 @@ export function Positions() {
 
     try {
       setRefreshing(true);
-      
+
       // Get wallet positions with full token details (single API call - no rate limits!)
       // Also get PnL data in parallel
       // Use cache unless force refresh
       const [positionsResponse, pnlResponse] = await Promise.all([
         getWalletPositions(walletAddress, !forceRefresh),
-        getWalletPnL(walletAddress, !forceRefresh).catch(() => ({ tokens: {} })), // Fallback if PnL fails
+        getWalletPnL(walletAddress, !forceRefresh).catch(() => ({
+          tokens: {},
+        })), // Fallback if PnL fails
       ]);
 
       // Get summary (this internally uses getWalletPnL, but we already have it)
@@ -64,47 +79,74 @@ export function Positions() {
         summaryData = await getWalletPnLSummary(walletAddress);
       } catch (error) {
         // If summary fails, we'll just not show it
-        console.warn('Failed to fetch summary:', error);
+        console.warn("Failed to fetch summary:", error);
       }
       setSummary(summaryData.data?.summary);
 
       // Get SOL balance and price
+      let currentSolBalance = 0;
+      let currentSolPrice = 150; // Default fallback price
       try {
         const [balance, price] = await Promise.all([
           getSolBalance(walletAddress),
           getSolPrice(),
         ]);
+        currentSolBalance = balance;
+        currentSolPrice = price;
         setSolBalance(balance);
         setSolPrice(price);
       } catch (error) {
-        console.warn('Failed to fetch SOL balance/price:', error);
+        console.warn("Failed to fetch SOL balance/price:", error);
+        // Use state values as fallback if fetch fails
+        currentSolBalance = solBalance;
+        currentSolPrice = solPrice;
       }
 
       // Merge position data with PnL data
       const pnlTokens = pnlResponse.tokens || {};
       const positionsData: Position[] = [];
-      
+
       for (const positionToken of positionsResponse.tokens) {
+        const mint = positionToken.token.mint;
+
+        // Check if this is SOL token
+        const isSOL =
+          mint === "So11111111111111111111111111111111111111112" ||
+          mint === "So11111111111111111111111111111111111111111";
+
+        // For SOL, use calculated value (solBalance * solPrice) instead of API value
+        // For other tokens, use API value directly (already in USD)
+        let tokenValue = positionToken.value || 0;
+        let tokenAmount = positionToken.balance || 0;
+
+        if (isSOL) {
+          // Use calculated SOL value and balance instead of API values
+          tokenValue = currentSolBalance * currentSolPrice;
+          tokenAmount = currentSolBalance;
+        }
+
         // Only show positions with value > 0 (filter out zero value positions)
-        if (positionToken.value > 0) {
-          const mint = positionToken.token.mint;
+        // Token values from API are already in USD - use them directly
+        // SOL value is calculated separately using solBalance * solPrice
+        if (tokenValue > 0) {
           const tokenPnL = pnlTokens[mint];
-          
-          // Special handling for SOL token
-          const isSOL = mint === 'So11111111111111111111111111111111111111112' || 
-                       mint === 'So11111111111111111111111111111111111111111';
-          
+
           positionsData.push({
             mint,
-            symbol: positionToken.token.symbol || shortenAddress(mint),
-            name: isSOL ? 'Solana' : (positionToken.token.name || 'Unknown Token'),
+            symbol: isSOL
+              ? "SOL"
+              : positionToken.token.symbol || shortenAddress(mint),
+            name: isSOL
+              ? "Solana"
+              : positionToken.token.name || "Unknown Token",
             image: positionToken.token.image,
-            amount: positionToken.balance || 0,
-            value: positionToken.value || 0,
+            amount: tokenAmount,
+            value: tokenValue, // Already in USD for tokens, calculated for SOL
             pnl: tokenPnL?.total || 0,
-            pnlPercent: tokenPnL?.cost_basis && tokenPnL.cost_basis > 0
-              ? ((tokenPnL.total || 0) / tokenPnL.cost_basis) * 100
-              : 0,
+            pnlPercent:
+              tokenPnL?.cost_basis && tokenPnL.cost_basis > 0
+                ? ((tokenPnL.total || 0) / tokenPnL.cost_basis) * 100
+                : 0,
             realized: tokenPnL?.realized || 0,
             unrealized: tokenPnL?.unrealized || 0,
             costBasis: tokenPnL?.cost_basis || 0,
@@ -121,8 +163,8 @@ export function Positions() {
       positionsData.sort((a, b) => b.value - a.value);
       setPositions(positionsData);
     } catch (error: any) {
-      console.error('Error fetching positions:', error);
-      toast.error('Failed to load positions');
+      console.error("Error fetching positions:", error);
+      toast.error("Failed to load positions");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -133,14 +175,19 @@ export function Positions() {
     fetchPositions();
   }, [walletAddress]);
 
-  // Calculate total value: sum of all positions + SOL balance
+  // Calculate total value
+  // Since SOL is included in the positions list, tokensValue already includes SOL
+  // All token values from API are already in USD, SOL value is calculated as solBalance * solPrice
   const tokensValue = positions.reduce((acc, pos) => acc + pos.value, 0);
-  const solValue = solBalance * solPrice;
-  const totalValue = tokensValue + solValue;
-  
+
+  // Total value is the sum of all positions (which includes SOL)
+  const totalValue = tokensValue;
+
   // Calculate total PnL
-  const totalPnl = summary?.pnl?.total_usd || positions.reduce((acc, pos) => acc + pos.pnl, 0);
-  const totalPnlPercent = summary?.pnl?.realized_profit_percent || 
+  const totalPnl =
+    summary?.pnl?.total_usd || positions.reduce((acc, pos) => acc + pos.pnl, 0);
+  const totalPnlPercent =
+    summary?.pnl?.realized_profit_percent ||
     (totalValue > 0 ? (totalPnl / (totalValue - totalPnl)) * 100 : 0);
 
   if (!walletAddress) {
@@ -149,7 +196,9 @@ export function Positions() {
         <div className="text-center py-16">
           <DollarSign className="w-12 h-12 mx-auto mb-4 text-white/30" />
           <p className="text-white/60 mb-2">No wallet connected</p>
-          <p className="text-sm text-white/40">Connect a wallet to view your positions</p>
+          <p className="text-sm text-white/40">
+            Connect a wallet to view your positions
+          </p>
         </div>
       </div>
     );
@@ -183,7 +232,9 @@ export function Positions() {
             disabled={refreshing}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-sm transition-colors disabled:opacity-50"
           >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            <RefreshCw
+              className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
+            />
             Refresh
           </button>
         </div>
@@ -192,10 +243,12 @@ export function Positions() {
         <Card glass className="mb-6">
           <div className="text-center">
             <p className="text-sm text-white/60 mb-1">Total Value</p>
-            <h2 className="text-3xl font-bold mb-1">{formatCurrency(totalValue)}</h2>
+            <h2 className="text-3xl font-bold mb-1">
+              {formatCurrency(totalValue)}
+            </h2>
             <p
               className={`text-lg ${
-                totalPnl >= 0 ? 'text-[#12d585]' : 'text-[#FF4757]'
+                totalPnl >= 0 ? "text-[#12d585]" : "text-[#FF4757]"
               }`}
             >
               {formatCurrency(totalPnl)} ({formatPercentage(totalPnlPercent)})
@@ -204,23 +257,31 @@ export function Positions() {
               <div className="mt-4 pt-4 border-t border-white/10 grid grid-cols-2 gap-4 text-xs">
                 <div>
                   <p className="text-white/60">Realized</p>
-                  <p className={`font-semibold ${summary.pnl.realized_profit_usd >= 0 ? 'text-[#12d585]' : 'text-[#FF4757]'}`}>
+                  <p
+                    className={`font-semibold ${summary.pnl.realized_profit_usd >= 0 ? "text-[#12d585]" : "text-[#FF4757]"}`}
+                  >
                     {formatCurrency(summary.pnl.realized_profit_usd)}
                   </p>
                 </div>
                 <div>
                   <p className="text-white/60">Unrealized</p>
-                  <p className={`font-semibold ${summary.pnl.unrealized_usd >= 0 ? 'text-[#12d585]' : 'text-[#FF4757]'}`}>
+                  <p
+                    className={`font-semibold ${summary.pnl.unrealized_usd >= 0 ? "text-[#12d585]" : "text-[#FF4757]"}`}
+                  >
                     {formatCurrency(summary.pnl.unrealized_usd)}
                   </p>
                 </div>
                 <div>
                   <p className="text-white/60">Total Invested</p>
-                  <p className="font-semibold">{formatCurrency(summary.cashflow_usd.total_invested)}</p>
+                  <p className="font-semibold">
+                    {formatCurrency(summary.cashflow_usd.total_invested)}
+                  </p>
                 </div>
                 <div>
                   <p className="text-white/60">Win Rate</p>
-                  <p className="font-semibold">{formatPercentage(summary.counts.win_rate * 100)}</p>
+                  <p className="font-semibold">
+                    {formatPercentage(summary.counts.win_rate * 100)}
+                  </p>
                 </div>
               </div>
             )}
@@ -229,22 +290,25 @@ export function Positions() {
       </div>
 
       {/* Positions List */}
+      {/* Note: Token values from API are already in USD - displayed directly */}
+      {/* SOL is shown but without detailed P&L info (to avoid double-counting with summary) */}
       <div className="space-y-3">
         {positions.length > 0 ? (
           positions.map((position) => {
-            const isSOL = position.mint === 'So11111111111111111111111111111111111111112' || 
-                         position.mint === 'So11111111111111111111111111111111111111111';
+            const isSOL =
+              position.mint === "So11111111111111111111111111111111111111112" ||
+              position.mint === "So11111111111111111111111111111111111111111";
 
             return (
-              <Card 
-                key={position.mint} 
+              <Card
+                key={position.mint}
                 className="cursor-pointer hover:border-white/20 transition-colors"
                 onClick={() => {
                   // Only pass the mint address - Trade screen will fetch full data
-                  navigate('/app/trade', { 
-                    state: { 
-                      mint: position.mint 
-                    } 
+                  navigate("/app/trade", {
+                    state: {
+                      mint: position.mint,
+                    },
                   });
                 }}
               >
@@ -256,57 +320,86 @@ export function Positions() {
                         alt={position.symbol}
                         className="w-10 h-10 rounded-full"
                         onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none';
-                          (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
+                          (e.target as HTMLImageElement).style.display = "none";
+                          (
+                            e.target as HTMLImageElement
+                          ).nextElementSibling?.classList.remove("hidden");
                         }}
                       />
                     ) : null}
-                    <div className={`w-10 h-10 rounded-full bg-gradient-to-br from-[#12d585] to-[#08b16b] ${position.image ? 'hidden' : ''}`} />
+                    <div
+                      className={`w-10 h-10 rounded-full bg-gradient-to-br from-[#12d585] to-[#08b16b] ${position.image ? "hidden" : ""}`}
+                    />
                     <div>
                       <h3 className="font-semibold">{position.name}</h3>
-                      <p className="text-sm text-white/50">{position.symbol} • {position.amount.toLocaleString()}</p>
+                      <p className="text-sm text-white/50">
+                        {position.symbol} • {position.amount.toLocaleString()}
+                      </p>
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="font-semibold">{formatCurrency(position.value)}</p>
-                    <p
-                      className={`text-sm flex items-center gap-1 justify-end ${
-                        position.pnl >= 0 ? 'text-[#12d585]' : 'text-[#FF4757]'
-                      }`}
-                    >
-                      {position.pnl >= 0 ? (
-                        <TrendingUp className="w-3 h-3" />
-                      ) : (
-                        <TrendingDown className="w-3 h-3" />
-                      )}
-                      {formatPercentage(position.pnlPercent)}
+                    {/* Token value is already in USD from API - display directly */}
+                    {/* SOL value is calculated separately */}
+                    <p className="font-semibold">
+                      {formatCurrency(position.value)}
                     </p>
+                    {!isSOL && (
+                      <p
+                        className={`text-sm flex items-center gap-1 justify-end ${
+                          position.pnl >= 0
+                            ? "text-[#12d585]"
+                            : "text-[#FF4757]"
+                        }`}
+                      >
+                        {position.pnl >= 0 ? (
+                          <TrendingUp className="w-3 h-3" />
+                        ) : (
+                          <TrendingDown className="w-3 h-3" />
+                        )}
+                        {formatPercentage(position.pnlPercent)}
+                      </p>
+                    )}
                   </div>
                 </div>
 
-                {/* Simplified display for SOL, full details for other tokens */}
+                {/* Token details - hide for SOL since PnL summary already includes it */}
                 {!isSOL && (
                   <div className="pt-3 border-t border-white/6 space-y-2">
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-white/60">Total P&L</span>
                       <span
                         className={`font-medium ${
-                          position.pnl >= 0 ? 'text-[#12d585]' : 'text-[#FF4757]'
+                          position.pnl >= 0
+                            ? "text-[#12d585]"
+                            : "text-[#FF4757]"
                         }`}
                       >
-                        {formatCurrency(position.pnl)} ({formatPercentage(position.pnlPercent)})
+                        {formatCurrency(position.pnl)} (
+                        {formatPercentage(position.pnlPercent)})
                       </span>
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       <div>
                         <span className="text-white/60">Realized: </span>
-                        <span className={position.realized >= 0 ? 'text-[#12d585]' : 'text-[#FF4757]'}>
+                        <span
+                          className={
+                            position.realized >= 0
+                              ? "text-[#12d585]"
+                              : "text-[#FF4757]"
+                          }
+                        >
                           {formatCurrency(position.realized)}
                         </span>
                       </div>
                       <div>
                         <span className="text-white/60">Unrealized: </span>
-                        <span className={position.unrealized >= 0 ? 'text-[#12d585]' : 'text-[#FF4757]'}>
+                        <span
+                          className={
+                            position.unrealized >= 0
+                              ? "text-[#12d585]"
+                              : "text-[#FF4757]"
+                          }
+                        >
                           {formatCurrency(position.unrealized)}
                         </span>
                       </div>
@@ -316,7 +409,11 @@ export function Positions() {
                       </div>
                       <div>
                         <span className="text-white/60">Trades: </span>
-                        <span>{position.tokenData?.total_transactions || position.txns || 0}</span>
+                        <span>
+                          {position.tokenData?.total_transactions ||
+                            position.txns ||
+                            0}
+                        </span>
                       </div>
                     </div>
                   </div>

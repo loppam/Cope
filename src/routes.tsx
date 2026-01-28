@@ -31,11 +31,7 @@ export const router = createBrowserRouter([
   },
   {
     path: "/auth/x-connect",
-    element: (
-      <PublicRoute>
-        <ConnectX />
-      </PublicRoute>
-    ),
+    element: <ConnectX />,
   },
   {
     path: "/auth/wallet-setup",

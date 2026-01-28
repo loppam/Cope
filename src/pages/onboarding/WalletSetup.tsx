@@ -32,7 +32,7 @@ export function WalletSetup() {
             className="cursor-pointer hover:border-[#12d585]/50 transition-colors"
             onClick={async () => {
               if (!user) {
-                toast.error('Please sign in first');
+                toast.error("Please sign in first");
                 return;
               }
 
@@ -40,32 +40,96 @@ export function WalletSetup() {
               try {
                 // Generate new wallet
                 const wallet = generateWallet();
-                
+
+                // Validate wallet has required fields
+                if (
+                  !wallet.publicKey ||
+                  typeof wallet.publicKey !== "string" ||
+                  wallet.publicKey.trim() === ""
+                ) {
+                  throw new Error(
+                    "Failed to generate wallet: invalid public key",
+                  );
+                }
+
+                if (
+                  !wallet.secretKey ||
+                  !Array.isArray(wallet.secretKey) ||
+                  wallet.secretKey.length === 0
+                ) {
+                  throw new Error(
+                    "Failed to generate wallet: invalid secret key",
+                  );
+                }
+
+                if (!wallet.mnemonic || typeof wallet.mnemonic !== "string") {
+                  throw new Error(
+                    "Failed to generate wallet: invalid mnemonic",
+                  );
+                }
+
                 // Generate encryption key for this user
                 const encryptionKey = generateEncryptionKey(user.uid);
-                
+
                 // Encrypt mnemonic and secret key
-                const encryptedMnemonic = await encrypt(wallet.mnemonic, encryptionKey);
-                const encryptedSecretKey = await encrypt(JSON.stringify(Array.from(wallet.secretKey)), encryptionKey);
-                
+                const encryptedMnemonic = await encrypt(
+                  wallet.mnemonic,
+                  encryptionKey,
+                );
+                const encryptedSecretKey = await encrypt(
+                  JSON.stringify(Array.from(wallet.secretKey)),
+                  encryptionKey,
+                );
+
                 // Save to Firebase with encrypted credentials
-                await updateWallet(wallet.publicKey, 0, encryptedMnemonic, encryptedSecretKey);
-                
-                toast.success('Wallet generated successfully!', {
+                // This will set: walletAddress, walletConnected: true, isNew: false, and encrypted credentials
+                await updateWallet(
+                  wallet.publicKey,
+                  0,
+                  encryptedMnemonic,
+                  encryptedSecretKey,
+                );
+
+                // Verify the update succeeded
+                const { getUserProfile } = await import("@/lib/auth");
+                const updatedProfile = await getUserProfile(user.uid);
+
+                if (
+                  !updatedProfile?.walletAddress ||
+                  updatedProfile.walletAddress !== wallet.publicKey
+                ) {
+                  throw new Error(
+                    "Wallet generation verification failed: wallet address not set correctly",
+                  );
+                }
+
+                if (updatedProfile.walletConnected !== true) {
+                  throw new Error(
+                    "Wallet generation verification failed: walletConnected not set to true",
+                  );
+                }
+
+                if (updatedProfile.isNew !== false) {
+                  throw new Error(
+                    "Wallet generation verification failed: isNew not set to false",
+                  );
+                }
+
+                toast.success("Wallet generated successfully!", {
                   duration: 5000,
                 });
-                
+
                 // Navigate to fund page with mnemonic in state (for display only)
-                navigate("/wallet/fund", { 
-                  state: { 
+                navigate("/wallet/fund", {
+                  state: {
                     mnemonic: wallet.mnemonic,
                     publicKey: wallet.publicKey,
-                    isNewWallet: true 
-                  } 
+                    isNewWallet: true,
+                  },
                 });
               } catch (error: any) {
-                console.error('Error generating wallet:', error);
-                toast.error(error.message || 'Failed to generate wallet');
+                console.error("Error generating wallet:", error);
+                toast.error(error.message || "Failed to generate wallet");
               } finally {
                 setIsGenerating(false);
               }

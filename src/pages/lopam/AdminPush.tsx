@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
+import { auth } from '@/lib/firebase';
 
 export function AdminPush() {
   const { userProfile } = useAuth();
@@ -21,7 +22,10 @@ export function AdminPush() {
     setError(null);
     setSuccess(null);
     try {
-      const idToken = await fetch('/api/auth/token').then((res) => res.text());
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        throw new Error('Authentication required');
+      }
       const response = await fetch('/api/push/send', {
         method: 'POST',
         headers: {
@@ -31,7 +35,7 @@ export function AdminPush() {
         body: JSON.stringify({ title, body, deepLink }),
       });
       if (!response.ok) {
-        const json = await response.json();
+        const json = await response.json().catch(() => ({}));
         throw new Error(json.error || 'Failed to send push');
       }
       setSuccess('Push sent successfully');

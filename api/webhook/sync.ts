@@ -1,23 +1,9 @@
 // Vercel Serverless Function: Sync all watched wallets to Helius webhook
 // This should be called when a wallet is added/removed from watchlist
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
+import { adminDb } from '../lib/firebaseAdmin';
 
-// Initialize Firebase Admin (only once)
-if (getApps().length === 0) {
-  const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || '{}');
-  
-  initializeApp({
-    credential: cert({
-      projectId: serviceAccount.project_id,
-      clientEmail: serviceAccount.client_email,
-      privateKey: serviceAccount.private_key?.replace(/\\n/g, '\n'),
-    }),
-  });
-}
-
-const db = getFirestore();
+const db = adminDb;
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const HELIUS_API_URL = 'https://api.helius.xyz/v0/webhooks';
 const WEBHOOK_ID = process.env.HELIUS_WEBHOOK_ID; // Store this in .env after creating first webhook

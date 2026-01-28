@@ -1,21 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { initializeApp, cert, getApps } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
-import { getFirestore, serverTimestamp } from 'firebase-admin/firestore';
-
-if (getApps().length === 0) {
-  const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || '{}');
-  initializeApp({
-    credential: cert({
-      projectId: serviceAccount.project_id,
-      clientEmail: serviceAccount.client_email,
-      privateKey: serviceAccount.private_key?.replace(/\\n/g, '\n'),
-    }),
-  });
-}
-
-const adminAuth = getAuth();
-const adminDb = getFirestore();
+import { adminAuth, adminDb } from '../lib/firebaseAdmin';
+import { serverTimestamp } from 'firebase-admin/firestore';
 
 async function getUidFromHeader(req: VercelRequest) {
   const authorization = req.headers.authorization;

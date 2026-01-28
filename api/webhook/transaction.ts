@@ -1,23 +1,9 @@
 // Vercel Serverless Function: Webhook endpoint for Helius transaction notifications
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
-import { getUserTokens, sendToTokens } from '../../src/lib/pushUtils';
+import { adminDb } from '../lib/firebaseAdmin';
+import { getUserTokens, sendToTokens } from '../lib/pushUtils';
 
-// Initialize Firebase Admin (only once)
-if (getApps().length === 0) {
-  const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || '{}');
-  
-  initializeApp({
-    credential: cert({
-      projectId: serviceAccount.project_id,
-      clientEmail: serviceAccount.client_email,
-      privateKey: serviceAccount.private_key?.replace(/\\n/g, '\n'),
-    }),
-  });
-}
-
-const db = getFirestore();
+const db = adminDb;
 
 // Price cache (in-memory, resets on function restart)
 const priceCache = new Map<string, { price: number; timestamp: number }>();

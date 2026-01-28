@@ -147,7 +147,7 @@ export default defineConfig({
         },
       },
       strategies: "injectManifest",
-      srcDir: "public",
+      srcDir: "src",
       filename: "sw.js",
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff,woff2}"],

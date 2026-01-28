@@ -1,9 +1,44 @@
 // Vercel Serverless Function: Webhook endpoint for Helius transaction notifications
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { adminDb } from '../lib/firebaseAdmin';
-import { getUserTokens, sendToTokens } from '../lib/pushUtils';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+import { getMessaging } from 'firebase-admin/messaging';
 
-const db = adminDb;
+// Initialize Firebase Admin (only once)
+if (getApps().length === 0) {
+  const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
+  let projectId: string | undefined;
+  let clientEmail: string | undefined;
+  let privateKey: string | undefined;
+
+  if (rawServiceAccount) {
+    const serviceAccount = JSON.parse(rawServiceAccount);
+    projectId = serviceAccount.project_id;
+    clientEmail = serviceAccount.client_email;
+    privateKey = serviceAccount.private_key?.replace(/\\n/g, '\n');
+  }
+
+  projectId = projectId || process.env.FIREBASE_ADMIN_PROJECT_ID;
+  clientEmail = clientEmail || process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
+  if (!privateKey && process.env.FIREBASE_ADMIN_PRIVATE_KEY) {
+    privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY.replace(/\\n/g, '\n');
+  }
+
+  if (!projectId || !clientEmail || !privateKey) {
+    throw new Error('Firebase admin credentials are not fully configured');
+  }
+
+  initializeApp({
+    credential: cert({
+      projectId,
+      clientEmail,
+      privateKey,
+    }),
+  });
+}
+
+const db = getFirestore();
+const adminMessaging = getMessaging();
 
 // Price cache (in-memory, resets on function restart)
 const priceCache = new Map<string, { price: number; timestamp: number }>();
@@ -77,6 +112,42 @@ async function getSolPrice(): Promise<number> {
       console.warn('SolanaTracker API key not configured, using fallback SOL price');
       return 150; // Fallback price
     }
+
+async function getUserTokens(uid: string): Promise<string[]> {
+  const snapshot = await db.collection('users').doc(uid).collection('pushTokens').get();
+  const tokens: string[] = [];
+  snapshot.forEach((doc) => {
+    const data = doc.data();
+    if (data.token) {
+      tokens.push(data.token);
+    }
+  });
+  return tokens;
+}
+
+async function sendToTokens(tokens: string[], payload: any) {
+  if (!tokens.length) return [];
+  const response = await adminMessaging.sendEachForMulticast({
+    tokens,
+    notification: {
+      title: payload.title,
+      body: payload.body,
+    },
+    data: payload.data || {},
+    webpush: {
+      fcmOptions: {
+        link: payload.deepLink || '/app/alerts',
+      },
+    },
+  });
+  const invalidTokens: string[] = [];
+  response.responses.forEach((resp, idx) => {
+    if (!resp.success && resp.error?.code === 'messaging/registration-token-not-registered') {
+      invalidTokens.push(tokens[idx]);
+    }
+  });
+  return invalidTokens;
+}
 
     const response = await fetch('https://data.solanatracker.io/price', {
       headers: {

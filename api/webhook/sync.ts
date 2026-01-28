@@ -1,9 +1,43 @@
 // Vercel Serverless Function: Sync all watched wallets to Helius webhook
 // This should be called when a wallet is added/removed from watchlist
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { adminDb } from '../lib/firebaseAdmin';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
 
-const db = adminDb;
+// Initialize Firebase Admin (only once)
+if (getApps().length === 0) {
+  const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
+  let projectId: string | undefined;
+  let clientEmail: string | undefined;
+  let privateKey: string | undefined;
+
+  if (rawServiceAccount) {
+    const serviceAccount = JSON.parse(rawServiceAccount);
+    projectId = serviceAccount.project_id;
+    clientEmail = serviceAccount.client_email;
+    privateKey = serviceAccount.private_key?.replace(/\\n/g, '\n');
+  }
+
+  projectId = projectId || process.env.FIREBASE_ADMIN_PROJECT_ID;
+  clientEmail = clientEmail || process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
+  if (!privateKey && process.env.FIREBASE_ADMIN_PRIVATE_KEY) {
+    privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY.replace(/\\n/g, '\n');
+  }
+
+  if (!projectId || !clientEmail || !privateKey) {
+    throw new Error('Firebase admin credentials are not fully configured');
+  }
+
+  initializeApp({
+    credential: cert({
+      projectId,
+      clientEmail,
+      privateKey,
+    }),
+  });
+}
+
+const db = getFirestore();
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const HELIUS_API_URL = 'https://api.helius.xyz/v0/webhooks';
 const WEBHOOK_ID = process.env.HELIUS_WEBHOOK_ID; // Store this in .env after creating first webhook

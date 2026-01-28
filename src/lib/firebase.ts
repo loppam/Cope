@@ -3,6 +3,7 @@ import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import { getAnalytics, Analytics, isSupported } from 'firebase/analytics';
 import { getAuth, Auth, connectAuthEmulator } from 'firebase/auth';
 import { getFirestore, Firestore, connectFirestoreEmulator } from 'firebase/firestore';
+import { getMessaging, getToken, Messaging } from 'firebase/messaging';
 
 // Firebase configuration - these should be in your .env file
 const firebaseConfig = {
@@ -26,6 +27,15 @@ if (getApps().length === 0) {
 // Initialize Firebase services
 export const auth: Auth = getAuth(app);
 export const db: Firestore = getFirestore(app);
+export let messaging: Messaging | null = null;
+
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+  try {
+    messaging = getMessaging(app);
+  } catch (error) {
+    console.warn('[Firebase] Messaging initialization skipped:', error);
+  }
+}
 
 // Initialize Analytics (only in browser environment and if measurementId is provided)
 // Analytics is optional and errors are caught to prevent app crashes
@@ -46,6 +56,23 @@ if (typeof window !== 'undefined' && firebaseConfig.measurementId) {
   })();
 }
 export { analytics };
+
+
+export async function requestFirebaseMessagingToken(vapidKey?: string): Promise<string | null> {
+  if (!messaging) return null;
+  try {
+    const resolvedVapidKey = vapidKey || import.meta.env.VITE_FIREBASE_VAPID_KEY;
+    if (!resolvedVapidKey) {
+      console.warn('[Firebase] VAPID key is missing');
+    }
+    return await getToken(messaging, {
+      vapidKey: resolvedVapidKey,
+    });
+  } catch (error) {
+    console.error('[Firebase] Failed to get messaging token:', error);
+    return null;
+  }
+}
 
 // Connect to emulators in development (optional)
 if (import.meta.env.DEV && import.meta.env.VITE_USE_FIREBASE_EMULATOR === 'true') {

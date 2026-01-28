@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
-import { ArrowLeft, Plus, X } from 'lucide-react';
+import { BackButton } from '@/components/BackButton';
+import { Plus, X } from 'lucide-react';
 
 export function ScannerInput() {
   const navigate = useNavigate();
@@ -42,12 +43,10 @@ export function ScannerInput() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E]">
       <div className="p-4">
-        <Button variant="icon" onClick={() => navigate(-1)}>
-          <ArrowLeft className="w-5 h-5" />
-        </Button>
+        <BackButton onClick={() => navigate(-1)} />
       </div>
 
-      <div className="p-6 max-w-[720px] mx-auto">
+      <div className="p-4 sm:p-6 max-w-[720px] mx-auto">
         <div className="mb-8">
           <h1 className="text-2xl font-bold mb-2">COPE Scanner</h1>
           <p className="text-white/60">Find wallets that traded multiple tokens</p>

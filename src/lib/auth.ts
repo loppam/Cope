@@ -8,7 +8,7 @@ import {
   User,
   TwitterAuthProvider,
 } from 'firebase/auth';
-import { doc, setDoc, getDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, setDoc, getDoc, serverTimestamp, collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { auth, db } from './firebase';
 
 // Twitter OAuth Provider
@@ -56,6 +56,7 @@ async function saveUserProfile(user: User, credential: any): Promise<void> {
     balance: 0,
     walletConnected: false,
     isNew: true,
+    isPublic: true, // Default to public - users can make private later
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -216,6 +217,7 @@ export async function updateUserWallet(
       balance,
       walletConnected: true,
       isNew: false, // Wallet is now set up, user is no longer new
+      isPublic: true, // Default to public if not already set
       updatedAt: serverTimestamp(),
     };
 
@@ -456,7 +458,8 @@ export async function updateWatchedWalletNickname(
 
 // Find user by wallet address
 // Returns user data if wallet is found in database, null otherwise
-export async function findUserByWalletAddress(walletAddress: string) {
+// Respects privacy: only returns if user is public OR if searching by exact wallet address
+export async function findUserByWalletAddress(walletAddress: string, requirePublic: boolean = false) {
   try {
     const usersRef = collection(db, 'users');
     const q = query(usersRef, where('walletAddress', '==', walletAddress));
@@ -470,16 +473,128 @@ export async function findUserByWalletAddress(walletAddress: string) {
     const userDoc = snapshot.docs[0];
     const userData = userDoc.data();
     
+    // If requirePublic is true, only return if user is public
+    // Default to public if isPublic field doesn't exist (for existing users)
+    // Only filter out if isPublic is explicitly false
+    const isPublic = userData.isPublic !== false; // Default to true if undefined/null
+    if (requirePublic && !isPublic) {
+      return null;
+    }
+    
     return {
       uid: userDoc.id,
       displayName: userData.displayName || userData.xHandle || null,
       xHandle: userData.xHandle || null,
       avatar: userData.avatar || userData.photoURL || null,
       walletAddress: userData.walletAddress,
+      isPublic: userData.isPublic !== false, // Default to true if undefined
       // Add any other user data you want to return
     };
   } catch (error) {
     console.error('Error finding user by wallet address:', error);
     return null;
+  }
+}
+
+// Find user by X handle (Twitter username)
+// Only returns public users (or users without isPublic field - treated as public by default)
+export async function findUserByXHandle(xHandle: string) {
+  try {
+    // Normalize handle - ensure it starts with @
+    const normalizedHandle = xHandle.startsWith('@') ? xHandle.toLowerCase() : `@${xHandle.toLowerCase()}`;
+    
+    const usersRef = collection(db, 'users');
+    // Query for users with matching X handle and wallet address
+    // Note: We can't easily query for "isPublic == true OR isPublic doesn't exist" in Firestore
+    // So we'll query all matching users and filter in code
+    const q = query(
+      usersRef,
+      where('xHandle', '==', normalizedHandle),
+      where('walletAddress', '!=', null) // Must have a wallet
+    );
+    const snapshot = await getDocs(q);
+    
+    if (snapshot.empty) {
+      return null;
+    }
+
+    // Filter for public users (treat missing isPublic as public)
+    const publicUsers = snapshot.docs.filter(doc => {
+      const data = doc.data();
+      // User is public if isPublic is not explicitly false
+      return data.isPublic !== false;
+    });
+    
+    if (publicUsers.length === 0) {
+      return null;
+    }
+
+    // Get the first matching public user
+    const userDoc = publicUsers[0];
+    const userData = userDoc.data();
+    
+    return {
+      uid: userDoc.id,
+      displayName: userData.displayName || userData.xHandle || null,
+      xHandle: userData.xHandle || null,
+      avatar: userData.avatar || userData.photoURL || null,
+      walletAddress: userData.walletAddress,
+      isPublic: userData.isPublic !== false, // Default to true if undefined
+    };
+  } catch (error) {
+    console.error('Error finding user by X handle:', error);
+    return null;
+  }
+}
+
+// Update public wallet status
+export async function updatePublicWalletStatus(uid: string, isPublic: boolean) {
+  try {
+    const userRef = doc(db, 'users', uid);
+    await setDoc(
+      userRef,
+      {
+        isPublic,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+    return true;
+  } catch (error) {
+    console.error('Error updating public wallet status:', error);
+    throw error;
+  }
+}
+
+// Get public wallets (for future discovery feature)
+// Includes users with isPublic: true OR users without isPublic field (default public)
+export async function getPublicWallets(limitCount: number = 50) {
+  try {
+    const usersRef = collection(db, 'users');
+    // Query all users with wallets, then filter for public ones
+    const q = query(
+      usersRef,
+      where('walletAddress', '!=', null),
+      limit(limitCount * 2) // Get more to account for filtering
+    );
+    
+    const snapshot = await getDocs(q);
+    
+    // Filter for public users (treat missing isPublic as public)
+    const publicUsers = snapshot.docs
+      .filter(doc => {
+        const data = doc.data();
+        // User is public if isPublic is not explicitly false
+        return data.isPublic !== false;
+      })
+      .slice(0, limitCount);
+    
+    return publicUsers.map(doc => ({
+      uid: doc.id,
+      ...doc.data(),
+    }));
+  } catch (error) {
+    console.error('Error getting public wallets:', error);
+    return [];
   }
 }

@@ -5,6 +5,7 @@ import { WalletSetup } from "@/pages/onboarding/WalletSetup";
 import { ImportWallet } from "@/pages/onboarding/ImportWallet";
 import { FundWallet } from "@/pages/onboarding/FundWallet";
 import { MainLayout } from "@/layouts/MainLayout";
+import { AppLayout } from "@/layouts/AppLayout";
 import { Home } from "@/pages/Home";
 import { Positions } from "@/pages/Positions";
 import { Trade } from "@/pages/Trade";
@@ -21,6 +22,7 @@ import { ScannerWalletDetail } from "@/pages/scanner/ScannerWalletDetail";
 import { TokenDetail } from "@/pages/TokenDetail";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { PublicRoute } from "@/components/PublicRoute";
+import { AdminPush } from "@/pages/lopam/AdminPush";
 
 export const router = createBrowserRouter([
   {
@@ -79,7 +81,9 @@ export const router = createBrowserRouter([
     path: "/cope/wallet",
     element: (
       <ProtectedRoute>
-        <CopeWallet />
+        <AppLayout>
+          <CopeWallet />
+        </AppLayout>
       </ProtectedRoute>
     ),
   },
@@ -87,7 +91,9 @@ export const router = createBrowserRouter([
     path: "/cope/wallet/found",
     element: (
       <ProtectedRoute>
-        <WalletFound />
+        <AppLayout>
+          <WalletFound />
+        </AppLayout>
       </ProtectedRoute>
     ),
   },
@@ -95,7 +101,9 @@ export const router = createBrowserRouter([
     path: "/cope/wallet/new",
     element: (
       <ProtectedRoute>
-        <WalletNotFound />
+        <AppLayout>
+          <WalletNotFound />
+        </AppLayout>
       </ProtectedRoute>
     ),
   },
@@ -103,7 +111,9 @@ export const router = createBrowserRouter([
     path: "/watchlist",
     element: (
       <ProtectedRoute>
-        <Watchlist />
+        <AppLayout>
+          <Watchlist />
+        </AppLayout>
       </ProtectedRoute>
     ),
   },
@@ -111,7 +121,9 @@ export const router = createBrowserRouter([
     path: "/scanner",
     element: (
       <ProtectedRoute>
-        <ScannerInput />
+        <AppLayout>
+          <ScannerInput />
+        </AppLayout>
       </ProtectedRoute>
     ),
   },
@@ -119,7 +131,9 @@ export const router = createBrowserRouter([
     path: "/scanner/loading",
     element: (
       <ProtectedRoute>
-        <ScannerLoading />
+        <AppLayout>
+          <ScannerLoading />
+        </AppLayout>
       </ProtectedRoute>
     ),
   },
@@ -127,7 +141,9 @@ export const router = createBrowserRouter([
     path: "/scanner/results",
     element: (
       <ProtectedRoute>
-        <ScannerResults />
+        <AppLayout>
+          <ScannerResults />
+        </AppLayout>
       </ProtectedRoute>
     ),
   },
@@ -135,7 +151,9 @@ export const router = createBrowserRouter([
     path: "/scanner/wallet/:address",
     element: (
       <ProtectedRoute>
-        <ScannerWalletDetail />
+        <AppLayout>
+          <ScannerWalletDetail />
+        </AppLayout>
       </ProtectedRoute>
     ),
   },
@@ -143,7 +161,19 @@ export const router = createBrowserRouter([
     path: "/token/:mint",
     element: (
       <ProtectedRoute>
-        <TokenDetail />
+        <AppLayout>
+          <TokenDetail />
+        </AppLayout>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/lopam/push",
+    element: (
+      <ProtectedRoute>
+        <AppLayout>
+          <AdminPush />
+        </AppLayout>
       </ProtectedRoute>
     ),
   },

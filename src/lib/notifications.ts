@@ -1,6 +1,22 @@
-// Notification system for watched wallet transactions
-import { doc, setDoc, getDoc, collection, query, where, getDocs, orderBy, limit, serverTimestamp } from 'firebase/firestore';
-import { db } from './firebase';
+import {
+  doc,
+  setDoc,
+  getDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+  orderBy,
+  limit,
+  serverTimestamp,
+} from 'firebase/firestore';
+import { auth, db } from './firebase';
+import { requestFirebaseMessagingToken } from './firebase';
+import { toast } from 'sonner';
+
+const PUSH_TOKEN_KEY = 'cope_push_token';
+const PUSH_REGISTER_URL = '/api/push/register';
+const PUSH_STATUS_URL = '/api/push/status';
 
 export interface WalletNotification {
   id: string;
@@ -16,6 +32,112 @@ export interface WalletNotification {
   read: boolean;
   deleted?: boolean;
   createdAt: any; // Firestore timestamp
+}
+
+async function getIdToken(): Promise<string | null> {
+  if (!auth.currentUser) {
+    return null;
+  }
+  return await auth.currentUser.getIdToken();
+}
+
+async function sendAuthRequest(method: string, body?: Record<string, any>) {
+  const idToken = await getIdToken();
+  if (!idToken) {
+    throw new Error('User not authenticated');
+  }
+
+  return fetch(PUSH_REGISTER_URL, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
+export async function requestPermissionAndGetFcmToken(): Promise<string | null> {
+  if (typeof Notification === 'undefined') {
+    return null;
+  }
+
+  if (Notification.permission === 'denied') {
+    return null;
+  }
+
+  if (Notification.permission !== 'granted') {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      return null;
+    }
+  }
+
+  return await requestFirebaseMessagingToken();
+}
+
+export function getStoredPushToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(PUSH_TOKEN_KEY);
+}
+
+function setStoredPushToken(token: string) {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(PUSH_TOKEN_KEY, token);
+}
+
+function clearStoredPushToken() {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(PUSH_TOKEN_KEY);
+}
+
+export async function savePushToken(token: string, platform: string = 'web'): Promise<void> {
+  if (!token) return;
+  await sendAuthRequest('POST', { token, platform });
+  setStoredPushToken(token);
+}
+
+export async function unregisterPushToken(token: string): Promise<void> {
+  if (!token) return;
+  await sendAuthRequest('DELETE', { token });
+  clearStoredPushToken();
+}
+
+export async function getPushNotificationStatus(): Promise<{
+  enabled: boolean;
+  permission: NotificationPermission;
+}> {
+  const permission =
+    typeof Notification !== 'undefined' ? Notification.permission : 'denied';
+
+  try {
+    const idToken = await getIdToken();
+    if (!idToken) {
+      return { enabled: !!getStoredPushToken(), permission };
+    }
+    const response = await fetch(PUSH_STATUS_URL, {
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+      },
+    });
+    if (!response.ok) {
+      return { enabled: !!getStoredPushToken(), permission };
+    }
+    const data = await response.json();
+    return { enabled: data.enabled, permission };
+  } catch (error) {
+    console.error('Error getting push notification status:', error);
+    return {
+      enabled: !!getStoredPushToken(),
+      permission,
+    };
+  }
+}
+
+export async function refreshPushToken(platform: string = 'web'): Promise<void> {
+  const token = getStoredPushToken();
+  if (!token) return;
+  await savePushToken(token, platform);
 }
 
 /**
@@ -64,16 +186,20 @@ export async function getUserNotifications(
       orderBy('createdAt', 'desc'),
       limit(limitCount)
     );
-    
+
     const snapshot = await getDocs(q);
-    return snapshot.docs
-      .map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-      }))
-      .filter(n => !n.deleted) as WalletNotification[];
+    const notifications = snapshot.docs
+      .map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+        } as WalletNotification;
+      })
+      .filter((n) => !n.deleted);
+
+    return notifications;
   } catch (error: any) {
-    // If index doesn't exist, try without orderBy
     if (error.code === 'failed-precondition') {
       try {
         const notificationsRef = collection(db, 'notifications');
@@ -84,12 +210,11 @@ export async function getUserNotifications(
         );
         const snapshot = await getDocs(q);
         const notifications = snapshot.docs
-          .map(doc => ({
+          .map((doc) => ({
             id: doc.id,
             ...doc.data(),
           }))
-          .filter(n => !n.deleted) as WalletNotification[];
-        // Sort manually by createdAt
+          .filter((n: any) => !n.deleted) as WalletNotification[];
         return notifications.sort((a, b) => {
           const aTime = a.createdAt?.toDate?.()?.getTime() || 0;
           const bTime = b.createdAt?.toDate?.()?.getTime() || 0;
@@ -153,8 +278,6 @@ export async function deleteNotification(notificationId: string): Promise<void> 
   try {
     const notificationRef = doc(db, 'notifications', notificationId);
     await setDoc(notificationRef, { deleted: true }, { merge: true });
-    // Note: In production, you might want to actually delete the document
-    // For now, we'll just mark it as deleted
   } catch (error) {
     console.error('Error deleting notification:', error);
     throw error;

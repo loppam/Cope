@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Card } from '@/components/Card';
 import { Button } from '@/components/Button';
-import { Star, ExternalLink, Trash2, ArrowLeft } from 'lucide-react';
+import { BackButton } from '@/components/BackButton';
+import { Star, ExternalLink, Trash2 } from 'lucide-react';
 import { shortenAddress } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { WatchedWallet } from '@/lib/auth';
@@ -66,11 +67,9 @@ export function Watchlist() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E]">
       <div className="p-4">
-        <Button variant="icon" onClick={() => navigate(-1)}>
-          <ArrowLeft className="w-5 h-5" />
-        </Button>
+        <BackButton onClick={() => navigate(-1)} />
       </div>
-      <div className="p-6 max-w-[1200px] mx-auto">
+      <div className="p-4 sm:p-6 max-w-[1200px] mx-auto">
         <div className="mb-6">
           <h1 className="text-2xl font-bold mb-2">Watchlist</h1>
           <p className="text-white/60">Wallets you're tracking for transaction notifications</p>

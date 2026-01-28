@@ -5,7 +5,7 @@ import { Input } from '@/components/Input';
 import { Card } from '@/components/Card';
 import { TokenSearch } from '@/components/TokenSearch';
 import { TokenSearchResult, searchTokens, getTokenInfo, convertTokenInfoToSearchResult } from '@/lib/solanatracker';
-import { DollarSign, ExternalLink, Calendar, Users, TrendingUp, RefreshCw } from 'lucide-react';
+import { DollarSign, ExternalLink, Calendar, Users, TrendingUp, RefreshCw, Copy } from 'lucide-react';
 import { shortenAddress } from '@/lib/utils';
 
 export function Trade() {
@@ -20,7 +20,7 @@ export function Trade() {
   const quickAmounts = [0.1, 0.5, 1];
   const REFRESH_COOLDOWN_MS = 15000; // 15 seconds
 
-  // Check if mint address was passed from navigation (e.g., from Positions page)
+  // Check if mint address was passed from navigation (e.g., from Positions page or feed)
   useEffect(() => {
     if (location.state?.mint) {
       const passedMint = location.state.mint as string;
@@ -115,13 +115,30 @@ export function Trade() {
   };
 
   return (
-    <div className="p-6 max-w-[720px] mx-auto">
+    <div className="p-4 sm:p-6 max-w-[720px] mx-auto">
       <div className="mb-8">
         <h1 className="text-2xl font-bold mb-2">Trade Terminal</h1>
         <p className="text-white/60">Paste token CA to trade instantly</p>
       </div>
 
       <div className="space-y-6">
+        {/* Copy Trade Banner */}
+        {location.state?.fromFeed && location.state?.walletNickname && (
+          <Card className="bg-accent-primary/10 border-accent-primary/20">
+            <div className="flex items-center gap-3">
+              <Copy className="w-5 h-5 text-accent-primary" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-white">
+                  Copying trade from {location.state.walletNickname}
+                </p>
+                <p className="text-xs text-white/70 mt-0.5">
+                  Token pre-filled from feed
+                </p>
+              </div>
+            </div>
+          </Card>
+        )}
+
         {/* Token Input */}
         <div>
           <label className="block text-sm font-medium mb-2">Token</label>
@@ -207,7 +224,7 @@ export function Trade() {
               </div>
 
               {/* Token Stats Grid */}
-              <div className="grid grid-cols-2 gap-3 mb-4">
+              <div className="grid grid-cols-2 sm:grid-cols-2 gap-3 mb-4">
                 <div className="bg-white/5 rounded-lg p-3">
                   <div className="text-xs text-white/60 mb-1">Price</div>
                   <div className="text-lg font-semibold">{formatPrice(token.priceUsd)}</div>

@@ -4,7 +4,8 @@ import { Card } from '@/components/Card';
 import { TrendingUp, TrendingDown, DollarSign, RefreshCw, Loader2 } from 'lucide-react';
 import { formatCurrency, formatPercentage, shortenAddress } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
-import { getWalletPnLSummary, getWalletPnL, TokenPnLData, getWalletPositions, TokenSearchResult } from '@/lib/solanatracker';
+import { getWalletPnLSummary, getWalletPnL, TokenPnLData, getWalletPositions, TokenSearchResult, getSolPrice } from '@/lib/solanatracker';
+import { getSolBalance } from '@/lib/rpc';
 import { apiCache } from '@/lib/cache';
 import { toast } from 'sonner';
 
@@ -34,6 +35,8 @@ export function Positions() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [summary, setSummary] = useState<any>(null);
+  const [solBalance, setSolBalance] = useState<number>(0);
+  const [solPrice, setSolPrice] = useState<number>(150);
 
   const walletAddress = userProfile?.walletAddress;
 
@@ -64,6 +67,18 @@ export function Positions() {
         console.warn('Failed to fetch summary:', error);
       }
       setSummary(summaryData.data?.summary);
+
+      // Get SOL balance and price
+      try {
+        const [balance, price] = await Promise.all([
+          getSolBalance(walletAddress),
+          getSolPrice(),
+        ]);
+        setSolBalance(balance);
+        setSolPrice(price);
+      } catch (error) {
+        console.warn('Failed to fetch SOL balance/price:', error);
+      }
 
       // Merge position data with PnL data
       const pnlTokens = pnlResponse.tokens || {};
@@ -118,7 +133,12 @@ export function Positions() {
     fetchPositions();
   }, [walletAddress]);
 
-  const totalValue = summary?.cashflow_usd?.current_value || positions.reduce((acc, pos) => acc + pos.value, 0);
+  // Calculate total value: sum of all positions + SOL balance
+  const tokensValue = positions.reduce((acc, pos) => acc + pos.value, 0);
+  const solValue = solBalance * solPrice;
+  const totalValue = tokensValue + solValue;
+  
+  // Calculate total PnL
   const totalPnl = summary?.pnl?.total_usd || positions.reduce((acc, pos) => acc + pos.pnl, 0);
   const totalPnlPercent = summary?.pnl?.realized_profit_percent || 
     (totalValue > 0 ? (totalPnl / (totalValue - totalPnl)) * 100 : 0);
@@ -147,7 +167,7 @@ export function Positions() {
   }
 
   return (
-    <div className="p-6 max-w-[720px] mx-auto">
+    <div className="p-4 sm:p-6 max-w-[720px] mx-auto">
       <div className="mb-8">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold">Positions</h1>

@@ -2,18 +2,33 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
-import { Twitter, Wallet, Settings, LogOut, ExternalLink, Trash2, RefreshCw } from 'lucide-react';
+import { Twitter, Wallet, Settings, LogOut, ExternalLink, Trash2, RefreshCw, Bell, Users, Globe, GlobeLock, Eye, ArrowRight } from 'lucide-react';
 import { shortenAddress } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSolBalance } from '@/lib/rpc';
+import {
+  getUnreadNotificationCount,
+  getPushNotificationStatus,
+  requestPermissionAndGetFcmToken,
+  savePushToken,
+  unregisterPushToken,
+  getStoredPushToken,
+} from '@/lib/notifications';
+import { updatePublicWalletStatus } from '@/lib/auth';
 import { toast } from 'sonner';
 
 export function Profile() {
   const navigate = useNavigate();
-  const { user, userProfile, signOut, removeWallet, loading } = useAuth();
+  const { user, userProfile, signOut, removeWallet, loading, watchlist, updateProfile } = useAuth();
   const [isRemovingWallet, setIsRemovingWallet] = useState(false);
   const [balance, setBalance] = useState<number>(userProfile?.balance || 0);
   const [isRefreshingBalance, setIsRefreshingBalance] = useState(false);
+  const [notificationCount, setNotificationCount] = useState(0);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  // Default to public if isPublic is undefined (for existing users)
+  const [isPublic, setIsPublic] = useState(userProfile?.isPublic !== false);
+  const [isTogglingPublic, setIsTogglingPublic] = useState(false);
+  const [isTogglingPush, setIsTogglingPush] = useState(false);
 
   // Get user data from Firebase or use defaults
   const xHandle = userProfile?.xHandle || userProfile?.displayName || user?.displayName || '@user';
@@ -46,8 +61,67 @@ export function Profile() {
     }
   }, [walletAddress]);
 
+  // Fetch stats
+  useEffect(() => {
+    if (user) {
+      getUnreadNotificationCount(user.uid).then(count => {
+        setNotificationCount(count);
+      });
+      
+      getPushNotificationStatus(user.uid).then(status => {
+        setPushEnabled(status.enabled && status.permission === 'granted');
+      });
+    }
+  }, [user]);
+
+  const handleTogglePublic = async () => {
+    if (!user) return;
+    
+    setIsTogglingPublic(true);
+    try {
+      const newValue = !isPublic;
+      await updatePublicWalletStatus(user.uid, newValue);
+      setIsPublic(newValue);
+      toast.success(newValue ? 'Wallet is now public' : 'Wallet is now private');
+    } catch (error) {
+      console.error('Error toggling public wallet:', error);
+      toast.error('Failed to update wallet visibility');
+    } finally {
+      setIsTogglingPublic(false);
+    }
+  };
+
+  const handleTogglePush = async () => {
+    if (!user) return;
+    
+    setIsTogglingPush(true);
+    try {
+      if (!pushEnabled) {
+        const token = await requestPermissionAndGetFcmToken();
+        if (token) {
+          await savePushToken(token);
+          setPushEnabled(true);
+          toast.success('Push notifications enabled');
+        } else {
+          toast.error('Unable to enable push (permission denied)');
+        }
+      } else {
+        const token = getStoredPushToken();
+        await unregisterPushToken(token || '');
+        setPushEnabled(false);
+        toast.success('Push notifications disabled');
+      }
+    } catch (error) {
+      console.error('Error toggling push notifications:', error);
+      toast.error('Failed to update push notification settings');
+    } finally {
+      setIsTogglingPush(false);
+    }
+  };
+
+
   return (
-    <div className="p-6 max-w-[720px] mx-auto">
+    <div className="p-4 sm:p-6 max-w-[720px] mx-auto">
       <div className="mb-8">
         <h1 className="text-2xl font-bold">Profile</h1>
       </div>
@@ -115,6 +189,134 @@ export function Profile() {
         </div>
       </Card>
 
+      {/* Stats */}
+      <Card glass className="mb-6">
+        <h3 className="font-semibold text-lg mb-4">Statistics</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="text-center">
+            <div className="flex items-center justify-center mb-2">
+              <Users className="w-5 h-5 text-accent-primary" />
+            </div>
+            <p className="text-2xl font-bold">{watchlist.length}</p>
+            <p className="text-xs text-white/60 mt-1">Watched Wallets</p>
+          </div>
+          <div className="text-center">
+            <div className="flex items-center justify-center mb-2">
+              <Bell className="w-5 h-5 text-accent-primary" />
+            </div>
+            <p className="text-2xl font-bold">{notificationCount}</p>
+            <p className="text-xs text-white/60 mt-1">Notifications</p>
+          </div>
+        </div>
+      </Card>
+
+      {/* Watched Wallets */}
+      {watchlist.length > 0 && (
+        <Card glass className="mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-lg">Watched Wallets</h3>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate('/app/watchlist')}
+              className="text-accent-primary hover:text-accent-hover"
+            >
+              View All
+              <ArrowRight className="w-4 h-4 ml-1" />
+            </Button>
+          </div>
+            <div className="space-y-2">
+            {watchlist.slice(0, 3).map((wallet) => (
+              <div
+                key={wallet.address}
+                className="flex items-center justify-between p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+                onClick={() => navigate(`/scanner/wallet/${wallet.address}`)}
+              >
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <Eye className="w-4 h-4 text-accent-primary flex-shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-sm truncate">
+                      {wallet.nickname || shortenAddress(wallet.address)}
+                    </p>
+                    <p className="text-xs text-white/50 font-mono truncate">
+                      {shortenAddress(wallet.address)}
+                    </p>
+                  </div>
+                </div>
+                <ArrowRight className="w-4 h-4 text-white/40 flex-shrink-0" />
+              </div>
+            ))}
+            {watchlist.length > 3 && (
+              <p className="text-xs text-white/60 text-center pt-2">
+                +{watchlist.length - 3} more wallet{watchlist.length - 3 !== 1 ? 's' : ''}
+              </p>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {/* Settings */}
+      <Card glass className="mb-6">
+        <h3 className="font-semibold text-lg mb-4">Settings</h3>
+        <div className="space-y-4">
+          {/* Push Notifications Toggle */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Bell className="w-5 h-5 text-white/70" />
+              <div>
+                <p className="font-medium">Push Notifications</p>
+                <p className="text-xs text-white/60">Get notified about watched wallet trades</p>
+              </div>
+            </div>
+            <button
+              onClick={handleTogglePush}
+              disabled={isTogglingPush}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                pushEnabled ? 'bg-accent-primary' : 'bg-white/20'
+              } disabled:opacity-50`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  pushEnabled ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Public Wallet Toggle */}
+          {walletAddress && (
+            <div className="flex items-center justify-between pt-4 border-t border-white/6">
+              <div className="flex items-center gap-3">
+                {isPublic ? (
+                  <Globe className="w-5 h-5 text-accent-primary" />
+                ) : (
+                  <GlobeLock className="w-5 h-5 text-white/70" />
+                )}
+                <div>
+                  <p className="font-medium">Public Wallet</p>
+                  <p className="text-xs text-white/60">
+                    {isPublic ? 'Your wallet is visible to others' : 'Your wallet is private'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleTogglePublic}
+                disabled={isTogglingPublic}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  isPublic ? 'bg-accent-primary' : 'bg-white/20'
+                } disabled:opacity-50`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    isPublic ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+          )}
+        </div>
+      </Card>
+
       {/* Actions */}
       <div className="space-y-3">
         {walletAddress && (
@@ -125,13 +327,6 @@ export function Profile() {
             </div>
           </Card>
         )}
-
-        <Card className="cursor-pointer hover:border-white/20">
-          <div className="flex items-center gap-3">
-            <Settings className="w-5 h-5 text-white/70" />
-            <span className="font-medium">Settings</span>
-          </div>
-        </Card>
 
         {walletAddress && (
           <Card 

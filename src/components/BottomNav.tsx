@@ -1,10 +1,13 @@
 import { Home, TrendingUp, Activity, Bell, User } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
 
 export function BottomNav() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { userProfile } = useAuth();
+  const isLopam = userProfile?.xHandle?.toLowerCase?.() === '@lopam.eth';
 
   const tabs = [
     { path: '/app/home', icon: Home, label: 'Home' },
@@ -15,8 +18,8 @@ export function BottomNav() {
   ];
 
   return (
-    <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
-      <div className="glass-panel px-6 py-3 rounded-full flex items-center gap-2 shadow-glow border-white/10">
+    <nav className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-50">
+      <div className="glass-panel px-4 sm:px-6 py-2 sm:py-3 rounded-full flex items-center gap-1 sm:gap-2 shadow-glow border-white/10">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = location.pathname === tab.path;
@@ -37,6 +40,14 @@ export function BottomNav() {
             </button>
           );
         })}
+      {isLopam && (
+        <button
+          onClick={() => navigate('/lopam/push')}
+          className="relative flex items-center justify-center h-10 px-3 rounded-full text-xs tracking-wide bg-white/5 text-white hover:bg-white/10 transition-colors"
+        >
+          Admin Push
+        </button>
+      )}
       </div>
     </nav>
   );

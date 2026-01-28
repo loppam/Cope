@@ -1,8 +1,13 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { createHash } from "crypto";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
+
+function pushTokenDocId(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
 
 if (getApps().length === 0) {
   const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
@@ -76,7 +81,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .collection("users")
           .doc(user.uid)
           .collection("pushTokens")
-          .doc(token)
+          .doc(pushTokenDocId(token))
           .delete(),
       ),
     );
@@ -110,16 +115,18 @@ async function getUserTokens(uid: string) {
 
 async function sendToTokens(tokens: string[], payload: any) {
   if (!tokens.length) return [];
+  const deepLink = payload.deepLink || "/app/alerts";
+  const data = { ...(payload.data || {}), deepLink };
   const response = await adminMessaging.sendEachForMulticast({
     tokens,
     notification: {
       title: payload.title,
       body: payload.body,
     },
-    data: payload.data || {},
+    data,
     webpush: {
       fcmOptions: {
-        link: payload.deepLink || "/app/alerts",
+        link: deepLink,
       },
     },
   });

@@ -1,22 +1,24 @@
-import { RouterProvider } from 'react-router';
-import { router } from '@/routes';
-import { Toaster } from 'sonner';
-import { InstallPrompt } from '@/components/pwa/InstallPrompt';
-import { OfflineIndicator } from '@/components/pwa/OfflineIndicator';
-import { AuthProvider } from '@/contexts/AuthContext';
+import { RouterProvider } from "react-router";
+import { router } from "@/routes";
+import { Toaster } from "sonner";
+import { InstallPrompt } from "@/components/pwa/InstallPrompt";
+import { OfflineIndicator } from "@/components/pwa/OfflineIndicator";
+import { PushForegroundHandler } from "@/components/pwa/PushForegroundHandler";
+import { AuthProvider } from "@/contexts/AuthContext";
 
 export default function App() {
   return (
     <AuthProvider>
+      <PushForegroundHandler />
       <OfflineIndicator />
       <RouterProvider router={router} />
-      <Toaster 
+      <Toaster
         position="top-center"
         toastOptions={{
           style: {
-            background: '#0F4A38',
-            color: '#fff',
-            border: '1px solid rgba(11, 110, 79, 0.3)',
+            background: "#0F4A38",
+            color: "#fff",
+            border: "1px solid rgba(11, 110, 79, 0.3)",
           },
         }}
       />

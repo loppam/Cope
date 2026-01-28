@@ -1,8 +1,29 @@
 // Authentication Context for managing user state
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { User } from 'firebase/auth';
-import { onAuthStateChange, signInWithTwitter, handleRedirectResult, signOutUser, getUserProfile, updateUserWallet, updateUserBalance, updateUserProfile, addWalletToWatchlist, removeWalletFromWatchlist, getWatchlist, WatchedWallet, removeUserWallet, getFirebaseCallbackUrl } from '@/lib/auth';
-import { toast } from 'sonner';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  ReactNode,
+} from "react";
+import { User } from "firebase/auth";
+import {
+  onAuthStateChange,
+  signInWithTwitter,
+  handleRedirectResult,
+  signOutUser,
+  getUserProfile,
+  updateUserWallet,
+  updateUserBalance,
+  updateUserProfile,
+  addWalletToWatchlist,
+  removeWalletFromWatchlist,
+  getWatchlist,
+  WatchedWallet,
+  removeUserWallet,
+  getFirebaseCallbackUrl,
+} from "@/lib/auth";
+import { toast } from "sonner";
 
 interface AuthContextType {
   user: User | null;
@@ -15,13 +36,22 @@ interface AuthContextType {
     walletAddress: string,
     balance?: number,
     encryptedMnemonic?: string,
-    encryptedSecretKey?: string
+    encryptedSecretKey?: string,
   ) => Promise<void>;
   updateBalance: (balance: number) => Promise<void>;
   updateProfile: (updates: Record<string, any>) => Promise<void>;
   refreshProfile: () => Promise<void>;
   removeWallet: () => Promise<void>;
-  addToWatchlist: (walletAddress: string, walletData?: { nickname?: string; matched?: number; totalInvested?: number; totalRemoved?: number; profitMargin?: number }) => Promise<void>;
+  addToWatchlist: (
+    walletAddress: string,
+    walletData?: {
+      nickname?: string;
+      matched?: number;
+      totalInvested?: number;
+      totalRemoved?: number;
+      profitMargin?: number;
+    },
+  ) => Promise<void>;
   removeFromWatchlist: (walletAddress: string) => Promise<void>;
   watchlist: WatchedWallet[];
 }
@@ -34,59 +64,82 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [watchlist, setWatchlist] = useState<WatchedWallet[]>([]);
 
-  // Handle redirect result when user returns from Twitter OAuth (mobile)
+  // CRITICAL: Handle redirect FIRST, then set up auth state listener
+  // getRedirectResult() can only be called once per redirect and must be called
+  // before onAuthStateChanged processes the redirect, otherwise it returns null
+  // This fixes mobile authentication where redirects weren't being detected
   useEffect(() => {
-    const checkRedirectResult = async () => {
+    let unsubscribe: (() => void) | null = null;
+
+    const initializeAuth = async () => {
+      // Step 1: Handle redirect result BEFORE setting up auth state listener
+      // This is critical for mobile OAuth redirects in browsers
+      // On mobile browsers, the redirect happens in the same tab/window,
+      // so we need to check for redirect results immediately on page load
       try {
         const redirectUser = await handleRedirectResult();
         if (redirectUser) {
-          toast.success('Successfully signed in with Twitter');
+          console.log(
+            "[AuthContext] Redirect user authenticated:",
+            redirectUser.uid,
+          );
+          toast.success("Successfully signed in with Twitter");
+        } else {
+          console.log(
+            "[AuthContext] No redirect result (normal if not returning from OAuth)",
+          );
         }
       } catch (error: any) {
-        console.error('Error handling redirect result:', error);
-        if (error.message && !error.message.includes('no redirect')) {
-          toast.error(error.message || 'Failed to complete sign-in');
+        console.error("[AuthContext] Error handling redirect result:", error);
+        // Only show error if it's not a "no redirect" case (which is normal)
+        if (
+          error.message &&
+          !error.message.includes("no redirect") &&
+          error.code !== "auth/no-auth-event"
+        ) {
+          toast.error(error.message || "Failed to complete sign-in");
         }
       }
+
+      // Step 2: Now set up auth state listener after redirect is handled
+      unsubscribe = onAuthStateChange(async (currentUser) => {
+        setUser(currentUser);
+
+        if (currentUser) {
+          // Fetch user profile from Firestore
+          const profile = await getUserProfile(currentUser.uid);
+
+          // For existing users without isNew field: set it based on walletAddress
+          // If they have a walletAddress, they're not new
+          if (profile && profile.isNew === undefined && profile.walletAddress) {
+            // Existing user with wallet - update isNew to false (migrate existing users)
+            try {
+              await updateUserProfile(currentUser.uid, { isNew: false });
+              profile.isNew = false;
+            } catch (error) {
+              console.warn("Failed to update isNew flag:", error);
+              // Continue anyway - the ProtectedRoute will check walletAddress
+            }
+          }
+
+          setUserProfile(profile);
+          // Load watchlist
+          const userWatchlist = await getWatchlist(currentUser.uid);
+          setWatchlist(userWatchlist);
+        } else {
+          setUserProfile(null);
+          setWatchlist([]);
+        }
+
+        setLoading(false);
+      });
     };
 
-    checkRedirectResult();
-  }, []);
+    initializeAuth();
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChange(async (currentUser) => {
-      setUser(currentUser);
-      
-      if (currentUser) {
-        // Fetch user profile from Firestore
-        const profile = await getUserProfile(currentUser.uid);
-        
-        // For existing users without isNew field: set it based on walletAddress
-        // If they have a walletAddress, they're not new
-        if (profile && profile.isNew === undefined && profile.walletAddress) {
-          // Existing user with wallet - update isNew to false (migrate existing users)
-          try {
-            await updateUserProfile(currentUser.uid, { isNew: false });
-            profile.isNew = false;
-          } catch (error) {
-            console.warn('Failed to update isNew flag:', error);
-            // Continue anyway - the ProtectedRoute will check walletAddress
-          }
-        }
-        
-        setUserProfile(profile);
-        // Load watchlist
-        const userWatchlist = await getWatchlist(currentUser.uid);
-        setWatchlist(userWatchlist);
-      } else {
-        setUserProfile(null);
-        setWatchlist([]);
-      }
-      
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   const handleSignInWithTwitter = async () => {
@@ -96,25 +149,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // On mobile, signInWithTwitter returns void (redirect happens)
       // On desktop, it returns the user
       if (result) {
-        toast.success('Successfully signed in with Twitter');
+        toast.success("Successfully signed in with Twitter");
       }
       // On mobile, the redirect will happen and handleRedirectResult will handle it
     } catch (error: any) {
-      console.error('Sign-in error:', error);
-      const errorMessage = error.message || 'Failed to sign in with Twitter';
-      
+      console.error("Sign-in error:", error);
+      const errorMessage = error.message || "Failed to sign in with Twitter";
+
       // Show more helpful error message
-      if (errorMessage.includes('invalid-credential') || errorMessage.includes('not configured')) {
-        toast.error('Twitter OAuth not configured. Check Firebase Console → Authentication → Twitter', {
-          duration: 5000,
-        });
-      } else if (errorMessage.includes('blocked') || errorMessage.includes('suspicious') || errorMessage.includes('prevented')) {
+      if (
+        errorMessage.includes("invalid-credential") ||
+        errorMessage.includes("not configured")
+      ) {
+        toast.error(
+          "Twitter OAuth not configured. Check Firebase Console → Authentication → Twitter",
+          {
+            duration: 5000,
+          },
+        );
+      } else if (
+        errorMessage.includes("blocked") ||
+        errorMessage.includes("suspicious") ||
+        errorMessage.includes("prevented")
+      ) {
         const callbackUrl = getFirebaseCallbackUrl();
         toast.error(
           `Twitter blocked the login. Add this callback URL to Twitter Developer Portal: ${callbackUrl}. See TWITTER_OAUTH_MOBILE_FIX.md for details.`,
-          { duration: 10000 }
+          { duration: 10000 },
         );
-      } else if (!errorMessage.includes('cancelled')) {
+      } else if (!errorMessage.includes("cancelled")) {
         toast.error(errorMessage);
       }
       throw error;
@@ -127,10 +190,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setLoading(true);
       await signOutUser();
-      toast.success('Signed out successfully');
+      toast.success("Signed out successfully");
     } catch (error: any) {
-      console.error('Sign-out error:', error);
-      toast.error(error.message || 'Failed to sign out');
+      console.error("Sign-out error:", error);
+      toast.error(error.message || "Failed to sign out");
       throw error;
     } finally {
       setLoading(false);
@@ -141,44 +204,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     walletAddress: string,
     balance: number = 0,
     encryptedMnemonic?: string,
-    encryptedSecretKey?: string
+    encryptedSecretKey?: string,
   ) => {
-    if (!user) throw new Error('User not authenticated');
+    if (!user) throw new Error("User not authenticated");
     try {
-      await updateUserWallet(user.uid, walletAddress, balance, encryptedMnemonic, encryptedSecretKey);
+      await updateUserWallet(
+        user.uid,
+        walletAddress,
+        balance,
+        encryptedMnemonic,
+        encryptedSecretKey,
+      );
       // Refresh profile after update
       await refreshProfile();
-      toast.success('Wallet updated successfully');
+      toast.success("Wallet updated successfully");
     } catch (error: any) {
-      console.error('Update wallet error:', error);
-      toast.error(error.message || 'Failed to update wallet');
+      console.error("Update wallet error:", error);
+      toast.error(error.message || "Failed to update wallet");
       throw error;
     }
   };
 
   const handleUpdateBalance = async (balance: number) => {
-    if (!user) throw new Error('User not authenticated');
+    if (!user) throw new Error("User not authenticated");
     try {
       await updateUserBalance(user.uid, balance);
       // Refresh profile after update
       await refreshProfile();
     } catch (error: any) {
-      console.error('Update balance error:', error);
-      toast.error(error.message || 'Failed to update balance');
+      console.error("Update balance error:", error);
+      toast.error(error.message || "Failed to update balance");
       throw error;
     }
   };
 
   const handleUpdateProfile = async (updates: Record<string, any>) => {
-    if (!user) throw new Error('User not authenticated');
+    if (!user) throw new Error("User not authenticated");
     try {
       await updateUserProfile(user.uid, updates);
       // Refresh profile after update
       await refreshProfile();
-      toast.success('Profile updated successfully');
+      toast.success("Profile updated successfully");
     } catch (error: any) {
-      console.error('Update profile error:', error);
-      toast.error(error.message || 'Failed to update profile');
+      console.error("Update profile error:", error);
+      toast.error(error.message || "Failed to update profile");
       throw error;
     }
   };
@@ -192,56 +261,66 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const userWatchlist = await getWatchlist(user.uid);
       setWatchlist(userWatchlist);
     } catch (error) {
-      console.error('Error refreshing profile:', error);
+      console.error("Error refreshing profile:", error);
     }
   };
 
   const handleAddToWatchlist = async (
     walletAddress: string,
-    walletData?: { nickname?: string; matched?: number; totalInvested?: number; totalRemoved?: number; profitMargin?: number }
+    walletData?: {
+      nickname?: string;
+      matched?: number;
+      totalInvested?: number;
+      totalRemoved?: number;
+      profitMargin?: number;
+    },
   ) => {
-    if (!user) throw new Error('User not authenticated');
+    if (!user) throw new Error("User not authenticated");
     try {
       await addWalletToWatchlist(user.uid, walletAddress, walletData);
       await refreshProfile();
-      
+
       // Sync webhook in background (don't wait for it)
-      import('@/lib/webhook').then(({ syncWebhook }) => syncWebhook()).catch(() => {});
-      
-      toast.success('Wallet added to watchlist');
+      import("@/lib/webhook")
+        .then(({ syncWebhook }) => syncWebhook())
+        .catch(() => {});
+
+      toast.success("Wallet added to watchlist");
     } catch (error: any) {
-      console.error('Add to watchlist error:', error);
-      toast.error(error.message || 'Failed to add wallet to watchlist');
+      console.error("Add to watchlist error:", error);
+      toast.error(error.message || "Failed to add wallet to watchlist");
       throw error;
     }
   };
 
   const handleRemoveFromWatchlist = async (walletAddress: string) => {
-    if (!user) throw new Error('User not authenticated');
+    if (!user) throw new Error("User not authenticated");
     try {
       await removeWalletFromWatchlist(user.uid, walletAddress);
       await refreshProfile();
-      
+
       // Sync webhook in background (don't wait for it)
-      import('@/lib/webhook').then(({ syncWebhook }) => syncWebhook()).catch(() => {});
-      
-      toast.success('Wallet removed from watchlist');
+      import("@/lib/webhook")
+        .then(({ syncWebhook }) => syncWebhook())
+        .catch(() => {});
+
+      toast.success("Wallet removed from watchlist");
     } catch (error: any) {
-      console.error('Remove from watchlist error:', error);
-      toast.error(error.message || 'Failed to remove wallet from watchlist');
+      console.error("Remove from watchlist error:", error);
+      toast.error(error.message || "Failed to remove wallet from watchlist");
       throw error;
     }
   };
 
   const handleRemoveWallet = async () => {
-    if (!user) throw new Error('User not authenticated');
+    if (!user) throw new Error("User not authenticated");
     try {
       await removeUserWallet(user.uid);
       await refreshProfile();
-      toast.success('Wallet removed successfully');
+      toast.success("Wallet removed successfully");
     } catch (error: any) {
-      console.error('Remove wallet error:', error);
-      toast.error(error.message || 'Failed to remove wallet');
+      console.error("Remove wallet error:", error);
+      toast.error(error.message || "Failed to remove wallet");
       throw error;
     }
   };
@@ -269,7 +348,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
 }

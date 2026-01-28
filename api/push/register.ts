@@ -1,7 +1,12 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { initializeApp, cert, getApps } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { createHash } from "crypto";
+import { initializeApp, cert, getApps } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
+
+function pushTokenDocId(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
 
 if (getApps().length === 0) {
   const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
@@ -41,41 +46,45 @@ const adminDb = getFirestore();
 async function getUidFromHeader(req: VercelRequest) {
   const authorization = req.headers.authorization;
   if (!authorization) return null;
-  const token = authorization.replace('Bearer ', '');
+  const token = authorization.replace("Bearer ", "");
   try {
     const decoded = await adminAuth.verifyIdToken(token);
     return decoded.uid;
   } catch (error) {
-    console.error('Invalid token', error);
+    console.error("Invalid token", error);
     return null;
   }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST' && req.method !== 'DELETE') {
-    return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method !== "POST" && req.method !== "DELETE") {
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
   const uid = await getUidFromHeader(req);
   if (!uid) {
-    return res.status(401).json({ error: 'Unauthorized' });
+    return res.status(401).json({ error: "Unauthorized" });
   }
 
   const { token, platform } = req.body || {};
   if (!token) {
-    return res.status(400).json({ error: 'Token is required' });
+    return res.status(400).json({ error: "Token is required" });
   }
 
-  const tokenRef = adminDb.collection('users').doc(uid).collection('pushTokens').doc(token);
-  if (req.method === 'POST') {
+  const tokenRef = adminDb
+    .collection("users")
+    .doc(uid)
+    .collection("pushTokens")
+    .doc(pushTokenDocId(token));
+  if (req.method === "POST") {
     await tokenRef.set(
       {
         token,
-        platform: platform || 'web',
+        platform: platform || "web",
         createdAt: FieldValue.serverTimestamp(),
         lastSeenAt: FieldValue.serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
     return res.status(200).json({ success: true });
   }

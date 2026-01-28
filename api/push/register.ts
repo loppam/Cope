@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { getFirestore, serverTimestamp } from 'firebase-admin/firestore';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 
 if (getApps().length === 0) {
   const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
@@ -72,8 +72,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       {
         token,
         platform: platform || 'web',
-        createdAt: serverTimestamp(),
-        lastSeenAt: serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
+        lastSeenAt: FieldValue.serverTimestamp(),
       },
       { merge: true }
     );

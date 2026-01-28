@@ -6,18 +6,32 @@ import { getMessaging } from "firebase-admin/messaging";
 
 if (getApps().length === 0) {
   const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (!rawServiceAccount) {
-    throw new Error("FIREBASE_SERVICE_ACCOUNT is not configured");
+  let projectId: string | undefined;
+  let clientEmail: string | undefined;
+  let privateKey: string | undefined;
+
+  if (rawServiceAccount) {
+    const serviceAccount = JSON.parse(rawServiceAccount);
+    projectId = serviceAccount.project_id;
+    clientEmail = serviceAccount.client_email;
+    privateKey = serviceAccount.private_key?.replace(/\\n/g, "\n");
   }
-  const serviceAccount = JSON.parse(rawServiceAccount);
-  if (typeof serviceAccount.project_id !== "string") {
-    throw new Error("FIREBASE_SERVICE_ACCOUNT is missing project_id");
+
+  projectId = projectId || process.env.FIREBASE_ADMIN_PROJECT_ID;
+  clientEmail = clientEmail || process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
+  if (!privateKey && process.env.FIREBASE_ADMIN_PRIVATE_KEY) {
+    privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY.replace(/\\n/g, "\n");
   }
+
+  if (!projectId || !clientEmail || !privateKey) {
+    throw new Error("Firebase admin credentials are not fully configured");
+  }
+
   initializeApp({
     credential: cert({
-      projectId: serviceAccount.project_id,
-      clientEmail: serviceAccount.client_email,
-      privateKey: serviceAccount.private_key?.replace(/\\n/g, "\n"),
+      projectId,
+      clientEmail,
+      privateKey,
     }),
   });
 }

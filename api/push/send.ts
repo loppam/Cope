@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
-import { getUserTokens, sendToTokens } from "./pushUtils";
+import { adminMessaging } from "../../src/lib/firebaseAdmin";
 
 if (getApps().length === 0) {
   const serviceAccount = JSON.parse(
@@ -68,4 +68,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       message: (error as Error).message,
     });
   }
+}
+
+async function getUserTokens(uid: string) {
+  const snapshot = await adminDb
+    .collection("users")
+    .doc(uid)
+    .collection("pushTokens")
+    .get();
+  const tokens: string[] = [];
+  snapshot.forEach((doc) => {
+    const data = doc.data();
+    if (data.token) {
+      tokens.push(data.token);
+    }
+  });
+  return tokens;
+}
+
+async function sendToTokens(tokens: string[], payload: any) {
+  if (!tokens.length) return [];
+  const response = await adminMessaging.sendEachForMulticast({
+    tokens,
+    notification: {
+      title: payload.title,
+      body: payload.body,
+    },
+    data: payload.data || {},
+    webpush: {
+      fcmOptions: {
+        link: payload.deepLink || "/app/alerts",
+      },
+    },
+  });
+  const invalidTokens: string[] = [];
+  response.responses.forEach((resp, idx) => {
+    if (!resp.success && resp.error?.code === "messaging/registration-token-not-registered") {
+      invalidTokens.push(tokens[idx]);
+    }
+  });
+  return invalidTokens;
 }

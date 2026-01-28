@@ -47,3 +47,6 @@ sw.js.map
 dev-dist/
 dev-sw.js
 .vercel
+
+# Allow custom SW source for injectManifest
+!src/sw.js

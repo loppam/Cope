@@ -149,6 +149,9 @@ export default defineConfig({
       strategies: "injectManifest",
       srcDir: "src",
       filename: "sw.js",
+      injectManifest: {
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff,woff2}"],
+      },
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff,woff2}"],
         navigateFallback: "/index.html",

@@ -5,9 +5,14 @@ import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 
 if (getApps().length === 0) {
-  const serviceAccount = JSON.parse(
-    process.env.FIREBASE_SERVICE_ACCOUNT || "{}",
-  );
+  const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (!rawServiceAccount) {
+    throw new Error("FIREBASE_SERVICE_ACCOUNT is not configured");
+  }
+  const serviceAccount = JSON.parse(rawServiceAccount);
+  if (typeof serviceAccount.project_id !== "string") {
+    throw new Error("FIREBASE_SERVICE_ACCOUNT is missing project_id");
+  }
   initializeApp({
     credential: cert({
       projectId: serviceAccount.project_id,

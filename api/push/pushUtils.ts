@@ -1,9 +1,11 @@
-import { collection, getDocs } from 'firebase-admin/firestore';
 import { adminDb, adminMessaging } from '../../src/lib/firebaseAdmin';
 
 export async function getUserTokens(uid: string): Promise<string[]> {
-  const tokensRef = collection(adminDb, 'users', uid, 'pushTokens');
-  const snapshot = await getDocs(tokensRef);
+  const snapshot = await adminDb
+    .collection('users')
+    .doc(uid)
+    .collection('pushTokens')
+    .get();
   const tokens: string[] = [];
   snapshot.forEach((doc) => {
     const data = doc.data();

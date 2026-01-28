@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
-import { adminMessaging } from "../../src/lib/firebaseAdmin";
+import { getMessaging } from "firebase-admin/messaging";
 
 if (getApps().length === 0) {
   const serviceAccount = JSON.parse(
@@ -19,6 +19,7 @@ if (getApps().length === 0) {
 
 const adminAuth = getAuth();
 const adminDb = getFirestore();
+const adminMessaging = getMessaging();
 
 async function getUserData(req: VercelRequest) {
   const authHeader = req.headers.authorization;

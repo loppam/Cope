@@ -4,6 +4,7 @@ import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
+import webpush from "web-push";
 
 function pushTokenDocId(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -97,47 +98,171 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-async function getUserTokens(uid: string) {
+interface PushToken {
+  token: string;
+  platform: string;
+}
+
+async function getUserTokens(uid: string): Promise<PushToken[]> {
   const snapshot = await adminDb
     .collection("users")
     .doc(uid)
     .collection("pushTokens")
     .get();
-  const tokens: string[] = [];
+  const tokens: PushToken[] = [];
   snapshot.forEach((doc) => {
     const data = doc.data();
     if (data.token) {
-      tokens.push(data.token);
+      tokens.push({
+        token: data.token,
+        platform: data.platform || "web",
+      });
     }
   });
   return tokens;
 }
 
-async function sendToTokens(tokens: string[], payload: any) {
+/**
+ * Check if token is a Web Push subscription (JSON object) or FCM token (string)
+ */
+function isWebPushSubscription(token: string): boolean {
+  try {
+    const parsed = JSON.parse(token);
+    return (
+      parsed &&
+      typeof parsed === "object" &&
+      parsed.endpoint &&
+      parsed.keys &&
+      parsed.keys.p256dh &&
+      parsed.keys.auth
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Initialize Web Push with VAPID keys
+ */
+function initWebPush() {
+  const vapidPublicKey = process.env.VITE_FIREBASE_VAPID_KEY;
+  const vapidPrivateKey = process.env.FIREBASE_VAPID_PRIVATE_KEY;
+
+  if (!vapidPublicKey || !vapidPrivateKey) {
+    console.warn("[Push] VAPID keys not configured for Web Push");
+    return false;
+  }
+
+  webpush.setVapidDetails(
+    "mailto:your-email@example.com", // Contact email (update this)
+    vapidPublicKey,
+    vapidPrivateKey,
+  );
+  return true;
+}
+
+/**
+ * Send notifications to tokens (supports both FCM and Web Push)
+ */
+async function sendToTokens(
+  tokens: PushToken[],
+  payload: any,
+): Promise<string[]> {
   if (!tokens.length) return [];
+
   const deepLink = payload.deepLink || "/app/alerts";
-  const data = { ...(payload.data || {}), deepLink };
-  const response = await adminMessaging.sendEachForMulticast({
-    tokens,
-    notification: {
-      title: payload.title,
-      body: payload.body,
-    },
-    data,
-    webpush: {
-      fcmOptions: {
-        link: deepLink,
-      },
-    },
-  });
   const invalidTokens: string[] = [];
-  response.responses.forEach((resp, idx) => {
+
+  // Separate FCM tokens and Web Push subscriptions
+  const fcmTokens: string[] = [];
+  const webPushSubscriptions: Array<{ token: string; subscription: any }> = [];
+
+  for (const tokenData of tokens) {
     if (
-      !resp.success &&
-      resp.error?.code === "messaging/registration-token-not-registered"
+      tokenData.platform === "webpush" ||
+      isWebPushSubscription(tokenData.token)
     ) {
-      invalidTokens.push(tokens[idx]);
+      try {
+        const subscription = JSON.parse(tokenData.token);
+        webPushSubscriptions.push({
+          token: tokenData.token,
+          subscription,
+        });
+      } catch (e) {
+        console.error("[Push] Invalid Web Push subscription:", e);
+        invalidTokens.push(tokenData.token);
+      }
+    } else {
+      fcmTokens.push(tokenData.token);
     }
-  });
+  }
+
+  // Send FCM notifications
+  if (fcmTokens.length > 0) {
+    try {
+      const data = { ...(payload.data || {}), deepLink };
+      const response = await adminMessaging.sendEachForMulticast({
+        tokens: fcmTokens,
+        notification: {
+          title: payload.title,
+          body: payload.body,
+        },
+        data,
+        webpush: {
+          fcmOptions: {
+            link: deepLink,
+          },
+        },
+      });
+
+      response.responses.forEach((resp, idx) => {
+        if (
+          !resp.success &&
+          resp.error?.code === "messaging/registration-token-not-registered"
+        ) {
+          invalidTokens.push(fcmTokens[idx]);
+        }
+      });
+    } catch (error) {
+      console.error("[Push] FCM send error:", error);
+      // Mark all FCM tokens as invalid on error
+      invalidTokens.push(...fcmTokens);
+    }
+  }
+
+  // Send Web Push notifications
+  if (webPushSubscriptions.length > 0) {
+    if (!initWebPush()) {
+      console.warn("[Push] Web Push not initialized, skipping Web Push tokens");
+      invalidTokens.push(...webPushSubscriptions.map((s) => s.token));
+    } else {
+      const webPushPayload = JSON.stringify({
+        title: payload.title,
+        body: payload.body,
+        data: { ...(payload.data || {}), deepLink },
+        icon: "/icons/icon-192x192.png",
+        badge: "/icons/icon-96x96.png",
+      });
+
+      await Promise.all(
+        webPushSubscriptions.map(async ({ token, subscription }) => {
+          try {
+            await webpush.sendNotification(subscription, webPushPayload);
+          } catch (error: any) {
+            console.error("[Push] Web Push send error:", error);
+            // Mark as invalid if subscription expired or invalid
+            if (
+              error.statusCode === 410 || // Gone
+              error.statusCode === 404 || // Not Found
+              error.statusCode === 400 // Bad Request
+            ) {
+              invalidTokens.push(token);
+            }
+          }
+        }),
+      );
+    }
+  }
+
   return invalidTokens;
 }

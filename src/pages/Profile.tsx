@@ -23,8 +23,8 @@ import { getSolBalance } from "@/lib/rpc";
 import {
   getUnreadNotificationCount,
   getPushNotificationStatus,
-  requestPermissionAndGetFcmToken,
-  savePushToken,
+  requestPermissionAndGetPushToken,
+  savePushTokenWithPlatform,
   unregisterPushToken,
   getStoredPushToken,
 } from "@/lib/notifications";
@@ -142,9 +142,10 @@ export function Profile() {
           return;
         }
 
-        const token = await requestPermissionAndGetFcmToken();
-        if (token) {
-          await savePushToken(token);
+        // Get push token (automatically uses FCM or Web Push based on browser)
+        const result = await requestPermissionAndGetPushToken();
+        if (result && result.token) {
+          await savePushTokenWithPlatform(result.token, result.platform);
           setPushEnabled(true);
           toast.success("Push notifications enabled");
         } else {
@@ -157,7 +158,7 @@ export function Profile() {
           } else if (Notification.permission === "default") {
             toast.error("Please allow notifications when prompted");
           } else {
-            // Likely unsupported browser (e.g., Safari on iOS)
+            // Likely unsupported browser
             toast.info("Push notifications are not supported on this browser");
           }
         }

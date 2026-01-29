@@ -40,29 +40,58 @@ async function initFirebase() {
       };
       self.registration.showNotification(title, options);
     });
+  } catch (error) {
+    console.error("[SW] Firebase init failed", error);
+  }
+}
 
-    self.addEventListener("notificationclick", (event) => {
-      event.notification.close();
-      const deepLink =
-        (event.notification.data && event.notification.data.deepLink) ||
-        "/app/alerts";
-      const urlToOpen = new URL(deepLink, self.location.origin).href;
-      event.waitUntil(
-        clients
-          .matchAll({ type: "window", includeUncontrolled: true })
-          .then((windowClients) => {
-            const tClient = windowClients.find(
-              (client) =>
-                client.url.startsWith(urlToOpen) ||
-                client.url.includes(deepLink),
-            );
-            if (tClient) {
-              return tClient.focus();
-            }
-            return clients.openWindow(urlToOpen);
-          }),
-      );
-    });
+// Web Push API handler (for Safari/iOS)
+self.addEventListener("push", (event) => {
+  let data = {};
+  if (event.data) {
+    try {
+      data = event.data.json();
+    } catch (e) {
+      data = { title: "COPE Alert", body: event.data.text() || "New notification" };
+    }
+  }
+
+  const title = data.title || "COPE Alert";
+  const options = {
+    body: data.body || data.message || "New wallet activity",
+    data: data.data || {},
+    icon: "/icons/icon-192x192.png",
+    badge: "/icons/icon-96x96.png",
+    tag: data.tag || "cope-notification",
+    requireInteraction: false,
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Unified notification click handler (works for both FCM and Web Push)
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const deepLink =
+    (event.notification.data && event.notification.data.deepLink) ||
+    "/app/alerts";
+  const urlToOpen = new URL(deepLink, self.location.origin).href;
+  event.waitUntil(
+    clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((windowClients) => {
+        const tClient = windowClients.find(
+          (client) =>
+            client.url.startsWith(urlToOpen) ||
+            client.url.includes(deepLink),
+        );
+        if (tClient) {
+          return tClient.focus();
+        }
+        return clients.openWindow(urlToOpen);
+      }),
+  );
+});
   } catch (error) {
     console.error("[SW] Firebase init failed", error);
   }

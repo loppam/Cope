@@ -1,7 +1,6 @@
 import {
   doc,
   setDoc,
-  getDoc,
   collection,
   query,
   where,
@@ -12,11 +11,22 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "./firebase";
 import { requestFirebaseMessagingToken } from "./firebase";
-import { toast } from "sonner";
 
 const PUSH_TOKEN_KEY = "cope_push_token";
 const PUSH_REGISTER_URL = "/api/push/register";
 const PUSH_STATUS_URL = "/api/push/status";
+
+// Detect if browser is Safari (including iOS Safari)
+function isSafari(): boolean {
+  if (typeof window === "undefined") return false;
+  const ua = navigator.userAgent.toLowerCase();
+  const isIOS =
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isSafariUA =
+    ua.includes("safari") && !ua.includes("chrome") && !ua.includes("crios");
+  return isSafariUA || isIOS;
+}
 
 export interface WalletNotification {
   id: string;
@@ -57,14 +67,76 @@ async function sendAuthRequest(method: string, body?: Record<string, any>) {
   });
 }
 
-export async function requestPermissionAndGetFcmToken(): Promise<
-  string | null
-> {
+/**
+ * Subscribe to Web Push API (for Safari/iOS)
+ * Returns the subscription object as JSON string
+ */
+async function subscribeToWebPush(): Promise<string | null> {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    console.warn("[Notifications] Web Push API not supported");
+    return null;
+  }
+
+  try {
+    // Get service worker registration
+    const registration = await navigator.serviceWorker.ready;
+
+    // Get VAPID public key
+    const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
+    if (!vapidKey) {
+      console.warn("[Notifications] VAPID key missing for Web Push");
+      return null;
+    }
+
+    // Convert VAPID key to Uint8Array (required by Web Push API)
+    const vapidKeyBytes = urlBase64ToUint8Array(vapidKey);
+
+    // Subscribe to push notifications
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: vapidKeyBytes,
+    });
+
+    // Return subscription as JSON string
+    return JSON.stringify(subscription);
+  } catch (error: any) {
+    console.error("[Notifications] Web Push subscription failed:", error);
+    return null;
+  }
+}
+
+/**
+ * Convert VAPID key from base64 URL to Uint8Array
+ */
+function urlBase64ToUint8Array(base64String: string): BufferSource {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding)
+    .replace(/\-/g, "+")
+    .replace(/_/g, "/");
+
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+/**
+ * Unified function to get push token/subscription
+ * Returns: { token: string, platform: 'fcm' | 'webpush' }
+ */
+export async function requestPermissionAndGetPushToken(): Promise<{
+  token: string;
+  platform: "fcm" | "webpush";
+} | null> {
   if (typeof Notification === "undefined") {
     console.warn("[Notifications] Notification API not available");
     return null;
   }
 
+  // Request permission first
   if (Notification.permission === "denied") {
     console.warn("[Notifications] Notification permission denied by user");
     return null;
@@ -78,36 +150,60 @@ export async function requestPermissionAndGetFcmToken(): Promise<
     }
   }
 
-  try {
-    const token = await requestFirebaseMessagingToken();
-    if (!token) {
-      // Token request failed - could be unsupported browser (e.g., Safari)
-      // This is not an error, just not supported
-      console.info(
-        "[Notifications] Push notifications not supported on this browser",
-      );
+  const isSafariBrowser = isSafari();
+
+  // For Safari/iOS: Use Web Push API
+  if (isSafariBrowser) {
+    console.info("[Notifications] Using Web Push API for Safari/iOS");
+    const subscription = await subscribeToWebPush();
+    if (subscription) {
+      return { token: subscription, platform: "webpush" };
     }
-    return token;
+    return null;
+  }
+
+  // For other browsers: Try FCM first
+  try {
+    const fcmToken = await requestFirebaseMessagingToken();
+    if (fcmToken) {
+      return { token: fcmToken, platform: "fcm" };
+    }
   } catch (error: any) {
-    // Handle errors gracefully - don't show error toast for unsupported browsers
     const errorCode = error?.code || "";
     const errorMessage = error?.message || "";
 
+    // If FCM fails, try Web Push as fallback
     if (
       errorCode === "messaging/unsupported-browser" ||
-      errorMessage.includes("unsupported") ||
-      errorMessage.includes("not supported")
+      errorMessage.includes("unsupported")
     ) {
-      console.info(
-        "[Notifications] Push notifications not supported:",
-        errorMessage,
-      );
-      return null;
+      console.info("[Notifications] FCM not supported, trying Web Push API...");
+      const subscription = await subscribeToWebPush();
+      if (subscription) {
+        return { token: subscription, platform: "webpush" };
+      }
+    } else {
+      console.error("[Notifications] Error requesting FCM token:", error);
     }
-
-    console.error("[Notifications] Error requesting FCM token:", error);
-    throw error; // Re-throw unexpected errors
   }
+
+  return null;
+}
+
+/**
+ * Legacy function name for backward compatibility
+ * @deprecated Use requestPermissionAndGetPushToken instead
+ */
+export async function requestPermissionAndGetFcmToken(): Promise<
+  string | null
+> {
+  const result = await requestPermissionAndGetPushToken();
+  return result?.token || null;
+}
+
+// Export helper to check if Safari
+export function isSafariBrowser(): boolean {
+  return isSafari();
 }
 
 export function getStoredPushToken(): string | null {
@@ -132,6 +228,16 @@ export async function savePushToken(
   if (!token) return;
   await sendAuthRequest("POST", { token, platform });
   setStoredPushToken(token);
+}
+
+/**
+ * Save push token with platform detection
+ */
+export async function savePushTokenWithPlatform(
+  token: string,
+  platform: "fcm" | "webpush",
+): Promise<void> {
+  await savePushToken(token, platform);
 }
 
 export async function unregisterPushToken(token: string): Promise<void> {

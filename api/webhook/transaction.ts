@@ -57,6 +57,29 @@ const tokenSymbolCache = new Map<
 >();
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
+/** Fetch with one retry on 429 (rate limit). */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  retries = 1,
+): Promise<Response> {
+  let lastRes: Response | null = null;
+  for (let i = 0; i <= retries; i++) {
+    const res = await fetch(url, options);
+    lastRes = res;
+    if (res.status === 429 && i < retries) {
+      const retryAfter = res.headers.get("Retry-After");
+      const delayMs = retryAfter
+        ? Math.min(parseInt(retryAfter, 10) * 1000, 10000)
+        : 2000;
+      await new Promise((r) => setTimeout(r, delayMs));
+      continue;
+    }
+    return res;
+  }
+  return lastRes!;
+}
+
 /**
  * Fetch token price from SolanaTracker API
  */
@@ -78,7 +101,7 @@ async function getTokenPrice(mint: string): Promise<number> {
       return 0;
     }
 
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `https://data.solanatracker.io/tokens/${mint}`,
       {
         headers: {
@@ -139,12 +162,15 @@ async function getSolPrice(): Promise<number> {
       return 150; // Fallback price
     }
 
-    const response = await fetch("https://data.solanatracker.io/price", {
-      headers: {
-        "x-api-key": apiKey,
-        "Content-Type": "application/json",
+    const response = await fetchWithRetry(
+      "https://data.solanatracker.io/price",
+      {
+        headers: {
+          "x-api-key": apiKey,
+          "Content-Type": "application/json",
+        },
       },
-    });
+    );
 
     if (!response.ok) {
       console.warn(`Failed to fetch SOL price: ${response.status}`);
@@ -176,7 +202,7 @@ async function getTokenSymbol(mint: string): Promise<string> {
       process.env.VITE_SOLANATRACKER_API_KEY ||
       process.env.SOLANATRACKER_API_KEY;
     if (!apiKey) return `${mint.slice(0, 4)}...${mint.slice(-4)}`;
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `https://data.solanatracker.io/tokens/${mint}`,
       {
         headers: {
@@ -298,6 +324,63 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
       // Omit accountData – often token/account addresses, not owners; reduces duplicate notifications
 
+      // Compute price/symbol once per tx (reduces SolanaTracker API calls and 429 rate limits).
+      // Note: Helius sends one webhook POST per transaction; each POST runs in a separate
+      // serverless invocation, so in-memory cache doesn't help across requests. High tx volume
+      // = many invocations = many getSolPrice/getTokenPrice calls. Consider a shared cache
+      // (e.g. Vercel KV / Upstash Redis) with ~60s TTL for SOL/token prices to cut 429s.
+      const tokenTransfers = tx.tokenTransfers || [];
+      const nativeTransfers = tx.nativeTransfers || [];
+      const hasTokenTransfer = tokenTransfers.length > 0;
+      const hasNativeTransfer = nativeTransfers.length > 0;
+
+      let amountUsd = 0;
+      if (hasTokenTransfer) {
+        const tokenPricePromises = tokenTransfers.map(async (transfer) => {
+          const tokenPrice = await getTokenPrice(transfer.mint);
+          return tokenPrice * (transfer.tokenAmount || 0);
+        });
+        const tokenAmounts = await Promise.all(tokenPricePromises);
+        amountUsd += tokenAmounts.reduce((sum, amount) => sum + amount, 0);
+      }
+      if (hasNativeTransfer) {
+        const solPrice = await getSolPrice();
+        const solAmount =
+          nativeTransfers.reduce((sum, t) => sum + t.amount, 0) / 1e9;
+        amountUsd += solAmount * solPrice;
+      }
+
+      const isLargeTrade = amountUsd > 10000;
+      const notificationType = isLargeTrade
+        ? "large_trade"
+        : hasTokenTransfer
+          ? "token_swap"
+          : "transaction";
+
+      const tokenAddress = getPrimaryTokenMint(tx) ?? undefined;
+      const primaryTransfer = hasTokenTransfer
+        ? tokenTransfers.find((t) => t.mint === tokenAddress) ||
+          tokenTransfers[0]
+        : null;
+
+      const tokenSymbol = tokenAddress
+        ? await getTokenSymbol(tokenAddress)
+        : "SOL";
+      const amountUsdFormatted =
+        amountUsd >= 1
+          ? amountUsd.toLocaleString("en-US", {
+              style: "currency",
+              currency: "USD",
+              minimumFractionDigits: 0,
+              maximumFractionDigits: 0,
+            })
+          : amountUsd.toLocaleString("en-US", {
+              style: "currency",
+              currency: "USD",
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            });
+
       // Collect unique users to notify (one notification per user per tx)
       const notifiedUserIds = new Set<string>();
 
@@ -358,57 +441,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (!alreadyNotified) notifiedUserIds.add(userId);
 
           if (!alreadyNotified) {
-            // One notification per user per transaction
-            const tokenTransfers = tx.tokenTransfers || [];
-            const nativeTransfers = tx.nativeTransfers || [];
-            const hasTokenTransfer = tokenTransfers.length > 0;
-            const hasNativeTransfer = nativeTransfers.length > 0;
-
-            // Calculate total USD value using dynamic prices
-            let amountUsd = 0;
-
-            if (hasTokenTransfer) {
-              // Fetch prices for all tokens in parallel
-              const tokenPricePromises = tokenTransfers.map(
-                async (transfer) => {
-                  const tokenPrice = await getTokenPrice(transfer.mint);
-                  // tokenAmount is in raw units, we need to convert to USD
-                  // For now, we'll use a simplified calculation
-                  // In production, you'd need to account for token decimals
-                  return tokenPrice * (transfer.tokenAmount || 0);
-                },
-              );
-
-              const tokenAmounts = await Promise.all(tokenPricePromises);
-              amountUsd += tokenAmounts.reduce(
-                (sum, amount) => sum + amount,
-                0,
-              );
-            }
-
-            if (hasNativeTransfer) {
-              // Fetch SOL price dynamically
-              const solPrice = await getSolPrice();
-              const solAmount =
-                nativeTransfers.reduce((sum, t) => sum + t.amount, 0) / 1e9;
-              amountUsd += solAmount * solPrice;
-            }
-
-            // Determine if it's a large trade (>$10,000)
-            const isLargeTrade = amountUsd > 10000;
-            const notificationType = isLargeTrade
-              ? "large_trade"
-              : hasTokenTransfer
-                ? "token_swap"
-                : "transaction";
-
-            // Primary token for alert: prefer non–wrapped-SOL so alerts show the actual token, not wSOL
-            const tokenAddress = getPrimaryTokenMint(tx) ?? undefined;
-            const primaryTransfer = hasTokenTransfer
-              ? tokenTransfers.find((t) => t.mint === tokenAddress) ||
-                tokenTransfers[0]
-              : null;
-
+            // One notification per user per transaction (price/symbol already computed once per tx)
             // Buy vs sell: watched wallet received token -> buy, sent -> sell
             const isBuy =
               hasTokenTransfer &&
@@ -419,23 +452,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               primaryTransfer &&
               primaryTransfer.fromUserAccount === walletAddress;
 
-            const tokenSymbol = tokenAddress
-              ? await getTokenSymbol(tokenAddress)
-              : "SOL";
-            const amountUsdFormatted =
-              amountUsd >= 1
-                ? amountUsd.toLocaleString("en-US", {
-                    style: "currency",
-                    currency: "USD",
-                    minimumFractionDigits: 0,
-                    maximumFractionDigits: 0,
-                  })
-                : amountUsd.toLocaleString("en-US", {
-                    style: "currency",
-                    currency: "USD",
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  });
             const displayName =
               nickname ||
               `Wallet ${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`;
@@ -459,6 +475,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
             // Create notification
             const notificationRef = db.collection("notifications").doc();
+            // Firestore does not accept undefined; use null for optional tokenAddress
             const notificationData = {
               userId,
               walletAddress,
@@ -466,7 +483,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               title: notificationTitle,
               message: notificationMessage,
               txHash: tx.signature,
-              tokenAddress,
+              tokenAddress: tokenAddress ?? null,
               amount:
                 primaryTransfer?.tokenAmount ?? nativeTransfers[0]?.amount,
               amountUsd,

@@ -17,7 +17,7 @@ service cloud.firestore {
       allow create: if false; // Only server (webhook) creates via Admin SDK
     }
 
-    // Push tokens: stored by API (Admin SDK). Client does not read/write this collection directly; allow own for future use.
+    // Push tokens: client can only read/write own tokens (register/unregister). Admin broadcast (Lopam Push) sends to all users via API (Admin SDK), which bypasses these rules.
     match /users/{userId}/pushTokens/{tokenId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }

@@ -74,8 +74,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const tokens = await getUserTokens(user.uid);
-    console.log(`[Push] Found ${tokens.length} tokens for user ${user.uid}`);
+    const tokensWithUid = await getAllUserTokens();
+    const tokens: PushToken[] = tokensWithUid.map(({ token, platform }) => ({
+      token,
+      platform,
+    }));
+    const tokenToUid = new Map(tokensWithUid.map((t) => [t.token, t.uid]));
+
+    console.log(`[Push] Sending to all users: ${tokens.length} total tokens`);
     console.log(
       `[Push] Token platforms:`,
       tokens.map((t) => ({
@@ -89,14 +95,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (invalidTokens.length > 0) {
       console.log(`[Push] Removing ${invalidTokens.length} invalid tokens`);
       await Promise.all(
-        invalidTokens.map((token) =>
-          adminDb
+        invalidTokens.map((token) => {
+          const uid = tokenToUid.get(token);
+          if (!uid) return Promise.resolve();
+          return adminDb
             .collection("users")
-            .doc(user.uid)
+            .doc(uid)
             .collection("pushTokens")
             .doc(pushTokenDocId(token))
-            .delete(),
-        ),
+            .delete();
+        }),
       );
     }
 
@@ -125,6 +133,10 @@ interface PushToken {
   platform: string;
 }
 
+interface PushTokenWithUid extends PushToken {
+  uid: string;
+}
+
 async function getUserTokens(uid: string): Promise<PushToken[]> {
   const snapshot = await adminDb
     .collection("users")
@@ -142,6 +154,31 @@ async function getUserTokens(uid: string): Promise<PushToken[]> {
     }
   });
   return tokens;
+}
+
+/** Collect push tokens from all users (for admin broadcast). */
+async function getAllUserTokens(): Promise<PushTokenWithUid[]> {
+  const usersSnap = await adminDb.collection("users").get();
+  const result: PushTokenWithUid[] = [];
+  for (const userDoc of usersSnap.docs) {
+    const uid = userDoc.id;
+    const tokensSnap = await adminDb
+      .collection("users")
+      .doc(uid)
+      .collection("pushTokens")
+      .get();
+    tokensSnap.forEach((doc) => {
+      const data = doc.data();
+      if (data.token) {
+        result.push({
+          token: data.token,
+          platform: data.platform || "web",
+          uid,
+        });
+      }
+    });
+  }
+  return result;
 }
 
 /**

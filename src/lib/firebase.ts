@@ -69,12 +69,16 @@ export { analytics };
 export async function requestFirebaseMessagingToken(
   vapidKey?: string,
 ): Promise<string | null> {
-  if (!messaging) return null;
+  if (!messaging) {
+    console.warn("[Firebase] Messaging not available (unsupported browser)");
+    return null;
+  }
   try {
     const resolvedVapidKey =
       vapidKey || import.meta.env.VITE_FIREBASE_VAPID_KEY;
     if (!resolvedVapidKey) {
       console.warn("[Firebase] VAPID key is missing");
+      return null;
     }
 
     // Get the unified service worker registration (Vite PWA)
@@ -87,7 +91,27 @@ export async function requestFirebaseMessagingToken(
       vapidKey: resolvedVapidKey,
       serviceWorkerRegistration: registration || undefined,
     });
-  } catch (error) {
+  } catch (error: any) {
+    // Handle specific Firebase messaging errors
+    const errorCode = error?.code || "";
+    const errorMessage = error?.message || "";
+
+    // Check for permission denied or unsupported browser errors
+    if (
+      errorCode === "messaging/permission-blocked" ||
+      errorCode === "messaging/permission-default" ||
+      errorMessage.includes("permission") ||
+      errorCode === "messaging/unsupported-browser"
+    ) {
+      console.warn(
+        "[Firebase] Messaging not available:",
+        errorCode,
+        errorMessage,
+      );
+      return null;
+    }
+
+    // Log other errors but don't throw
     console.error("[Firebase] Failed to get messaging token:", error);
     return null;
   }

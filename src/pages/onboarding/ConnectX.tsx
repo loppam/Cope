@@ -3,7 +3,7 @@ import { useNavigate } from "react-router";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { motion } from "motion/react";
-import { Twitter, LogIn } from "lucide-react";
+import { Twitter, LogIn, Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
@@ -113,6 +113,21 @@ export function ConnectX() {
           </div>
 
           <div className="space-y-4">
+            {/* Show loading state while checking auth */}
+            {loading && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.2 }}
+                className="flex flex-col items-center justify-center py-8"
+              >
+                <Loader2 className="w-8 h-8 mb-4 animate-spin text-[#12d585]" />
+                <p className="text-white/60 text-sm">
+                  Checking authentication...
+                </p>
+              </motion.div>
+            )}
+
             {/* Show user profile card if authenticated */}
             {!loading && userProfile && (
               <motion.div

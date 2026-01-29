@@ -1,11 +1,25 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router';
-import { Button } from '@/components/Button';
-import { Card } from '@/components/Card';
-import { Twitter, Wallet, Settings, LogOut, ExternalLink, Trash2, RefreshCw, Bell, Users, Globe, GlobeLock, Eye, ArrowRight } from 'lucide-react';
-import { shortenAddress } from '@/lib/utils';
-import { useAuth } from '@/contexts/AuthContext';
-import { getSolBalance } from '@/lib/rpc';
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router";
+import { Button } from "@/components/Button";
+import { Card } from "@/components/Card";
+import {
+  Twitter,
+  Wallet,
+  Settings,
+  LogOut,
+  ExternalLink,
+  Trash2,
+  RefreshCw,
+  Bell,
+  Users,
+  Globe,
+  GlobeLock,
+  Eye,
+  ArrowRight,
+} from "lucide-react";
+import { shortenAddress } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
+import { getSolBalance } from "@/lib/rpc";
 import {
   getUnreadNotificationCount,
   getPushNotificationStatus,
@@ -13,13 +27,21 @@ import {
   savePushToken,
   unregisterPushToken,
   getStoredPushToken,
-} from '@/lib/notifications';
-import { updatePublicWalletStatus } from '@/lib/auth';
-import { toast } from 'sonner';
+} from "@/lib/notifications";
+import { updatePublicWalletStatus } from "@/lib/auth";
+import { toast } from "sonner";
 
 export function Profile() {
   const navigate = useNavigate();
-  const { user, userProfile, signOut, removeWallet, loading, watchlist, updateProfile } = useAuth();
+  const {
+    user,
+    userProfile,
+    signOut,
+    removeWallet,
+    loading,
+    watchlist,
+    updateProfile,
+  } = useAuth();
   const [isRemovingWallet, setIsRemovingWallet] = useState(false);
   const [balance, setBalance] = useState<number>(userProfile?.balance || 0);
   const [isRefreshingBalance, setIsRefreshingBalance] = useState(false);
@@ -31,21 +53,26 @@ export function Profile() {
   const [isTogglingPush, setIsTogglingPush] = useState(false);
 
   // Get user data from Firebase or use defaults
-  const xHandle = userProfile?.xHandle || userProfile?.displayName || user?.displayName || '@user';
-  const avatar = userProfile?.avatar || userProfile?.photoURL || user?.photoURL || '';
+  const xHandle =
+    userProfile?.xHandle ||
+    userProfile?.displayName ||
+    user?.displayName ||
+    "@user";
+  const avatar =
+    userProfile?.avatar || userProfile?.photoURL || user?.photoURL || "";
   const walletAddress = userProfile?.walletAddress || null;
   const walletConnected = userProfile?.walletConnected || false;
 
   // Fetch real-time balance using RPC
   const fetchBalance = async () => {
     if (!walletAddress) return;
-    
+
     setIsRefreshingBalance(true);
     try {
       const solBalance = await getSolBalance(walletAddress);
       setBalance(solBalance);
     } catch (error) {
-      console.error('Error fetching balance:', error);
+      console.error("Error fetching balance:", error);
       // Keep the stored balance if RPC fails
     } finally {
       setIsRefreshingBalance(false);
@@ -64,28 +91,30 @@ export function Profile() {
   // Fetch stats
   useEffect(() => {
     if (user) {
-      getUnreadNotificationCount(user.uid).then(count => {
+      getUnreadNotificationCount(user.uid).then((count) => {
         setNotificationCount(count);
       });
-      
-      getPushNotificationStatus(user.uid).then(status => {
-        setPushEnabled(status.enabled && status.permission === 'granted');
+
+      getPushNotificationStatus(user.uid).then((status) => {
+        setPushEnabled(status.enabled && status.permission === "granted");
       });
     }
   }, [user]);
 
   const handleTogglePublic = async () => {
     if (!user) return;
-    
+
     setIsTogglingPublic(true);
     try {
       const newValue = !isPublic;
       await updatePublicWalletStatus(user.uid, newValue);
       setIsPublic(newValue);
-      toast.success(newValue ? 'Wallet is now public' : 'Wallet is now private');
+      toast.success(
+        newValue ? "Wallet is now public" : "Wallet is now private",
+      );
     } catch (error) {
-      console.error('Error toggling public wallet:', error);
-      toast.error('Failed to update wallet visibility');
+      console.error("Error toggling public wallet:", error);
+      toast.error("Failed to update wallet visibility");
     } finally {
       setIsTogglingPublic(false);
     }
@@ -93,32 +122,66 @@ export function Profile() {
 
   const handleTogglePush = async () => {
     if (!user) return;
-    
+
     setIsTogglingPush(true);
     try {
       if (!pushEnabled) {
+        // Check if notifications are supported
+        if (typeof Notification === "undefined") {
+          toast.error("Push notifications are not supported on this device");
+          setIsTogglingPush(false);
+          return;
+        }
+
+        // Check current permission
+        if (Notification.permission === "denied") {
+          toast.error(
+            "Notification permission was denied. Please enable it in your browser settings.",
+          );
+          setIsTogglingPush(false);
+          return;
+        }
+
         const token = await requestPermissionAndGetFcmToken();
         if (token) {
           await savePushToken(token);
           setPushEnabled(true);
-          toast.success('Push notifications enabled');
+          toast.success("Push notifications enabled");
         } else {
-          toast.error('Unable to enable push (permission denied)');
+          // Token is null - could be unsupported browser or permission denied
+          // Check permission state to give better error message
+          if (Notification.permission === "denied") {
+            toast.error(
+              "Notification permission denied. Please enable it in your browser settings.",
+            );
+          } else if (Notification.permission === "default") {
+            toast.error("Please allow notifications when prompted");
+          } else {
+            // Likely unsupported browser (e.g., Safari on iOS)
+            toast.info("Push notifications are not supported on this browser");
+          }
         }
       } else {
         const token = getStoredPushToken();
-        await unregisterPushToken(token || '');
+        await unregisterPushToken(token || "");
         setPushEnabled(false);
-        toast.success('Push notifications disabled');
+        toast.success("Push notifications disabled");
       }
-    } catch (error) {
-      console.error('Error toggling push notifications:', error);
-      toast.error('Failed to update push notification settings');
+    } catch (error: any) {
+      console.error("Error toggling push notifications:", error);
+      const errorMessage = error?.message || "";
+      if (
+        errorMessage.includes("unsupported") ||
+        errorMessage.includes("not supported")
+      ) {
+        toast.info("Push notifications are not supported on this browser");
+      } else {
+        toast.error("Failed to update push notification settings");
+      }
     } finally {
       setIsTogglingPush(false);
     }
   };
-
 
   return (
     <div className="p-4 sm:p-6 max-w-[720px] mx-auto">
@@ -130,15 +193,15 @@ export function Profile() {
       <Card glass className="mb-6">
         <div className="flex items-center gap-4 mb-4">
           {avatar ? (
-            <img 
-              src={avatar} 
-              alt={xHandle} 
+            <img
+              src={avatar}
+              alt={xHandle}
               className="w-16 h-16 rounded-full object-cover"
             />
           ) : (
             <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#12d585] to-[#08b16b] flex items-center justify-center">
               <span className="text-xl font-bold text-[#000000]">
-                {xHandle.charAt(1)?.toUpperCase() || 'U'}
+                {xHandle.charAt(1)?.toUpperCase() || "U"}
               </span>
             </div>
           )}
@@ -150,13 +213,15 @@ export function Profile() {
             </div>
           </div>
         </div>
-        
+
         <div className="pt-4 border-t border-white/6">
           {walletConnected && walletAddress ? (
             <>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-white/60">Wallet</span>
-                <code className="font-mono">{shortenAddress(walletAddress)}</code>
+                <code className="font-mono">
+                  {shortenAddress(walletAddress)}
+                </code>
               </div>
               <div className="flex items-center justify-between text-sm mt-2">
                 <span className="text-white/60">Balance</span>
@@ -168,7 +233,9 @@ export function Profile() {
                     className="p-1 hover:bg-white/10 rounded transition-colors disabled:opacity-50"
                     title="Refresh balance"
                   >
-                    <RefreshCw className={`w-3 h-3 ${isRefreshingBalance ? 'animate-spin' : ''}`} />
+                    <RefreshCw
+                      className={`w-3 h-3 ${isRefreshingBalance ? "animate-spin" : ""}`}
+                    />
                   </button>
                 </div>
               </div>
@@ -179,7 +246,7 @@ export function Profile() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => navigate('/auth/wallet-setup')}
+                onClick={() => navigate("/auth/wallet-setup")}
                 className="mt-2 text-accent-primary hover:text-accent-hover"
               >
                 Connect Wallet
@@ -218,14 +285,14 @@ export function Profile() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => navigate('/app/watchlist')}
+              onClick={() => navigate("/app/watchlist")}
               className="text-accent-primary hover:text-accent-hover"
             >
               View All
               <ArrowRight className="w-4 h-4 ml-1" />
             </Button>
           </div>
-            <div className="space-y-2">
+          <div className="space-y-2">
             {watchlist.slice(0, 3).map((wallet) => (
               <div
                 key={wallet.address}
@@ -248,7 +315,8 @@ export function Profile() {
             ))}
             {watchlist.length > 3 && (
               <p className="text-xs text-white/60 text-center pt-2">
-                +{watchlist.length - 3} more wallet{watchlist.length - 3 !== 1 ? 's' : ''}
+                +{watchlist.length - 3} more wallet
+                {watchlist.length - 3 !== 1 ? "s" : ""}
               </p>
             )}
           </div>
@@ -265,19 +333,21 @@ export function Profile() {
               <Bell className="w-5 h-5 text-white/70" />
               <div>
                 <p className="font-medium">Push Notifications</p>
-                <p className="text-xs text-white/60">Get notified about watched wallet trades</p>
+                <p className="text-xs text-white/60">
+                  Get notified about watched wallet trades
+                </p>
               </div>
             </div>
             <button
               onClick={handleTogglePush}
               disabled={isTogglingPush}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                pushEnabled ? 'bg-accent-primary' : 'bg-white/20'
+                pushEnabled ? "bg-accent-primary" : "bg-white/20"
               } disabled:opacity-50`}
             >
               <span
                 className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  pushEnabled ? 'translate-x-6' : 'translate-x-1'
+                  pushEnabled ? "translate-x-6" : "translate-x-1"
                 }`}
               />
             </button>
@@ -295,7 +365,9 @@ export function Profile() {
                 <div>
                   <p className="font-medium">Public Wallet</p>
                   <p className="text-xs text-white/60">
-                    {isPublic ? 'Your wallet is visible to others' : 'Your wallet is private'}
+                    {isPublic
+                      ? "Your wallet is visible to others"
+                      : "Your wallet is private"}
                   </p>
                 </div>
               </div>
@@ -303,12 +375,12 @@ export function Profile() {
                 onClick={handleTogglePublic}
                 disabled={isTogglingPublic}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  isPublic ? 'bg-accent-primary' : 'bg-white/20'
+                  isPublic ? "bg-accent-primary" : "bg-white/20"
                 } disabled:opacity-50`}
               >
                 <span
                   className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    isPublic ? 'translate-x-6' : 'translate-x-1'
+                    isPublic ? "translate-x-6" : "translate-x-1"
                   }`}
                 />
               </button>
@@ -320,7 +392,10 @@ export function Profile() {
       {/* Actions */}
       <div className="space-y-3">
         {walletAddress && (
-          <Card className="cursor-pointer hover:border-white/20" onClick={() => navigate('/wallet/fund')}>
+          <Card
+            className="cursor-pointer hover:border-white/20"
+            onClick={() => navigate("/wallet/fund")}
+          >
             <div className="flex items-center gap-3">
               <Wallet className="w-5 h-5 text-white/70" />
               <span className="font-medium">Fund Wallet</span>
@@ -329,9 +404,14 @@ export function Profile() {
         )}
 
         {walletAddress && (
-          <Card 
+          <Card
             className="cursor-pointer hover:border-white/20"
-            onClick={() => window.open(`https://solscan.io/account/${walletAddress}`, '_blank')}
+            onClick={() =>
+              window.open(
+                `https://solscan.io/account/${walletAddress}`,
+                "_blank",
+              )
+            }
           >
             <div className="flex items-center gap-3">
               <ExternalLink className="w-5 h-5 text-white/70" />
@@ -341,18 +421,22 @@ export function Profile() {
         )}
 
         {walletAddress && (
-          <Card 
+          <Card
             className="cursor-pointer hover:border-[#FF4757]/20 border-[#FF4757]/10"
             onClick={async () => {
-              if (!confirm('Are you sure you want to remove your wallet? You will need to set it up again.')) {
+              if (
+                !confirm(
+                  "Are you sure you want to remove your wallet? You will need to set it up again.",
+                )
+              ) {
                 return;
               }
               setIsRemovingWallet(true);
               try {
                 await removeWallet();
-                navigate('/auth/wallet-setup');
+                navigate("/auth/wallet-setup");
               } catch (error) {
-                console.error('Remove wallet error:', error);
+                console.error("Remove wallet error:", error);
               } finally {
                 setIsRemovingWallet(false);
               }
@@ -361,21 +445,21 @@ export function Profile() {
             <div className="flex items-center gap-3">
               <Trash2 className="w-5 h-5 text-[#FF4757]" />
               <span className="font-medium text-[#FF4757]">
-                {isRemovingWallet ? 'Removing...' : 'Remove Wallet'}
+                {isRemovingWallet ? "Removing..." : "Remove Wallet"}
               </span>
             </div>
           </Card>
         )}
 
-        <Button 
-          variant="outline" 
+        <Button
+          variant="outline"
           className="w-full h-10 text-[#FF4757] hover:bg-[#FF4757]/10"
           onClick={async () => {
             try {
               await signOut();
-              navigate('/');
+              navigate("/");
             } catch (error) {
-              console.error('Sign out error:', error);
+              console.error("Sign out error:", error);
             }
           }}
           disabled={loading}

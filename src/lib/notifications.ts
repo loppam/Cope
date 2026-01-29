@@ -9,20 +9,20 @@ import {
   orderBy,
   limit,
   serverTimestamp,
-} from 'firebase/firestore';
-import { auth, db } from './firebase';
-import { requestFirebaseMessagingToken } from './firebase';
-import { toast } from 'sonner';
+} from "firebase/firestore";
+import { auth, db } from "./firebase";
+import { requestFirebaseMessagingToken } from "./firebase";
+import { toast } from "sonner";
 
-const PUSH_TOKEN_KEY = 'cope_push_token';
-const PUSH_REGISTER_URL = '/api/push/register';
-const PUSH_STATUS_URL = '/api/push/status';
+const PUSH_TOKEN_KEY = "cope_push_token";
+const PUSH_REGISTER_URL = "/api/push/register";
+const PUSH_STATUS_URL = "/api/push/status";
 
 export interface WalletNotification {
   id: string;
   userId: string;
   walletAddress: string;
-  type: 'transaction' | 'large_trade' | 'token_swap';
+  type: "transaction" | "large_trade" | "token_swap";
   title: string;
   message: string;
   txHash?: string;
@@ -44,62 +44,99 @@ async function getIdToken(): Promise<string | null> {
 async function sendAuthRequest(method: string, body?: Record<string, any>) {
   const idToken = await getIdToken();
   if (!idToken) {
-    throw new Error('User not authenticated');
+    throw new Error("User not authenticated");
   }
 
   return fetch(PUSH_REGISTER_URL, {
     method,
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       Authorization: `Bearer ${idToken}`,
     },
     body: body ? JSON.stringify(body) : undefined,
   });
 }
 
-export async function requestPermissionAndGetFcmToken(): Promise<string | null> {
-  if (typeof Notification === 'undefined') {
+export async function requestPermissionAndGetFcmToken(): Promise<
+  string | null
+> {
+  if (typeof Notification === "undefined") {
+    console.warn("[Notifications] Notification API not available");
     return null;
   }
 
-  if (Notification.permission === 'denied') {
+  if (Notification.permission === "denied") {
+    console.warn("[Notifications] Notification permission denied by user");
     return null;
   }
 
-  if (Notification.permission !== 'granted') {
+  if (Notification.permission !== "granted") {
     const permission = await Notification.requestPermission();
-    if (permission !== 'granted') {
+    if (permission !== "granted") {
+      console.warn("[Notifications] User denied notification permission");
       return null;
     }
   }
 
-  return await requestFirebaseMessagingToken();
+  try {
+    const token = await requestFirebaseMessagingToken();
+    if (!token) {
+      // Token request failed - could be unsupported browser (e.g., Safari)
+      // This is not an error, just not supported
+      console.info(
+        "[Notifications] Push notifications not supported on this browser",
+      );
+    }
+    return token;
+  } catch (error: any) {
+    // Handle errors gracefully - don't show error toast for unsupported browsers
+    const errorCode = error?.code || "";
+    const errorMessage = error?.message || "";
+
+    if (
+      errorCode === "messaging/unsupported-browser" ||
+      errorMessage.includes("unsupported") ||
+      errorMessage.includes("not supported")
+    ) {
+      console.info(
+        "[Notifications] Push notifications not supported:",
+        errorMessage,
+      );
+      return null;
+    }
+
+    console.error("[Notifications] Error requesting FCM token:", error);
+    throw error; // Re-throw unexpected errors
+  }
 }
 
 export function getStoredPushToken(): string | null {
-  if (typeof window === 'undefined') return null;
+  if (typeof window === "undefined") return null;
   return localStorage.getItem(PUSH_TOKEN_KEY);
 }
 
 function setStoredPushToken(token: string) {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
   localStorage.setItem(PUSH_TOKEN_KEY, token);
 }
 
 function clearStoredPushToken() {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
   localStorage.removeItem(PUSH_TOKEN_KEY);
 }
 
-export async function savePushToken(token: string, platform: string = 'web'): Promise<void> {
+export async function savePushToken(
+  token: string,
+  platform: string = "web",
+): Promise<void> {
   if (!token) return;
-  await sendAuthRequest('POST', { token, platform });
+  await sendAuthRequest("POST", { token, platform });
   setStoredPushToken(token);
 }
 
 export async function unregisterPushToken(token: string): Promise<void> {
   if (!token) return;
-  await sendAuthRequest('DELETE', { token });
+  await sendAuthRequest("DELETE", { token });
   clearStoredPushToken();
 }
 
@@ -108,7 +145,7 @@ export async function getPushNotificationStatus(): Promise<{
   permission: NotificationPermission;
 }> {
   const permission =
-    typeof Notification !== 'undefined' ? Notification.permission : 'denied';
+    typeof Notification !== "undefined" ? Notification.permission : "denied";
 
   try {
     const idToken = await getIdToken();
@@ -126,7 +163,7 @@ export async function getPushNotificationStatus(): Promise<{
     const data = await response.json();
     return { enabled: data.enabled, permission };
   } catch (error) {
-    console.error('Error getting push notification status:', error);
+    console.error("Error getting push notification status:", error);
     return {
       enabled: !!getStoredPushToken(),
       permission,
@@ -134,7 +171,9 @@ export async function getPushNotificationStatus(): Promise<{
   }
 }
 
-export async function refreshPushToken(platform: string = 'web'): Promise<void> {
+export async function refreshPushToken(
+  platform: string = "web",
+): Promise<void> {
   const token = getStoredPushToken();
   if (!token) return;
   await savePushToken(token, platform);
@@ -147,17 +186,17 @@ export async function createNotification(
   userId: string,
   walletAddress: string,
   notification: {
-    type: 'transaction' | 'large_trade' | 'token_swap';
+    type: "transaction" | "large_trade" | "token_swap";
     title: string;
     message: string;
     txHash?: string;
     tokenAddress?: string;
     amount?: number;
     amountUsd?: number;
-  }
+  },
 ): Promise<void> {
   try {
-    const notificationRef = doc(collection(db, 'notifications'));
+    const notificationRef = doc(collection(db, "notifications"));
     await setDoc(notificationRef, {
       userId,
       walletAddress,
@@ -166,7 +205,7 @@ export async function createNotification(
       createdAt: serverTimestamp(),
     });
   } catch (error) {
-    console.error('Error creating notification:', error);
+    console.error("Error creating notification:", error);
     throw error;
   }
 }
@@ -176,15 +215,15 @@ export async function createNotification(
  */
 export async function getUserNotifications(
   userId: string,
-  limitCount: number = 50
+  limitCount: number = 50,
 ): Promise<WalletNotification[]> {
   try {
-    const notificationsRef = collection(db, 'notifications');
+    const notificationsRef = collection(db, "notifications");
     const q = query(
       notificationsRef,
-      where('userId', '==', userId),
-      orderBy('createdAt', 'desc'),
-      limit(limitCount)
+      where("userId", "==", userId),
+      orderBy("createdAt", "desc"),
+      limit(limitCount),
     );
 
     const snapshot = await getDocs(q);
@@ -200,13 +239,13 @@ export async function getUserNotifications(
 
     return notifications;
   } catch (error: any) {
-    if (error.code === 'failed-precondition') {
+    if (error.code === "failed-precondition") {
       try {
-        const notificationsRef = collection(db, 'notifications');
+        const notificationsRef = collection(db, "notifications");
         const q = query(
           notificationsRef,
-          where('userId', '==', userId),
-          limit(limitCount)
+          where("userId", "==", userId),
+          limit(limitCount),
         );
         const snapshot = await getDocs(q);
         const notifications = snapshot.docs
@@ -221,11 +260,11 @@ export async function getUserNotifications(
           return bTime - aTime;
         });
       } catch (fallbackError) {
-        console.error('Error getting notifications (fallback):', fallbackError);
+        console.error("Error getting notifications (fallback):", fallbackError);
         return [];
       }
     }
-    console.error('Error getting notifications:', error);
+    console.error("Error getting notifications:", error);
     return [];
   }
 }
@@ -233,16 +272,14 @@ export async function getUserNotifications(
 /**
  * Mark notification as read
  */
-export async function markNotificationAsRead(notificationId: string): Promise<void> {
+export async function markNotificationAsRead(
+  notificationId: string,
+): Promise<void> {
   try {
-    const notificationRef = doc(db, 'notifications', notificationId);
-    await setDoc(
-      notificationRef,
-      { read: true },
-      { merge: true }
-    );
+    const notificationRef = doc(db, "notifications", notificationId);
+    await setDoc(notificationRef, { read: true }, { merge: true });
   } catch (error) {
-    console.error('Error marking notification as read:', error);
+    console.error("Error marking notification as read:", error);
     throw error;
   }
 }
@@ -250,23 +287,25 @@ export async function markNotificationAsRead(notificationId: string): Promise<vo
 /**
  * Mark all notifications as read for a user
  */
-export async function markAllNotificationsAsRead(userId: string): Promise<void> {
+export async function markAllNotificationsAsRead(
+  userId: string,
+): Promise<void> {
   try {
-    const notificationsRef = collection(db, 'notifications');
+    const notificationsRef = collection(db, "notifications");
     const q = query(
       notificationsRef,
-      where('userId', '==', userId),
-      where('read', '==', false)
+      where("userId", "==", userId),
+      where("read", "==", false),
     );
-    
+
     const snapshot = await getDocs(q);
-    const batch = snapshot.docs.map(doc => 
-      setDoc(doc.ref, { read: true }, { merge: true })
+    const batch = snapshot.docs.map((doc) =>
+      setDoc(doc.ref, { read: true }, { merge: true }),
     );
-    
+
     await Promise.all(batch);
   } catch (error) {
-    console.error('Error marking all notifications as read:', error);
+    console.error("Error marking all notifications as read:", error);
     throw error;
   }
 }
@@ -274,12 +313,14 @@ export async function markAllNotificationsAsRead(userId: string): Promise<void> 
 /**
  * Delete a notification
  */
-export async function deleteNotification(notificationId: string): Promise<void> {
+export async function deleteNotification(
+  notificationId: string,
+): Promise<void> {
   try {
-    const notificationRef = doc(db, 'notifications', notificationId);
+    const notificationRef = doc(db, "notifications", notificationId);
     await setDoc(notificationRef, { deleted: true }, { merge: true });
   } catch (error) {
-    console.error('Error deleting notification:', error);
+    console.error("Error deleting notification:", error);
     throw error;
   }
 }
@@ -287,19 +328,21 @@ export async function deleteNotification(notificationId: string): Promise<void> 
 /**
  * Get unread notification count for a user
  */
-export async function getUnreadNotificationCount(userId: string): Promise<number> {
+export async function getUnreadNotificationCount(
+  userId: string,
+): Promise<number> {
   try {
-    const notificationsRef = collection(db, 'notifications');
+    const notificationsRef = collection(db, "notifications");
     const q = query(
       notificationsRef,
-      where('userId', '==', userId),
-      where('read', '==', false)
+      where("userId", "==", userId),
+      where("read", "==", false),
     );
-    
+
     const snapshot = await getDocs(q);
     return snapshot.size;
   } catch (error) {
-    console.error('Error getting unread notification count:', error);
+    console.error("Error getting unread notification count:", error);
     return 0;
   }
 }

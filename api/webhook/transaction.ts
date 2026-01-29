@@ -351,10 +351,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const transactions = Array.isArray(payload) ? payload : [payload];
 
     for (const tx of transactions) {
-      // Only process BUY and SELL (enhanced webhook types)
+      // Only process BUY, SELL, SWAP (enhanced webhook types)
       const isBuy = tx.type === "BUY";
       const isSell = tx.type === "SELL";
-      if (!isBuy && !isSell) continue;
+      const isSwap = tx.type === "SWAP";
+      if (!isBuy && !isSell && !isSwap) continue;
 
       // Extract wallet addresses from the transaction
       const walletAddresses = new Set<string>();

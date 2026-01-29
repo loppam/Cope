@@ -5,6 +5,9 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const HELIUS_API_URL = "https://api-mainnet.helius-rpc.com/v0/webhooks";
 
+/** Transaction types we subscribe to: BUY, SELL, SWAP only. */
+const WEBHOOK_TRANSACTION_TYPES = ["BUY", "SELL", "SWAP"] as const;
+
 /**
  * Create or update a Helius webhook for monitoring wallet addresses
  */

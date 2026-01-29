@@ -43,6 +43,9 @@ const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const HELIUS_API_URL = "https://api-mainnet.helius-rpc.com/v0/webhooks";
 const WEBHOOK_ID = process.env.HELIUS_WEBHOOK_ID; // Store this in .env after creating first webhook
 
+/** Transaction types we subscribe to: BUY, SELL, SWAP only. */
+const WEBHOOK_TRANSACTION_TYPES = ["BUY", "SELL", "SWAP"] as const;
+
 /**
  * Sync all watched wallets across all users to Helius webhook
  * This aggregates all unique wallet addresses from all user watchlists

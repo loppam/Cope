@@ -119,21 +119,6 @@ export function ConnectX() {
           </div>
 
           <div className="space-y-4">
-            {/* Show loading state while checking auth */}
-            {loading && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.2 }}
-                className="flex flex-col items-center justify-center py-8"
-              >
-                <Loader2 className="w-8 h-8 mb-4 animate-spin text-[#12d585]" />
-                <p className="text-white/60 text-sm">
-                  Checking authentication...
-                </p>
-              </motion.div>
-            )}
-
             {/* Show user profile card if authenticated */}
             {!loading && userProfile && (
               <motion.div
@@ -202,11 +187,15 @@ export function ConnectX() {
               <Button
                 onClick={handleTwitterSignIn}
                 className="w-full h-14"
-                isLoading={isLoading}
-                disabled={isLoading}
+                isLoading={isLoading || loading}
+                disabled={loading || isLoading}
               >
-                <Twitter className="w-5 h-5" />
-                Connect with X
+                {loading ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <Twitter className="w-5 h-5" />
+                )}
+                {loading ? "Checking..." : "Connect with X"}
               </Button>
             )}
 

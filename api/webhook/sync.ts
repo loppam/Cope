@@ -52,7 +52,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Optional: Add authentication/authorization here
   const authHeader = req.headers.authorization;
   if (
     process.env.WEBHOOK_SYNC_SECRET &&
@@ -63,11 +62,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     if (!HELIUS_API_KEY) {
+      console.error("[webhook/sync] HELIUS_API_KEY not set");
       return res.status(500).json({ error: "HELIUS_API_KEY not configured" });
     }
 
     // Get all users with watchlists
-    const usersSnapshot = await db.collection("users").get();
+    let usersSnapshot;
+    try {
+      usersSnapshot = await db.collection("users").get();
+    } catch (dbError: any) {
+      console.error(
+        "[webhook/sync] Firestore error:",
+        dbError?.message || dbError,
+      );
+      return res.status(500).json({
+        error: "Firestore error",
+        message: dbError?.message || "Failed to read users",
+      });
+    }
     const allWatchedWallets = new Set<string>();
 
     usersSnapshot.docs.forEach((doc) => {
@@ -170,9 +182,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       message: "Add webhookId to HELIUS_WEBHOOK_ID in .env",
     });
   } catch (error: any) {
-    console.error("Webhook sync error:", error);
-    return res
-      .status(500)
-      .json({ error: error.message || "Internal server error" });
+    const message = error?.message || String(error);
+    console.error("[webhook/sync] Error:", message, error?.stack);
+    return res.status(500).json({
+      error: "Webhook sync failed",
+      message,
+    });
   }
 }

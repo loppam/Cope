@@ -226,15 +226,25 @@ export async function handleRedirectResult(): Promise<User | null> {
         );
         // Ensure profile exists (it might not have been saved if redirect was missed)
         try {
-          const profile = await getUserProfile(currentUser.uid);
+          let profile = await getUserProfile(currentUser.uid);
           if (!profile) {
             console.log("[Auth] Profile missing, creating it now...");
             // Create a basic credential-like object for saveUserProfile
             await saveUserProfile(currentUser, { providerId: "twitter.com" });
+            // Fetch the newly created profile
+            profile = await getUserProfile(currentUser.uid);
+            console.log("[Auth] Profile created and fetched:", profile);
+          } else {
+            console.log("[Auth] Profile found in fallback:", {
+              walletAddress: profile.walletAddress,
+              isNew: profile.isNew,
+            });
           }
           return currentUser;
         } catch (error) {
           console.error("[Auth] Error checking/creating profile:", error);
+          // Still return user even if profile fetch fails - onAuthStateChange will handle it
+          return currentUser;
         }
       }
     }

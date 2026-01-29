@@ -76,6 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // This is critical for mobile OAuth redirects in browsers
       // On mobile browsers, the redirect happens in the same tab/window,
       // so we need to check for redirect results immediately on page load
+      let redirectHandled = false;
       try {
         const redirectUser = await handleRedirectResult();
         if (redirectUser) {
@@ -83,7 +84,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             "[AuthContext] Redirect user authenticated:",
             redirectUser.uid,
           );
-          toast.success("Successfully signed in with Twitter");
+          redirectHandled = true;
+
+          // Immediately fetch and set profile after redirect
+          // This ensures the profile is available even if onAuthStateChange hasn't fired yet
+          try {
+            const profile = await getUserProfile(redirectUser.uid);
+            console.log(
+              "[AuthContext] Profile fetched after redirect:",
+              profile,
+            );
+            setUserProfile(profile);
+            setUser(redirectUser);
+
+            // Load watchlist
+            const userWatchlist = await getWatchlist(redirectUser.uid);
+            setWatchlist(userWatchlist);
+
+            setLoading(false);
+            toast.success("Successfully signed in with Twitter");
+          } catch (profileError) {
+            console.error(
+              "[AuthContext] Error fetching profile after redirect:",
+              profileError,
+            );
+            // Continue - onAuthStateChange will handle it
+          }
         } else {
           console.log(
             "[AuthContext] No redirect result (normal if not returning from OAuth)",
@@ -102,12 +128,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       // Step 2: Now set up auth state listener after redirect is handled
+      // This will handle cases where redirect wasn't detected or for subsequent auth changes
       unsubscribe = onAuthStateChange(async (currentUser) => {
+        console.log("[AuthContext] Auth state changed:", {
+          hasUser: !!currentUser,
+          uid: currentUser?.uid,
+          redirectHandled,
+        });
+
         setUser(currentUser);
 
         if (currentUser) {
           // Fetch user profile from Firestore
           const profile = await getUserProfile(currentUser.uid);
+          console.log("[AuthContext] Profile fetched from onAuthStateChange:", {
+            hasProfile: !!profile,
+            walletAddress: profile?.walletAddress,
+            isNew: profile?.isNew,
+          });
 
           // For existing users without isNew field: set it based on walletAddress
           // If they have a walletAddress, they're not new

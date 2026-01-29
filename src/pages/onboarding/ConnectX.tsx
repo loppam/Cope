@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
@@ -9,8 +9,35 @@ import { toast } from "sonner";
 
 export function ConnectX() {
   const navigate = useNavigate();
-  const { signInWithTwitter, userProfile, loading } = useAuth();
+  const { signInWithTwitter, userProfile, loading, user, refreshProfile } =
+    useAuth();
   const [isLoading, setIsLoading] = useState(false);
+
+  // Debug logging and profile refresh for mobile authentication
+  useEffect(() => {
+    console.log("[ConnectX] Auth state:", {
+      loading,
+      hasUser: !!user,
+      hasProfile: !!userProfile,
+      userId: user?.uid,
+      profileWallet: userProfile?.walletAddress,
+      profileIsNew: userProfile?.isNew,
+      url: window.location.href,
+      searchParams: window.location.search,
+      hash: window.location.hash,
+    });
+
+    // If user exists but profile is missing, try to refresh it
+    // This can happen on mobile if redirect was successful but profile wasn't loaded
+    if (!loading && user && !userProfile) {
+      console.log(
+        "[ConnectX] User exists but profile missing, attempting to refresh...",
+      );
+      refreshProfile().catch((error) => {
+        console.error("[ConnectX] Error refreshing profile:", error);
+      });
+    }
+  }, [loading, user, userProfile, refreshProfile]);
 
   const handleTwitterSignIn = async () => {
     try {

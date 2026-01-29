@@ -232,47 +232,96 @@ interface HeliusWebhookPayload {
     tokenBalanceChanges?: Array<{
       mint: string;
       rawTokenAmount: {
+        decimals?: number;
         tokenAmount: string;
       };
       tokenAccount: string;
+      userAccount?: string;
     }>;
   }>;
-  description: string;
+  description?: string;
   fee: number;
   feePayer: string;
-  instructions: Array<any>;
-  nativeTransfers: Array<{
+  instructions?: Array<any>;
+  nativeTransfers?: Array<{
     amount: number;
     fromUserAccount: string;
     toUserAccount: string;
   }>;
   signature: string;
   slot: number;
-  source: string;
+  source?: string;
   timestamp: number;
-  tokenTransfers: Array<{
+  tokenTransfers?: Array<{
     fromTokenAccount?: string;
     fromUserAccount?: string;
     mint: string;
     toTokenAccount?: string;
     toUserAccount?: string;
     tokenAmount: number;
-    tokenStandard: string;
+    tokenStandard?: string;
   }>;
-  type: string;
-  webhookId?: string; // Optional; not in all Helius enhanced payload docs
+  type: string; // "BUY" | "SELL" in enhanced payload
+  webhookId?: string;
+  events?: {
+    swap?: {
+      tokenInputs: Array<{ mint: string; amount: string }>;
+      tokenOutputs: Array<{ mint: string; amount: string }>;
+    };
+  };
+}
+
+/**
+ * Primary token from enhanced payload:
+ * BUY = token received (tokenOutputs, non-wSOL); SELL = token sold (tokenInputs, non-wSOL);
+ * SWAP = first non-wSOL from tokenOutputs or tokenInputs.
+ */
+function getPrimaryTokenFromEvents(
+  tx: HeliusWebhookPayload,
+): string | undefined {
+  const swap = tx.events?.swap;
+  if (!swap) return undefined;
+  if (tx.type === "BUY") {
+    const nonWsol = (swap.tokenOutputs || []).filter(
+      (t) => t.mint !== WRAPPED_SOL_MINT,
+    );
+    return nonWsol[0]?.mint ?? swap.tokenOutputs?.[0]?.mint;
+  }
+  if (tx.type === "SELL") {
+    const nonWsol = (swap.tokenInputs || []).filter(
+      (t) => t.mint !== WRAPPED_SOL_MINT,
+    );
+    return nonWsol[0]?.mint ?? swap.tokenInputs?.[0]?.mint;
+  }
+  if (tx.type === "SWAP") {
+    const fromOutputs = (swap.tokenOutputs || []).filter(
+      (t) => t.mint !== WRAPPED_SOL_MINT,
+    );
+    if (fromOutputs[0]) return fromOutputs[0].mint;
+    const fromInputs = (swap.tokenInputs || []).filter(
+      (t) => t.mint !== WRAPPED_SOL_MINT,
+    );
+    return (
+      fromInputs[0]?.mint ??
+      swap.tokenInputs?.[0]?.mint ??
+      swap.tokenOutputs?.[0]?.mint
+    );
+  }
+  return undefined;
 }
 
 /**
  * Pick the primary token for the notification (non–wrapped-SOL first, then by amount).
- * Swaps often list wSOL first; we want the actual token in the alert/deep link.
+ * Uses events.swap for BUY/SELL when present; else falls back to tokenTransfers.
  */
 function getPrimaryTokenMint(tx: HeliusWebhookPayload): string | undefined {
+  const fromEvents = getPrimaryTokenFromEvents(tx);
+  if (fromEvents) return fromEvents;
+
   const tokenTransfers = tx.tokenTransfers || [];
   const nonWsol = tokenTransfers.filter((t) => t.mint !== WRAPPED_SOL_MINT);
   const candidates = nonWsol.length > 0 ? nonWsol : tokenTransfers;
   if (candidates.length === 0) return undefined;
-  // Prefer largest tokenAmount so the "main" token of the swap is shown
   const byAmount = [...candidates].sort(
     (a, b) => Math.abs(b.tokenAmount || 0) - Math.abs(a.tokenAmount || 0),
   );
@@ -302,27 +351,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const transactions = Array.isArray(payload) ? payload : [payload];
 
     for (const tx of transactions) {
+      // Only process BUY and SELL (enhanced webhook types)
+      const isBuy = tx.type === "BUY";
+      const isSell = tx.type === "SELL";
+      if (!isBuy && !isSell) continue;
+
       // Extract wallet addresses from the transaction
       const walletAddresses = new Set<string>();
 
-      // Add fee payer
-      if (tx.feePayer) {
-        walletAddresses.add(tx.feePayer);
+      if (tx.feePayer) walletAddresses.add(tx.feePayer);
+
+      tx.nativeTransfers?.forEach((t) => {
+        walletAddresses.add(t.fromUserAccount);
+        walletAddresses.add(t.toUserAccount);
+      });
+
+      tx.tokenTransfers?.forEach((t) => {
+        if (t.fromUserAccount) walletAddresses.add(t.fromUserAccount);
+        if (t.toUserAccount) walletAddresses.add(t.toUserAccount);
+      });
+
+      // Enhanced BUY/SELL/SWAP: accountData contains wallet accounts involved
+      if (isBuy || isSell || isSwap) {
+        tx.accountData?.forEach((acc) => {
+          walletAddresses.add(acc.account);
+          acc.tokenBalanceChanges?.forEach((tc) => {
+            if ((tc as any).userAccount)
+              walletAddresses.add((tc as any).userAccount);
+          });
+        });
       }
-
-      // Add native transfer participants
-      tx.nativeTransfers?.forEach((transfer) => {
-        walletAddresses.add(transfer.fromUserAccount);
-        walletAddresses.add(transfer.toUserAccount);
-      });
-
-      // Add token transfer participants
-      tx.tokenTransfers?.forEach((transfer) => {
-        if (transfer.fromUserAccount)
-          walletAddresses.add(transfer.fromUserAccount);
-        if (transfer.toUserAccount) walletAddresses.add(transfer.toUserAccount);
-      });
-      // Omit accountData – often token/account addresses, not owners; reduces duplicate notifications
 
       // Compute price/symbol once per tx (reduces SolanaTracker API calls and 429 rate limits).
       // Note: Helius sends one webhook POST per transaction; each POST runs in a separate
@@ -350,12 +408,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         amountUsd += solAmount * solPrice;
       }
 
-      const isLargeTrade = amountUsd > 10000;
-      const notificationType = isLargeTrade
-        ? "large_trade"
-        : hasTokenTransfer
-          ? "token_swap"
-          : "transaction";
+      const notificationType = isBuy
+        ? "buy"
+        : isSell
+          ? "sell"
+          : isSwap
+            ? "swap"
+            : "transaction";
 
       const tokenAddress = getPrimaryTokenMint(tx) ?? undefined;
       const primaryTransfer = hasTokenTransfer
@@ -441,32 +500,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (!alreadyNotified) notifiedUserIds.add(userId);
 
           if (!alreadyNotified) {
-            // One notification per user per transaction (price/symbol already computed once per tx)
-            // Buy vs sell: watched wallet received token -> buy, sent -> sell
-            const isBuy =
-              hasTokenTransfer &&
-              primaryTransfer &&
-              primaryTransfer.toUserAccount === walletAddress;
-            const isSell =
-              hasTokenTransfer &&
-              primaryTransfer &&
-              primaryTransfer.fromUserAccount === walletAddress;
-
+            // BUY/SELL from enhanced webhook; title/message from tx.type
             const displayName =
               nickname ||
               `Wallet ${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`;
 
             let notificationTitle: string;
             let notificationMessage: string;
-            if (hasTokenTransfer && (isBuy || isSell)) {
-              notificationTitle = isBuy
-                ? "Buy Transaction"
-                : "Sell Transaction";
-              notificationMessage = isBuy
-                ? `${displayName} bought ${amountUsdFormatted} of ${tokenSymbol}`
-                : `${displayName} sold ${amountUsdFormatted} of ${tokenSymbol}`;
-            } else if (hasTokenTransfer) {
-              notificationTitle = "Token Swap";
+            if (isBuy) {
+              notificationTitle = "Buy Transaction";
+              notificationMessage = `${displayName} bought ${amountUsdFormatted} of ${tokenSymbol}`;
+            } else if (isSell) {
+              notificationTitle = "Sell Transaction";
+              notificationMessage = `${displayName} sold ${amountUsdFormatted} of ${tokenSymbol}`;
+            } else if (isSwap) {
+              notificationTitle = "Swap Transaction";
               notificationMessage = `${displayName} swapped ${amountUsdFormatted} (${tokenSymbol})`;
             } else {
               notificationTitle = "Transaction";

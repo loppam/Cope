@@ -103,6 +103,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await watchedRef.set({ watchers: existingWatchers }, { merge: true });
     }
 
+    // Update Helius webhook so this address is removed (even if client doesn't call sync)
+    const syncSecret = process.env.WEBHOOK_SYNC_SECRET;
+    const base = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : req.headers.origin || "";
+    if (syncSecret && base) {
+      fetch(`${base}/api/webhook/sync`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${syncSecret}`,
+          "Content-Type": "application/json",
+        },
+      }).catch((err) =>
+        console.error("[watchlist/remove] webhook sync failed:", err),
+      );
+    }
+
     return res
       .status(200)
       .json({ success: true, watchlist: filteredWatchlist });

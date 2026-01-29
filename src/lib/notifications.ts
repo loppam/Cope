@@ -32,7 +32,7 @@ export interface WalletNotification {
   id: string;
   userId: string;
   walletAddress: string;
-  type: "transaction" | "large_trade" | "token_swap";
+  type: "transaction" | "buy" | "sell" | "swap";
   title: string;
   message: string;
   txHash?: string;
@@ -338,7 +338,7 @@ export async function createNotification(
   userId: string,
   walletAddress: string,
   notification: {
-    type: "transaction" | "large_trade" | "token_swap";
+    type: "transaction" | "buy" | "sell" | "swap";
     title: string;
     message: string;
     txHash?: string;

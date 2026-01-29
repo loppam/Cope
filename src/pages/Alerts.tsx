@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
-import { Card } from '@/components/Card';
-import { Button } from '@/components/Button';
-import { Bell, ExternalLink, Check, Trash2, Filter, Copy } from 'lucide-react';
-import { useNavigate } from 'react-router';
-import { shortenAddress } from '@/lib/utils';
-import { useAuth } from '@/contexts/AuthContext';
+import { useEffect, useState } from "react";
+import { Card } from "@/components/Card";
+import { Button } from "@/components/Button";
+import { Bell, ExternalLink, Check, Trash2, Filter, Copy } from "lucide-react";
+import { useNavigate } from "react-router";
+import { shortenAddress } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   getUserNotifications,
   markNotificationAsRead,
@@ -15,10 +15,17 @@ import {
   requestPermissionAndGetFcmToken,
   savePushToken,
   getPushNotificationStatus,
-} from '@/lib/notifications';
-import { collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { toast } from 'sonner';
+} from "@/lib/notifications";
+import {
+  collection,
+  query,
+  where,
+  orderBy,
+  limit,
+  onSnapshot,
+} from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { toast } from "sonner";
 
 export function Alerts() {
   const navigate = useNavigate();
@@ -27,7 +34,9 @@ export function Alerts() {
   const [loading, setLoading] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
   const [pushEnabled, setPushEnabled] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'unread' | 'large_trade' | 'token_swap'>('all');
+  const [filter, setFilter] = useState<
+    "all" | "unread" | "buy" | "sell" | "swap"
+  >("all");
 
   // Real-time listener for notifications
   useEffect(() => {
@@ -37,85 +46,89 @@ export function Alerts() {
     }
 
     // Set up real-time listener
-    const notificationsRef = collection(db, 'notifications');
+    const notificationsRef = collection(db, "notifications");
     const q = query(
       notificationsRef,
-      where('userId', '==', user.uid),
-      orderBy('createdAt', 'desc'),
-      limit(100)
+      where("userId", "==", user.uid),
+      orderBy("createdAt", "desc"),
+      limit(100),
     );
 
     let unsubscribe: (() => void) | null = null;
-    
+
     try {
-      unsubscribe = onSnapshot(q, (snapshot) => {
-        const fetchedNotifications = snapshot.docs
-          .map(doc => {
-            const data = doc.data();
-            return {
-              id: doc.id,
-              ...data,
-            } as WalletNotification;
-          })
-          .filter((n: any) => !n.deleted)
-          .sort((a: any, b: any) => {
-            const aTime = a.createdAt?.toDate?.()?.getTime() || 0;
-            const bTime = b.createdAt?.toDate?.()?.getTime() || 0;
-            return bTime - aTime;
-          });
-        
-        setNotifications(fetchedNotifications);
-        
-        // Update unread count
-        const unread = fetchedNotifications.filter((n: any) => !n.read);
-        setUnreadCount(unread.length);
-        
-        setLoading(false);
-      }, (error: any) => {
-        // If index doesn't exist, try without orderBy
-        if (error.code === 'failed-precondition') {
-          const fallbackQ = query(
-            notificationsRef,
-            where('userId', '==', user.uid),
-            limit(100)
-          );
-          
-          unsubscribe = onSnapshot(fallbackQ, (snapshot) => {
-            const fetchedNotifications = snapshot.docs
-              .map(doc => {
-                const data = doc.data();
-                return {
-                  id: doc.id,
-                  ...data,
-                } as WalletNotification;
-              })
-              .filter((n: any) => !n.deleted)
-              .sort((a: any, b: any) => {
-                const aTime = a.createdAt?.toDate?.()?.getTime() || 0;
-                const bTime = b.createdAt?.toDate?.()?.getTime() || 0;
-                return bTime - aTime;
-              });
-            
-            setNotifications(fetchedNotifications);
-            
-            const unread = fetchedNotifications.filter((n: any) => !n.read);
-            setUnreadCount(unread.length);
-            
-            setLoading(false);
-          });
-        } else {
-          console.error('Error fetching notifications:', error);
+      unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          const fetchedNotifications = snapshot.docs
+            .map((doc) => {
+              const data = doc.data();
+              return {
+                id: doc.id,
+                ...data,
+              } as WalletNotification;
+            })
+            .filter((n: any) => !n.deleted)
+            .sort((a: any, b: any) => {
+              const aTime = a.createdAt?.toDate?.()?.getTime() || 0;
+              const bTime = b.createdAt?.toDate?.()?.getTime() || 0;
+              return bTime - aTime;
+            });
+
+          setNotifications(fetchedNotifications);
+
+          // Update unread count
+          const unread = fetchedNotifications.filter((n: any) => !n.read);
+          setUnreadCount(unread.length);
+
           setLoading(false);
-        }
-      });
+        },
+        (error: any) => {
+          // If index doesn't exist, try without orderBy
+          if (error.code === "failed-precondition") {
+            const fallbackQ = query(
+              notificationsRef,
+              where("userId", "==", user.uid),
+              limit(100),
+            );
+
+            unsubscribe = onSnapshot(fallbackQ, (snapshot) => {
+              const fetchedNotifications = snapshot.docs
+                .map((doc) => {
+                  const data = doc.data();
+                  return {
+                    id: doc.id,
+                    ...data,
+                  } as WalletNotification;
+                })
+                .filter((n: any) => !n.deleted)
+                .sort((a: any, b: any) => {
+                  const aTime = a.createdAt?.toDate?.()?.getTime() || 0;
+                  const bTime = b.createdAt?.toDate?.()?.getTime() || 0;
+                  return bTime - aTime;
+                });
+
+              setNotifications(fetchedNotifications);
+
+              const unread = fetchedNotifications.filter((n: any) => !n.read);
+              setUnreadCount(unread.length);
+
+              setLoading(false);
+            });
+          } else {
+            console.error("Error fetching notifications:", error);
+            setLoading(false);
+          }
+        },
+      );
     } catch (error) {
-      console.error('Error setting up notification listener:', error);
+      console.error("Error setting up notification listener:", error);
       setLoading(false);
     }
 
     // Check push notification status
-    getPushNotificationStatus(user.uid).then(status => {
-      setPushEnabled(status.enabled && status.permission === 'granted');
+    getPushNotificationStatus(user.uid).then((status) => {
+      setPushEnabled(status.enabled && status.permission === "granted");
     });
 
     return () => {
@@ -135,10 +148,10 @@ export function Alerts() {
         if (token) {
           await savePushToken(token);
           setPushEnabled(true);
-          toast.success('Push notifications enabled');
+          toast.success("Push notifications enabled");
         }
       } catch (error) {
-        console.error('Error setting up push notifications:', error);
+        console.error("Error setting up push notifications:", error);
       }
     };
 
@@ -152,12 +165,12 @@ export function Alerts() {
   const handleMarkAsRead = async (notificationId: string) => {
     try {
       await markNotificationAsRead(notificationId);
-      setNotifications(prev =>
-        prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n)),
       );
-      setUnreadCount(prev => Math.max(0, prev - 1));
+      setUnreadCount((prev) => Math.max(0, prev - 1));
     } catch (error) {
-      toast.error('Failed to mark notification as read');
+      toast.error("Failed to mark notification as read");
     }
   };
 
@@ -165,23 +178,23 @@ export function Alerts() {
     if (!user) return;
     try {
       await markAllNotificationsAsRead(user.uid);
-      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
       setUnreadCount(0);
-      toast.success('All notifications marked as read');
+      toast.success("All notifications marked as read");
     } catch (error) {
-      toast.error('Failed to mark all as read');
+      toast.error("Failed to mark all as read");
     }
   };
 
   const handleDelete = async (notificationId: string) => {
     try {
       await deleteNotification(notificationId);
-      setNotifications(prev => prev.filter(n => n.id !== notificationId));
-      if (!notifications.find(n => n.id === notificationId)?.read) {
-        setUnreadCount(prev => Math.max(0, prev - 1));
+      setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+      if (!notifications.find((n) => n.id === notificationId)?.read) {
+        setUnreadCount((prev) => Math.max(0, prev - 1));
       }
     } catch (error) {
-      toast.error('Failed to delete notification');
+      toast.error("Failed to delete notification");
     }
   };
 
@@ -197,8 +210,8 @@ export function Alerts() {
   };
 
   const formatTime = (timestamp: any) => {
-    if (!timestamp) return 'Just now';
-    
+    if (!timestamp) return "Just now";
+
     // Handle Firestore timestamp
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
     const now = new Date();
@@ -207,7 +220,7 @@ export function Alerts() {
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
 
-    if (diffMins < 1) return 'Just now';
+    if (diffMins < 1) return "Just now";
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays < 7) return `${diffDays}d ago`;
@@ -230,7 +243,7 @@ export function Alerts() {
           <Card className="text-center py-12">
             <Bell className="w-12 h-12 mx-auto mb-4 text-white/30" />
             <p className="text-white/60 mb-4">Please sign in to view alerts</p>
-            <Button onClick={() => window.location.href = '/auth/x-connect'}>
+            <Button onClick={() => (window.location.href = "/auth/x-connect")}>
               Sign In
             </Button>
           </Card>
@@ -240,15 +253,16 @@ export function Alerts() {
   }
 
   // Filter notifications based on selected filter
-  const filteredNotifications = notifications.filter(n => {
-    if (filter === 'unread') return !n.read;
-    if (filter === 'large_trade') return n.type === 'large_trade';
-    if (filter === 'token_swap') return n.type === 'token_swap';
+  const filteredNotifications = notifications.filter((n) => {
+    if (filter === "unread") return !n.read;
+    if (filter === "buy") return n.type === "buy";
+    if (filter === "sell") return n.type === "sell";
+    if (filter === "swap") return n.type === "swap";
     return true;
   });
 
-  const unreadNotifications = filteredNotifications.filter(n => !n.read);
-  const readNotifications = filteredNotifications.filter(n => n.read);
+  const unreadNotifications = filteredNotifications.filter((n) => !n.read);
+  const readNotifications = filteredNotifications.filter((n) => n.read);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E] p-4 sm:p-6">
@@ -258,7 +272,7 @@ export function Alerts() {
             <h1 className="text-2xl font-bold mb-2">Alerts</h1>
             {unreadCount > 0 && (
               <p className="text-white/60 text-sm">
-                {unreadCount} unread notification{unreadCount !== 1 ? 's' : ''}
+                {unreadCount} unread notification{unreadCount !== 1 ? "s" : ""}
               </p>
             )}
           </div>
@@ -276,18 +290,19 @@ export function Alerts() {
         {notifications.length > 0 && (
           <div className="mb-4 flex gap-2 overflow-x-auto pb-2">
             {[
-              { value: 'all', label: 'All' },
-              { value: 'unread', label: 'Unread' },
-              { value: 'large_trade', label: 'Large Trades' },
-              { value: 'token_swap', label: 'Token Swaps' },
+              { value: "all", label: "All" },
+              { value: "unread", label: "Unread" },
+              { value: "buy", label: "Buys" },
+              { value: "sell", label: "Sells" },
+              { value: "swap", label: "Swaps" },
             ].map((filterOption) => (
               <button
                 key={filterOption.value}
                 onClick={() => setFilter(filterOption.value as any)}
                 className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
                   filter === filterOption.value
-                    ? 'bg-accent-primary text-[#000000]'
-                    : 'bg-white/5 text-white/60 hover:bg-white/10'
+                    ? "bg-accent-primary text-[#000000]"
+                    : "bg-white/5 text-white/60 hover:bg-white/10"
                 }`}
               >
                 {filterOption.label}
@@ -301,12 +316,12 @@ export function Alerts() {
             <Bell className="w-12 h-12 mx-auto mb-4 text-white/30" />
             <h3 className="text-lg font-semibold mb-2">No Alerts Yet</h3>
             <p className="text-white/60 text-center max-w-sm mx-auto mb-6">
-              {filter === 'all' 
+              {filter === "all"
                 ? "You'll get notified when wallets you're COPEing make new trades"
-                : `No ${filter === 'unread' ? 'unread' : filter === 'large_trade' ? 'large trade' : 'token swap'} notifications`}
+                : `No ${filter === "unread" ? "unread" : filter === "buy" ? "buy" : filter === "sell" ? "sell" : "swap"} notifications`}
             </p>
-            {filter === 'all' && (
-              <Button onClick={() => window.location.href = '/scanner'}>
+            {filter === "all" && (
+              <Button onClick={() => (window.location.href = "/scanner")}>
                 Find Wallets to COPE
               </Button>
             )}
@@ -316,34 +331,42 @@ export function Alerts() {
             {/* Unread Notifications */}
             {unreadNotifications.length > 0 && (
               <div>
-                <h2 className="text-sm font-medium text-white/70 mb-3">Unread</h2>
+                <h2 className="text-sm font-medium text-white/70 mb-3">
+                  Unread
+                </h2>
                 <div className="space-y-2">
                   {unreadNotifications.map((notification) => (
                     <Card
                       key={notification.id}
                       className={`border-l-4 ${
-                        notification.type === 'large_trade'
-                          ? 'border-[#FFB84D]'
-                          : notification.type === 'token_swap'
-                          ? 'border-[#12d585]'
-                          : 'border-[#54A0FF]'
+                        notification.type === "buy"
+                          ? "border-[#12d585]"
+                          : notification.type === "sell"
+                            ? "border-[#FF6B6B]"
+                            : "border-[#54A0FF]"
                       }`}
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-1">
-                            <h3 className="font-semibold">{notification.title}</h3>
+                            <h3 className="font-semibold text-white">
+                              {notification.title}
+                            </h3>
                             {!notification.read && (
                               <span className="w-2 h-2 rounded-full bg-[#12d585]"></span>
                             )}
                           </div>
-                          <p className="text-sm text-white/70 mb-2">{notification.message}</p>
+                          <p className="text-sm text-white mb-2">
+                            {notification.message}
+                          </p>
                           <div className="flex items-center gap-4 text-xs text-white/50">
                             <code className="font-mono">
                               {shortenAddress(notification.walletAddress)}
                             </code>
                             {notification.amountUsd && (
-                              <span>{formatCurrency(notification.amountUsd)}</span>
+                              <span>
+                                {formatCurrency(notification.amountUsd)}
+                              </span>
                             )}
                             <span>{formatTime(notification.createdAt)}</span>
                           </div>
@@ -354,8 +377,8 @@ export function Alerts() {
                               variant="ghost"
                               size="sm"
                               onClick={() => {
-                                navigate('/app/trade', {
-                                  state: { 
+                                navigate("/app/trade", {
+                                  state: {
                                     mint: notification.tokenAddress,
                                     fromFeed: true,
                                   },
@@ -411,18 +434,30 @@ export function Alerts() {
                   {readNotifications.map((notification) => (
                     <Card
                       key={notification.id}
-                      className="opacity-60"
+                      className={`opacity-60 border-l-4 ${
+                        notification.type === "buy"
+                          ? "border-[#12d585]"
+                          : notification.type === "sell"
+                            ? "border-[#FF6B6B]"
+                            : "border-[#54A0FF]"
+                      }`}
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
-                          <h3 className="font-semibold mb-1">{notification.title}</h3>
-                          <p className="text-sm text-white/70 mb-2">{notification.message}</p>
+                          <h3 className="font-semibold mb-1 text-white">
+                            {notification.title}
+                          </h3>
+                          <p className="text-sm text-white mb-2">
+                            {notification.message}
+                          </p>
                           <div className="flex items-center gap-4 text-xs text-white/50">
                             <code className="font-mono">
                               {shortenAddress(notification.walletAddress)}
                             </code>
                             {notification.amountUsd && (
-                              <span>{formatCurrency(notification.amountUsd)}</span>
+                              <span>
+                                {formatCurrency(notification.amountUsd)}
+                              </span>
                             )}
                             <span>{formatTime(notification.createdAt)}</span>
                           </div>
@@ -433,8 +468,8 @@ export function Alerts() {
                               variant="ghost"
                               size="sm"
                               onClick={() => {
-                                navigate('/app/trade', {
-                                  state: { 
+                                navigate("/app/trade", {
+                                  state: {
                                     mint: notification.tokenAddress,
                                     fromFeed: true,
                                   },

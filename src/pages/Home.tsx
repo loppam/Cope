@@ -2,9 +2,26 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
-import { Search, ScanLine, TrendingUp, Copy, ExternalLink, Loader2, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import {
+  Search,
+  ScanLine,
+  TrendingUp,
+  Copy,
+  ExternalLink,
+  Loader2,
+  ArrowUpRight,
+  ArrowDownRight,
+} from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { collection, query, where, orderBy, limit, onSnapshot, Timestamp } from "firebase/firestore";
+import {
+  collection,
+  query,
+  where,
+  orderBy,
+  limit,
+  onSnapshot,
+  Timestamp,
+} from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { WalletNotification } from "@/lib/notifications";
 import { shortenAddress, formatCurrency } from "@/lib/utils";
@@ -24,73 +41,83 @@ export function Home() {
     }
 
     // Get watched wallet addresses
-    const watchedAddresses = watchlist.map(w => w.address);
-    
+    const watchedAddresses = watchlist.map((w) => w.address);
+
     if (watchedAddresses.length === 0) {
       setLoading(false);
       return;
     }
 
     // Set up real-time listener
-    const notificationsRef = collection(db, 'notifications');
+    const notificationsRef = collection(db, "notifications");
     const q = query(
       notificationsRef,
-      where('userId', '==', user.uid),
-      orderBy('createdAt', 'desc'),
-      limit(50)
+      where("userId", "==", user.uid),
+      orderBy("createdAt", "desc"),
+      limit(50),
     );
 
     // Try with orderBy first, fallback if index doesn't exist
     let unsubscribe: (() => void) | null = null;
-    
+
     try {
-      unsubscribe = onSnapshot(q, (snapshot) => {
-        const fetchedNotifications = snapshot.docs
-          .map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-          }))
-          .filter((n: any) => !n.deleted && watchedAddresses.includes(n.walletAddress))
-          .sort((a: any, b: any) => {
-            const aTime = a.createdAt?.toDate?.()?.getTime() || 0;
-            const bTime = b.createdAt?.toDate?.()?.getTime() || 0;
-            return bTime - aTime;
-          }) as WalletNotification[];
-        
-        setNotifications(fetchedNotifications);
-        setLoading(false);
-      }, (error: any) => {
-        // If index doesn't exist, try without orderBy
-        if (error.code === 'failed-precondition') {
-          const fallbackQ = query(
-            notificationsRef,
-            where('userId', '==', user.uid),
-            limit(50)
-          );
-          
-          unsubscribe = onSnapshot(fallbackQ, (snapshot) => {
-            const fetchedNotifications = snapshot.docs
-              .map(doc => ({
-                id: doc.id,
-                ...doc.data(),
-              }))
-              .filter((n: any) => !n.deleted && watchedAddresses.includes(n.walletAddress))
-              .sort((a: any, b: any) => {
-                const aTime = a.createdAt?.toDate?.()?.getTime() || 0;
-                const bTime = b.createdAt?.toDate?.()?.getTime() || 0;
-                return bTime - aTime;
-              }) as WalletNotification[];
-            
-            setNotifications(fetchedNotifications);
-            setLoading(false);
-          });
-        } else {
-          console.error('Error fetching notifications:', error);
+      unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          const fetchedNotifications = snapshot.docs
+            .map((doc) => ({
+              id: doc.id,
+              ...doc.data(),
+            }))
+            .filter(
+              (n: any) =>
+                !n.deleted && watchedAddresses.includes(n.walletAddress),
+            )
+            .sort((a: any, b: any) => {
+              const aTime = a.createdAt?.toDate?.()?.getTime() || 0;
+              const bTime = b.createdAt?.toDate?.()?.getTime() || 0;
+              return bTime - aTime;
+            }) as WalletNotification[];
+
+          setNotifications(fetchedNotifications);
           setLoading(false);
-        }
-      });
+        },
+        (error: any) => {
+          // If index doesn't exist, try without orderBy
+          if (error.code === "failed-precondition") {
+            const fallbackQ = query(
+              notificationsRef,
+              where("userId", "==", user.uid),
+              limit(50),
+            );
+
+            unsubscribe = onSnapshot(fallbackQ, (snapshot) => {
+              const fetchedNotifications = snapshot.docs
+                .map((doc) => ({
+                  id: doc.id,
+                  ...doc.data(),
+                }))
+                .filter(
+                  (n: any) =>
+                    !n.deleted && watchedAddresses.includes(n.walletAddress),
+                )
+                .sort((a: any, b: any) => {
+                  const aTime = a.createdAt?.toDate?.()?.getTime() || 0;
+                  const bTime = b.createdAt?.toDate?.()?.getTime() || 0;
+                  return bTime - aTime;
+                }) as WalletNotification[];
+
+              setNotifications(fetchedNotifications);
+              setLoading(false);
+            });
+          } else {
+            console.error("Error fetching notifications:", error);
+            setLoading(false);
+          }
+        },
+      );
     } catch (error) {
-      console.error('Error setting up notification listener:', error);
+      console.error("Error setting up notification listener:", error);
       setLoading(false);
     }
 
@@ -102,8 +129,8 @@ export function Home() {
   }, [user, watchlist]);
 
   const formatTime = (timestamp: any) => {
-    if (!timestamp) return 'Just now';
-    
+    if (!timestamp) return "Just now";
+
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
@@ -111,7 +138,7 @@ export function Home() {
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
 
-    if (diffMins < 1) return 'Just now';
+    if (diffMins < 1) return "Just now";
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays < 7) return `${diffDays}d ago`;
@@ -119,17 +146,17 @@ export function Home() {
   };
 
   const getWalletNickname = (walletAddress: string) => {
-    const watched = watchlist.find(w => w.address === walletAddress);
+    const watched = watchlist.find((w) => w.address === walletAddress);
     return watched?.nickname || shortenAddress(walletAddress);
   };
 
   const handleCopyTrade = (notification: WalletNotification) => {
     if (!notification.tokenAddress) {
-      toast.error('No token address available for this trade');
+      toast.error("No token address available for this trade");
       return;
     }
-    
-    navigate('/app/trade', {
+
+    navigate("/app/trade", {
       state: {
         mint: notification.tokenAddress,
         fromFeed: true,
@@ -140,10 +167,12 @@ export function Home() {
 
   const getTradeIcon = (type: string) => {
     switch (type) {
-      case 'large_trade':
-        return <ArrowUpRight className="w-4 h-4 text-[#FFB84D]" />;
-      case 'token_swap':
+      case "buy":
         return <ArrowDownRight className="w-4 h-4 text-[#12d585]" />;
+      case "sell":
+        return <ArrowUpRight className="w-4 h-4 text-[#FF6B6B]" />;
+      case "swap":
+        return <ArrowDownRight className="w-4 h-4 text-[#54A0FF]" />;
       default:
         return <TrendingUp className="w-4 h-4 text-white/60" />;
     }
@@ -151,12 +180,14 @@ export function Home() {
 
   const getTradeTypeLabel = (type: string) => {
     switch (type) {
-      case 'large_trade':
-        return 'Large Trade';
-      case 'token_swap':
-        return 'Token Swap';
+      case "buy":
+        return "Buy";
+      case "sell":
+        return "Sell";
+      case "swap":
+        return "Swap";
       default:
-        return 'Transaction';
+        return "Transaction";
     }
   };
 
@@ -220,7 +251,10 @@ export function Home() {
         /* Feed */
         <div className="space-y-4">
           {notifications.map((notification) => (
-            <Card key={notification.id} className="hover:border-white/20 transition-colors">
+            <Card
+              key={notification.id}
+              className="hover:border-white/20 transition-colors"
+            >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-2">
@@ -229,11 +263,11 @@ export function Home() {
                       {getTradeTypeLabel(notification.type)}
                     </span>
                   </div>
-                  
+
                   <h3 className="font-semibold text-lg mb-1">
                     {getWalletNickname(notification.walletAddress)}
                   </h3>
-                  
+
                   <p className="text-sm text-white/70 mb-3">
                     {notification.message}
                   </p>
@@ -294,8 +328,8 @@ export function Home() {
             </div>
             <p className="text-base text-text-secondary leading-relaxed">
               <span className="text-accent-primary font-medium">COPE</span> =
-              Catch Onchain Plays Early. Follow proven wallets, see their verified
-              trades in real-time, and copy plays instantly.
+              Catch Onchain Plays Early. Follow proven wallets, see their
+              verified trades in real-time, and copy plays instantly.
             </p>
           </Card>
         </div>

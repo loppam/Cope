@@ -120,7 +120,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             webhookURL:
               process.env.WEBHOOK_URL ||
               `${req.headers.origin || "https://your-domain.vercel.app"}/api/webhook/transaction`,
-            transactionTypes: ["ANY"],
+            transactionTypes: WEBHOOK_TRANSACTION_TYPES,
             accountAddresses,
             webhookType: "enhanced",
             ...(process.env.HELIUS_WEBHOOK_SECRET && {
@@ -153,7 +153,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
         body: JSON.stringify({
           webhookURL,
-          transactionTypes: ["ANY"],
+          transactionTypes: WEBHOOK_TRANSACTION_TYPES,
           accountAddresses,
           webhookType: "enhanced",
           ...(process.env.HELIUS_WEBHOOK_SECRET && {

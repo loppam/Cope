@@ -50,3 +50,4 @@ dev-sw.js
 
 # Allow custom SW source for injectManifest
 !src/sw.js
+firestore.rules

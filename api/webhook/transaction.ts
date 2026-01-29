@@ -46,8 +46,15 @@ if (getApps().length === 0) {
 const db = getFirestore();
 const adminMessaging = getMessaging();
 
+// Wrapped SOL mint – exclude from "primary token" so alerts link to the actual token, not wSOL
+const WRAPPED_SOL_MINT = "So11111111111111111111111111111111111111112";
+
 // Price cache (in-memory, resets on function restart)
 const priceCache = new Map<string, { price: number; timestamp: number }>();
+const tokenSymbolCache = new Map<
+  string,
+  { symbol: string; timestamp: number }
+>();
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 /**
@@ -156,6 +163,42 @@ async function getSolPrice(): Promise<number> {
   }
 }
 
+/**
+ * Fetch token symbol/name from SolanaTracker for notification text.
+ */
+async function getTokenSymbol(mint: string): Promise<string> {
+  const cached = tokenSymbolCache.get(mint);
+  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    return cached.symbol;
+  }
+  try {
+    const apiKey =
+      process.env.VITE_SOLANATRACKER_API_KEY ||
+      process.env.SOLANATRACKER_API_KEY;
+    if (!apiKey) return `${mint.slice(0, 4)}...${mint.slice(-4)}`;
+    const response = await fetch(
+      `https://data.solanatracker.io/tokens/${mint}`,
+      {
+        headers: {
+          "x-api-key": apiKey,
+          "Content-Type": "application/json",
+        },
+      },
+    );
+    if (!response.ok) return `${mint.slice(0, 4)}...${mint.slice(-4)}`;
+    const data = await response.json();
+    const symbol =
+      data.token?.symbol ||
+      data.token?.name ||
+      `${mint.slice(0, 4)}...${mint.slice(-4)}`;
+    tokenSymbolCache.set(mint, { symbol, timestamp: Date.now() });
+    return symbol;
+  } catch (error) {
+    console.error(`Error fetching token symbol for ${mint}:`, error);
+    return `${mint.slice(0, 4)}...${mint.slice(-4)}`;
+  }
+}
+
 interface HeliusWebhookPayload {
   accountData: Array<{
     account: string;
@@ -192,6 +235,22 @@ interface HeliusWebhookPayload {
   }>;
   type: string;
   webhookId?: string; // Optional; not in all Helius enhanced payload docs
+}
+
+/**
+ * Pick the primary token for the notification (non–wrapped-SOL first, then by amount).
+ * Swaps often list wSOL first; we want the actual token in the alert/deep link.
+ */
+function getPrimaryTokenMint(tx: HeliusWebhookPayload): string | undefined {
+  const tokenTransfers = tx.tokenTransfers || [];
+  const nonWsol = tokenTransfers.filter((t) => t.mint !== WRAPPED_SOL_MINT);
+  const candidates = nonWsol.length > 0 ? nonWsol : tokenTransfers;
+  if (candidates.length === 0) return undefined;
+  // Prefer largest tokenAmount so the "main" token of the swap is shown
+  const byAmount = [...candidates].sort(
+    (a, b) => Math.abs(b.tokenAmount || 0) - Math.abs(a.tokenAmount || 0),
+  );
+  return byAmount[0]?.mint;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -237,11 +296,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           walletAddresses.add(transfer.fromUserAccount);
         if (transfer.toUserAccount) walletAddresses.add(transfer.toUserAccount);
       });
+      // Omit accountData – often token/account addresses, not owners; reduces duplicate notifications
 
-      // Add account data participants
-      tx.accountData?.forEach((account) => {
-        walletAddresses.add(account.account);
-      });
+      // Collect unique users to notify (one notification per user per tx)
+      const notifiedUserIds = new Set<string>();
 
       // For each wallet address, find users watching it (per-user, not platform-wide)
       for (const walletAddress of walletAddresses) {
@@ -296,97 +354,155 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             (watchersMap && watchersMap[userId]?.nickname) ||
             watchedWallet?.nickname;
 
-          // Determine notification type and details
-          const tokenTransfers = tx.tokenTransfers || [];
-          const nativeTransfers = tx.nativeTransfers || [];
-          const hasTokenTransfer = tokenTransfers.length > 0;
-          const hasNativeTransfer = nativeTransfers.length > 0;
+          const alreadyNotified = notifiedUserIds.has(userId);
+          if (!alreadyNotified) notifiedUserIds.add(userId);
 
-          // Calculate total USD value using dynamic prices
-          let amountUsd = 0;
+          if (!alreadyNotified) {
+            // One notification per user per transaction
+            const tokenTransfers = tx.tokenTransfers || [];
+            const nativeTransfers = tx.nativeTransfers || [];
+            const hasTokenTransfer = tokenTransfers.length > 0;
+            const hasNativeTransfer = nativeTransfers.length > 0;
 
-          if (hasTokenTransfer) {
-            // Fetch prices for all tokens in parallel
-            const tokenPricePromises = tokenTransfers.map(async (transfer) => {
-              const tokenPrice = await getTokenPrice(transfer.mint);
-              // tokenAmount is in raw units, we need to convert to USD
-              // For now, we'll use a simplified calculation
-              // In production, you'd need to account for token decimals
-              return tokenPrice * (transfer.tokenAmount || 0);
-            });
+            // Calculate total USD value using dynamic prices
+            let amountUsd = 0;
 
-            const tokenAmounts = await Promise.all(tokenPricePromises);
-            amountUsd += tokenAmounts.reduce((sum, amount) => sum + amount, 0);
-          }
+            if (hasTokenTransfer) {
+              // Fetch prices for all tokens in parallel
+              const tokenPricePromises = tokenTransfers.map(
+                async (transfer) => {
+                  const tokenPrice = await getTokenPrice(transfer.mint);
+                  // tokenAmount is in raw units, we need to convert to USD
+                  // For now, we'll use a simplified calculation
+                  // In production, you'd need to account for token decimals
+                  return tokenPrice * (transfer.tokenAmount || 0);
+                },
+              );
 
-          if (hasNativeTransfer) {
-            // Fetch SOL price dynamically
-            const solPrice = await getSolPrice();
-            const solAmount =
-              nativeTransfers.reduce((sum, t) => sum + t.amount, 0) / 1e9;
-            amountUsd += solAmount * solPrice;
-          }
-
-          // Determine if it's a large trade (>$10,000)
-          const isLargeTrade = amountUsd > 10000;
-          const notificationType = isLargeTrade
-            ? "large_trade"
-            : hasTokenTransfer
-              ? "token_swap"
-              : "transaction";
-
-          // Get token address if available
-          const tokenAddress = tokenTransfers[0]?.mint || undefined;
-
-          // Create notification
-          const notificationRef = db.collection("notifications").doc();
-          const notificationData = {
-            userId,
-            walletAddress,
-            type: notificationType,
-            title: isLargeTrade
-              ? `Large Trade Detected`
-              : hasTokenTransfer
-                ? `Token Swap Detected`
-                : `Transaction Detected`,
-            message: nickname
-              ? `${nickname} made a ${isLargeTrade ? "large trade" : hasTokenTransfer ? "token swap" : "transaction"}`
-              : `Watched wallet ${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)} made a ${isLargeTrade ? "large trade" : hasTokenTransfer ? "token swap" : "transaction"}`,
-            txHash: tx.signature,
-            tokenAddress,
-            amount: hasTokenTransfer
-              ? tokenTransfers[0]?.tokenAmount
-              : nativeTransfers[0]?.amount,
-            amountUsd,
-            read: false,
-            createdAt: new Date(),
-          };
-
-          await notificationRef.set(notificationData);
-
-          // Push notification
-          try {
-            const tokens = await getUserTokens(userId);
-            const invalidTokens = await sendToTokens(tokens, {
-              title: notificationData.title,
-              body: notificationData.message,
-              deepLink: `/scanner/wallet/${walletAddress}`,
-              data: {
-                type: notificationData.type,
-                txHash: notificationData.txHash || "",
-              },
-            });
-            // Remove invalid tokens (doc ID is hash of token)
-            for (const token of invalidTokens) {
-              await db
-                .collection("users")
-                .doc(userId)
-                .collection("pushTokens")
-                .doc(pushTokenDocId(token))
-                .delete();
+              const tokenAmounts = await Promise.all(tokenPricePromises);
+              amountUsd += tokenAmounts.reduce(
+                (sum, amount) => sum + amount,
+                0,
+              );
             }
-          } catch (pushError) {
-            console.error("Error sending push notification:", pushError);
+
+            if (hasNativeTransfer) {
+              // Fetch SOL price dynamically
+              const solPrice = await getSolPrice();
+              const solAmount =
+                nativeTransfers.reduce((sum, t) => sum + t.amount, 0) / 1e9;
+              amountUsd += solAmount * solPrice;
+            }
+
+            // Determine if it's a large trade (>$10,000)
+            const isLargeTrade = amountUsd > 10000;
+            const notificationType = isLargeTrade
+              ? "large_trade"
+              : hasTokenTransfer
+                ? "token_swap"
+                : "transaction";
+
+            // Primary token for alert: prefer non–wrapped-SOL so alerts show the actual token, not wSOL
+            const tokenAddress = getPrimaryTokenMint(tx) ?? undefined;
+            const primaryTransfer = hasTokenTransfer
+              ? tokenTransfers.find((t) => t.mint === tokenAddress) ||
+                tokenTransfers[0]
+              : null;
+
+            // Buy vs sell: watched wallet received token -> buy, sent -> sell
+            const isBuy =
+              hasTokenTransfer &&
+              primaryTransfer &&
+              primaryTransfer.toUserAccount === walletAddress;
+            const isSell =
+              hasTokenTransfer &&
+              primaryTransfer &&
+              primaryTransfer.fromUserAccount === walletAddress;
+
+            const tokenSymbol = tokenAddress
+              ? await getTokenSymbol(tokenAddress)
+              : "SOL";
+            const amountUsdFormatted =
+              amountUsd >= 1
+                ? amountUsd.toLocaleString("en-US", {
+                    style: "currency",
+                    currency: "USD",
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 0,
+                  })
+                : amountUsd.toLocaleString("en-US", {
+                    style: "currency",
+                    currency: "USD",
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  });
+            const displayName =
+              nickname ||
+              `Wallet ${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`;
+
+            let notificationTitle: string;
+            let notificationMessage: string;
+            if (hasTokenTransfer && (isBuy || isSell)) {
+              notificationTitle = isBuy
+                ? "Buy Transaction"
+                : "Sell Transaction";
+              notificationMessage = isBuy
+                ? `${displayName} bought ${amountUsdFormatted} of ${tokenSymbol}`
+                : `${displayName} sold ${amountUsdFormatted} of ${tokenSymbol}`;
+            } else if (hasTokenTransfer) {
+              notificationTitle = "Token Swap";
+              notificationMessage = `${displayName} swapped ${amountUsdFormatted} (${tokenSymbol})`;
+            } else {
+              notificationTitle = "Transaction";
+              notificationMessage = `${displayName} had a transaction (${amountUsdFormatted})`;
+            }
+
+            // Create notification
+            const notificationRef = db.collection("notifications").doc();
+            const notificationData = {
+              userId,
+              walletAddress,
+              type: notificationType,
+              title: notificationTitle,
+              message: notificationMessage,
+              txHash: tx.signature,
+              tokenAddress,
+              amount:
+                primaryTransfer?.tokenAmount ?? nativeTransfers[0]?.amount,
+              amountUsd,
+              read: false,
+              createdAt: new Date(),
+            };
+
+            await notificationRef.set(notificationData);
+
+            // Push notification
+            try {
+              const tokens = await getUserTokens(userId);
+              const invalidTokens = await sendToTokens(tokens, {
+                title: notificationData.title,
+                body: notificationData.message,
+                deepLink:
+                  hasTokenTransfer && tokenAddress
+                    ? `/token/${tokenAddress}`
+                    : `/scanner/wallet/${walletAddress}`,
+                data: {
+                  type: notificationData.type,
+                  txHash: notificationData.txHash || "",
+                },
+              });
+              // Remove invalid tokens (doc ID is hash of token)
+              for (const token of invalidTokens) {
+                await db
+                  .collection("users")
+                  .doc(userId)
+                  .collection("pushTokens")
+                  .doc(pushTokenDocId(token))
+                  .delete();
+              }
+            } catch (pushError) {
+              console.error("Error sending push notification:", pushError);
+            }
           }
 
           // Update last checked timestamp for the wallet in user's watchlist

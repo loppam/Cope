@@ -137,25 +137,6 @@ interface PushTokenWithUid extends PushToken {
   uid: string;
 }
 
-async function getUserTokens(uid: string): Promise<PushToken[]> {
-  const snapshot = await adminDb
-    .collection("users")
-    .doc(uid)
-    .collection("pushTokens")
-    .get();
-  const tokens: PushToken[] = [];
-  snapshot.forEach((doc) => {
-    const data = doc.data();
-    if (data.token) {
-      tokens.push({
-        token: data.token,
-        platform: data.platform || "web",
-      });
-    }
-  });
-  return tokens;
-}
-
 /** Collect push tokens from all users (for admin broadcast). */
 async function getAllUserTokens(): Promise<PushTokenWithUid[]> {
   const usersSnap = await adminDb.collection("users").get();

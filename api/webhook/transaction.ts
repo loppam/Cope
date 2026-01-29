@@ -141,17 +141,37 @@ async function getTokenPrice(mint: string): Promise<number> {
   }
 }
 
+const PRICES_COLLECTION = "prices";
+const SOL_PRICE_DOC_ID = "SOL";
+
 /**
- * Fetch SOL price from SolanaTracker API
+ * Fetch SOL price: Firestore cache (5 min) shared across all invocations, then SolanaTracker.
  */
 async function getSolPrice(): Promise<number> {
-  // Check cache first
+  // In-memory cache first (same invocation)
   const cached = priceCache.get("SOL");
   if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
     return cached.price;
   }
 
   try {
+    // Firestore cache (shared across all serverless invocations)
+    const priceRef = db.collection(PRICES_COLLECTION).doc(SOL_PRICE_DOC_ID);
+    const priceSnap = await priceRef.get();
+    if (priceSnap.exists) {
+      const data = priceSnap.data();
+      const updatedAt = data?.updatedAt as number | undefined;
+      const price = data?.price as number | undefined;
+      if (
+        typeof price === "number" &&
+        typeof updatedAt === "number" &&
+        Date.now() - updatedAt < CACHE_DURATION
+      ) {
+        priceCache.set("SOL", { price, timestamp: updatedAt });
+        return price;
+      }
+    }
+
     const apiKey =
       process.env.VITE_SOLANATRACKER_API_KEY ||
       process.env.SOLANATRACKER_API_KEY;
@@ -179,9 +199,11 @@ async function getSolPrice(): Promise<number> {
 
     const data = await response.json();
     const price = data.price || 150;
+    const now = Date.now();
 
-    // Cache the price
-    priceCache.set("SOL", { price, timestamp: Date.now() });
+    // Update Firestore so other invocations get this price for 5 mins
+    await priceRef.set({ price, updatedAt: now }, { merge: true });
+    priceCache.set("SOL", { price, timestamp: now });
     return price;
   } catch (error) {
     console.error("Error fetching SOL price:", error);

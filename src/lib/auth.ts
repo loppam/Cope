@@ -700,23 +700,22 @@ export async function findUserByXHandle(xHandle: string) {
       : `@${xHandle.toLowerCase()}`;
 
     const usersRef = collection(db, "users");
-    // Query for users with matching X handle and wallet address
-    // Note: We can't easily query for "isPublic == true OR isPublic doesn't exist" in Firestore
-    // So we'll query all matching users and filter in code
-    const q = query(
-      usersRef,
-      where("xHandle", "==", normalizedHandle),
-      where("walletAddress", "!=", null), // Must have a wallet
-    );
+    // Query for users with matching X handle
+    // Note: Firestore doesn't support != null queries well, so we query all and filter
+    const q = query(usersRef, where("xHandle", "==", normalizedHandle));
     const snapshot = await getDocs(q);
 
     if (snapshot.empty) {
       return null;
     }
 
-    // Filter for public users (treat missing isPublic as public)
+    // Filter for public users with wallets (treat missing isPublic as public)
     const publicUsers = snapshot.docs.filter((doc) => {
       const data = doc.data();
+      // User must have a wallet address
+      if (!data.walletAddress) {
+        return false;
+      }
       // User is public if isPublic is not explicitly false
       return data.isPublic !== false;
     });

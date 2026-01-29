@@ -72,35 +72,81 @@ async function sendAuthRequest(method: string, body?: Record<string, any>) {
  * Returns the subscription object as JSON string
  */
 async function subscribeToWebPush(): Promise<string | null> {
-  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-    console.warn("[Notifications] Web Push API not supported");
+  if (!("serviceWorker" in navigator)) {
+    console.error(
+      "[Notifications] Service Worker not supported - required for Web Push",
+    );
+    return null;
+  }
+
+  if (!("PushManager" in window)) {
+    console.error(
+      "[Notifications] PushManager not supported - iOS 16.4+ required for Web Push",
+    );
     return null;
   }
 
   try {
     // Get service worker registration
     const registration = await navigator.serviceWorker.ready;
+    console.log("[Notifications] Service Worker ready:", registration.scope);
 
     // Get VAPID public key
     const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
     if (!vapidKey) {
-      console.warn("[Notifications] VAPID key missing for Web Push");
+      console.error(
+        "[Notifications] VAPID key missing for Web Push - check VITE_FIREBASE_VAPID_KEY",
+      );
       return null;
     }
+    console.log(
+      "[Notifications] VAPID key found:",
+      vapidKey.substring(0, 20) + "...",
+    );
 
     // Convert VAPID key to Uint8Array (required by Web Push API)
     const vapidKeyBytes = urlBase64ToUint8Array(vapidKey);
 
+    // Check if already subscribed
+    const existingSubscription =
+      await registration.pushManager.getSubscription();
+    if (existingSubscription) {
+      console.log("[Notifications] Using existing Web Push subscription");
+      return JSON.stringify(existingSubscription);
+    }
+
     // Subscribe to push notifications
+    console.log("[Notifications] Creating new Web Push subscription...");
     const subscription = await registration.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: vapidKeyBytes,
     });
 
+    console.log("[Notifications] Web Push subscription created successfully:", {
+      endpoint: subscription.endpoint?.substring(0, 50) + "...",
+      hasKeys: !!subscription.keys,
+    });
+
     // Return subscription as JSON string
     return JSON.stringify(subscription);
   } catch (error: any) {
-    console.error("[Notifications] Web Push subscription failed:", error);
+    console.error("[Notifications] Web Push subscription failed:", {
+      error: error.message,
+      name: error.name,
+      stack: error.stack,
+    });
+
+    // Provide helpful error messages
+    if (error.name === "NotAllowedError") {
+      console.error(
+        "[Notifications] Permission denied - user must grant notification permission",
+      );
+    } else if (error.name === "NotSupportedError") {
+      console.error(
+        "[Notifications] Web Push not supported - ensure iOS 16.4+ and PWA is installed",
+      );
+    }
+
     return null;
   }
 }

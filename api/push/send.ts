@@ -75,20 +75,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const tokens = await getUserTokens(user.uid);
-    const invalidTokens = await sendToTokens(tokens, { title, body, deepLink });
-    await Promise.all(
-      invalidTokens.map((token) =>
-        adminDb
-          .collection("users")
-          .doc(user.uid)
-          .collection("pushTokens")
-          .doc(pushTokenDocId(token))
-          .delete(),
-      ),
+    console.log(`[Push] Found ${tokens.length} tokens for user ${user.uid}`);
+    console.log(
+      `[Push] Token platforms:`,
+      tokens.map((t) => ({
+        platform: t.platform,
+        isWebPush: isWebPushSubscription(t.token),
+      })),
     );
-    return res
-      .status(200)
-      .json({ success: true, removed: invalidTokens.length });
+
+    const invalidTokens = await sendToTokens(tokens, { title, body, deepLink });
+
+    if (invalidTokens.length > 0) {
+      console.log(`[Push] Removing ${invalidTokens.length} invalid tokens`);
+      await Promise.all(
+        invalidTokens.map((token) =>
+          adminDb
+            .collection("users")
+            .doc(user.uid)
+            .collection("pushTokens")
+            .doc(pushTokenDocId(token))
+            .delete(),
+        ),
+      );
+    }
+
+    return res.status(200).json({
+      success: true,
+      removed: invalidTokens.length,
+      totalTokens: tokens.length,
+      fcmTokens: tokens.filter(
+        (t) => t.platform !== "webpush" && !isWebPushSubscription(t.token),
+      ).length,
+      webPushTokens: tokens.filter(
+        (t) => t.platform === "webpush" || isWebPushSubscription(t.token),
+      ).length,
+    });
   } catch (error) {
     console.error("Failed to send push", error);
     return res.status(500).json({
@@ -149,16 +171,30 @@ function initWebPush() {
   const vapidPrivateKey = process.env.FIREBASE_VAPID_PRIVATE_KEY;
 
   if (!vapidPublicKey || !vapidPrivateKey) {
-    console.warn("[Push] VAPID keys not configured for Web Push");
+    console.error("[Push] VAPID keys not configured for Web Push");
+    console.error("[Push] VAPID_PUBLIC_KEY exists:", !!vapidPublicKey);
+    console.error("[Push] VAPID_PRIVATE_KEY exists:", !!vapidPrivateKey);
+    console.error(
+      "[Push] Make sure both are set in Vercel environment variables",
+    );
     return false;
   }
 
-  webpush.setVapidDetails(
-    "mailto:your-email@example.com", // Contact email (update this)
-    vapidPublicKey,
-    vapidPrivateKey,
-  );
-  return true;
+  try {
+    webpush.setVapidDetails(
+      "mailto:your-email@example.com", // Contact email (update this)
+      vapidPublicKey,
+      vapidPrivateKey,
+    );
+    console.log("[Push] Web Push initialized successfully with VAPID keys");
+    return true;
+  } catch (error: any) {
+    console.error("[Push] Failed to initialize Web Push:", {
+      error: error.message,
+      name: error.name,
+    });
+    return false;
+  }
 }
 
 /**
@@ -232,8 +268,13 @@ async function sendToTokens(
 
   // Send Web Push notifications
   if (webPushSubscriptions.length > 0) {
+    console.log(
+      `[Push] Sending to ${webPushSubscriptions.length} Web Push subscriptions`,
+    );
     if (!initWebPush()) {
-      console.warn("[Push] Web Push not initialized, skipping Web Push tokens");
+      console.error(
+        "[Push] Web Push not initialized, skipping Web Push tokens",
+      );
       invalidTokens.push(...webPushSubscriptions.map((s) => s.token));
     } else {
       const webPushPayload = JSON.stringify({
@@ -244,12 +285,22 @@ async function sendToTokens(
         badge: "/icons/icon-96x96.png",
       });
 
-      await Promise.all(
+      const results = await Promise.allSettled(
         webPushSubscriptions.map(async ({ token, subscription }) => {
           try {
+            console.log(`[Push] Sending Web Push to subscription:`, {
+              endpoint: subscription.endpoint?.substring(0, 50) + "...",
+              keys: !!subscription.keys,
+            });
             await webpush.sendNotification(subscription, webPushPayload);
+            console.log(`[Push] Web Push sent successfully`);
+            return { success: true, token };
           } catch (error: any) {
-            console.error("[Push] Web Push send error:", error);
+            console.error("[Push] Web Push send error:", {
+              statusCode: error.statusCode,
+              message: error.message,
+              body: error.body,
+            });
             // Mark as invalid if subscription expired or invalid
             if (
               error.statusCode === 410 || // Gone
@@ -258,8 +309,17 @@ async function sendToTokens(
             ) {
               invalidTokens.push(token);
             }
+            return { success: false, token, error };
           }
         }),
+      );
+
+      const successCount = results.filter(
+        (r) => r.status === "fulfilled" && r.value.success,
+      ).length;
+      const failCount = results.length - successCount;
+      console.log(
+        `[Push] Web Push results: ${successCount} succeeded, ${failCount} failed`,
       );
     }
   }

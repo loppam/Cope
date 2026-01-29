@@ -16,11 +16,16 @@ export default function App() {
         position="top-center"
         toastOptions={{
           style: {
-            background: "#0F4A38",
+            background: "linear-gradient(135deg, #0F4A38 0%, #0B3D2E 100%)",
             color: "#fff",
-            border: "1px solid rgba(11, 110, 79, 0.3)",
+            border: "1px solid rgba(18, 213, 133, 0.3)",
+            borderRadius: "12px",
+            boxShadow:
+              "0 4px 12px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(18, 213, 133, 0.1)",
+            marginTop: "var(--safe-area-inset-top)",
           },
         }}
+        className="cope-toaster"
       />
       <InstallPrompt />
     </AuthProvider>

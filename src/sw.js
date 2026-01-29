@@ -52,7 +52,10 @@ self.addEventListener("push", (event) => {
     try {
       data = event.data.json();
     } catch (e) {
-      data = { title: "COPE Alert", body: event.data.text() || "New notification" };
+      data = {
+        title: "COPE Alert",
+        body: event.data.text() || "New notification",
+      };
     }
   }
 
@@ -82,8 +85,7 @@ self.addEventListener("notificationclick", (event) => {
       .then((windowClients) => {
         const tClient = windowClients.find(
           (client) =>
-            client.url.startsWith(urlToOpen) ||
-            client.url.includes(deepLink),
+            client.url.startsWith(urlToOpen) || client.url.includes(deepLink),
         );
         if (tClient) {
           return tClient.focus();
@@ -92,10 +94,6 @@ self.addEventListener("notificationclick", (event) => {
       }),
   );
 });
-  } catch (error) {
-    console.error("[SW] Firebase init failed", error);
-  }
-}
 
 initFirebase();
 

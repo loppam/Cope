@@ -1,6 +1,5 @@
 // Authentication utilities for Twitter OAuth
 import {
-  signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
   signOut,
@@ -38,17 +37,6 @@ export function getFirebaseCallbackUrl(): string {
     return "Please set VITE_FIREBASE_AUTH_DOMAIN in your .env file";
   }
   return `https://${authDomain}/__/auth/handler`;
-}
-
-// Detect if user is on a mobile device
-function isMobileDevice(): boolean {
-  if (typeof window === "undefined") return false;
-  return (
-    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-      navigator.userAgent,
-    ) ||
-    (window.innerWidth <= 768 && window.innerHeight <= 1024)
-  );
 }
 
 // Helper function to save user profile data
@@ -108,29 +96,13 @@ async function saveUserProfile(user: User, credential: any): Promise<void> {
   await setDoc(userRef, twitterData, { merge: true });
 }
 
-// Sign in with Twitter - uses redirect on mobile, popup on desktop
+// Sign in with Twitter - uses redirect on both web and mobile (avoids X "suspicious activity" on popup)
 export async function signInWithTwitter(): Promise<User | void> {
   try {
-    // Use redirect on mobile devices to avoid popup blocking
-    if (isMobileDevice()) {
-      await signInWithRedirect(auth, twitterProvider);
-      // Note: signInWithRedirect doesn't return a user immediately
-      // The user will be redirected to Twitter, then back to the app
-      // We handle the redirect result in handleRedirectResult()
-      return;
-    }
-
-    // Use popup on desktop
-    const result = await signInWithPopup(auth, twitterProvider);
-    const user = result.user;
-    const credential = TwitterAuthProvider.credentialFromResult(result);
-
-    if (!credential) {
-      throw new Error("Failed to get Twitter credential");
-    }
-
-    await saveUserProfile(user, credential);
-    return user;
+    await signInWithRedirect(auth, twitterProvider);
+    // signInWithRedirect doesn't return; user goes to X then back to app
+    // handleRedirectResult() in AuthContext completes sign-in on return
+    return;
   } catch (error: any) {
     console.error("Twitter sign-in error:", error);
 

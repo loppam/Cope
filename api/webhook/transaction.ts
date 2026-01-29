@@ -191,7 +191,7 @@ interface HeliusWebhookPayload {
     tokenStandard: string;
   }>;
   type: string;
-  webhookId: string;
+  webhookId?: string; // Optional; not in all Helius enhanced payload docs
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -200,13 +200,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Verify webhook secret (optional but recommended)
-  const webhookSecret = req.headers["x-helius-webhook-secret"];
-  if (
-    process.env.HELIUS_WEBHOOK_SECRET &&
-    webhookSecret !== process.env.HELIUS_WEBHOOK_SECRET
-  ) {
-    return res.status(401).json({ error: "Unauthorized" });
+  // Verify webhook auth: Helius echoes authHeader in the Authorization header
+  const authHeader = req.headers.authorization;
+  if (process.env.HELIUS_WEBHOOK_SECRET) {
+    const secret = process.env.HELIUS_WEBHOOK_SECRET;
+    const valid = authHeader === secret || authHeader === `Bearer ${secret}`;
+    if (!valid) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
   }
 
   try {

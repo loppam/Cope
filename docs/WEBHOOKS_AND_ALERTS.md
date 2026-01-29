@@ -1,5 +1,7 @@
 # Webhooks and Alerts
 
+**Environment setup:** For how to get and set webhook-related env vars (Helius, WEBHOOK_URL, HELIUS_WEBHOOK_ID, etc.), see [WEBHOOK_ENV_SETUP.md](./WEBHOOK_ENV_SETUP.md).
+
 ## Helius webhooks (factual)
 
 Helius webhooks are **real** and documented at:

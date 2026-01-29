@@ -111,6 +111,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             transactionTypes: ["ANY"],
             accountAddresses,
             webhookType: "enhanced",
+            ...(process.env.HELIUS_WEBHOOK_SECRET && {
+              authHeader: process.env.HELIUS_WEBHOOK_SECRET,
+            }),
           }),
         },
       );
@@ -141,6 +144,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           transactionTypes: ["ANY"],
           accountAddresses,
           webhookType: "enhanced",
+          ...(process.env.HELIUS_WEBHOOK_SECRET && {
+            authHeader: process.env.HELIUS_WEBHOOK_SECRET,
+          }),
         }),
       },
     );

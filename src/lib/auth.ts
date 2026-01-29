@@ -18,6 +18,7 @@ import {
   where,
   getDocs,
   limit,
+  orderBy,
 } from "firebase/firestore";
 import { auth, db } from "./firebase";
 
@@ -739,6 +740,63 @@ export async function findUserByXHandle(xHandle: string) {
   } catch (error) {
     console.error("Error finding user by X handle:", error);
     return null;
+  }
+}
+
+// User search result (public users only; absence of isPublic means true)
+export interface UserSearchResult {
+  uid: string;
+  displayName: string | null;
+  xHandle: string | null;
+  avatar: string | null;
+  walletAddress: string;
+  isPublic?: boolean;
+}
+
+// Search users by X handle prefix (for dropdown suggestions)
+// Only returns public users; absence of isPublic field is treated as true
+export async function searchUsersByHandle(
+  handleQuery: string,
+  limitCount: number = 20,
+): Promise<UserSearchResult[]> {
+  try {
+    const trimmed = handleQuery.trim();
+    if (!trimmed.length) return [];
+
+    const normalizedPrefix = trimmed.startsWith("@")
+      ? trimmed.toLowerCase()
+      : `@${trimmed.toLowerCase()}`;
+
+    const usersRef = collection(db, "users");
+    const q = query(
+      usersRef,
+      where("xHandle", ">=", normalizedPrefix),
+      where("xHandle", "<=", normalizedPrefix + "\uf8ff"),
+      orderBy("xHandle"),
+      limit(limitCount * 2),
+    );
+    const snapshot = await getDocs(q);
+
+    const publicUsers = snapshot.docs.filter((docSnap) => {
+      const data = docSnap.data();
+      if (!data.walletAddress) return false;
+      return data.isPublic !== false; // default to true if undefined
+    });
+
+    return publicUsers.slice(0, limitCount).map((docSnap) => {
+      const userData = docSnap.data();
+      return {
+        uid: docSnap.id,
+        displayName: userData.displayName || userData.xHandle || null,
+        xHandle: userData.xHandle || null,
+        avatar: userData.avatar || userData.photoURL || null,
+        walletAddress: userData.walletAddress,
+        isPublic: userData.isPublic !== false,
+      };
+    });
+  } catch (error) {
+    console.error("Error searching users by handle:", error);
+    return [];
   }
 }
 

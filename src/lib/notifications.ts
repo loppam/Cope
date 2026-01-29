@@ -124,7 +124,7 @@ async function subscribeToWebPush(): Promise<string | null> {
 
     console.log("[Notifications] Web Push subscription created successfully:", {
       endpoint: subscription.endpoint?.substring(0, 50) + "...",
-      hasKeys: !!subscription.keys,
+      hasKeys: !!(subscription as any).keys,
     });
 
     // Return subscription as JSON string

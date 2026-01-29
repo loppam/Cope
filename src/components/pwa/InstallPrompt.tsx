@@ -1,12 +1,14 @@
-import { useState, useEffect } from 'react';
-import { Button } from '@/components/Button';
-import { Download, X, Share2 } from 'lucide-react';
-import { showInstallPrompt, isInstalled, getDeferredPrompt } from '@/lib/pwa';
+import { useState, useEffect } from "react";
+import { Button } from "@/components/Button";
+import { Download, X, Share2 } from "lucide-react";
+import { showInstallPrompt, isInstalled, getDeferredPrompt } from "@/lib/pwa";
 
 // Check if device is iOS
 const isIOS = () => {
-  return /iPad|iPhone|iPod/.test(navigator.userAgent) || 
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
 };
 
 // Check if device is Android
@@ -31,13 +33,14 @@ export function InstallPrompt() {
     // Check if prompt is available
     const checkPrompt = () => {
       const deferredPrompt = getDeferredPrompt();
-      
+
       // For iOS, always show instructions (no beforeinstallprompt event)
       if (isIOS() && !isInstalled()) {
-        const wasDismissed = localStorage.getItem('pwa-install-dismissed');
+        const wasDismissed = localStorage.getItem("pwa-install-dismissed");
         if (wasDismissed) {
           const dismissedTime = parseInt(wasDismissed, 10);
-          const daysSinceDismissed = (Date.now() - dismissedTime) / (1000 * 60 * 60 * 24);
+          const daysSinceDismissed =
+            (Date.now() - dismissedTime) / (1000 * 60 * 60 * 24);
           // Show again after 7 days
           if (daysSinceDismissed < 7) {
             setShowPrompt(false);
@@ -50,10 +53,11 @@ export function InstallPrompt() {
 
       // For Android/Chrome, use beforeinstallprompt
       if (deferredPrompt) {
-        const wasDismissed = localStorage.getItem('pwa-install-dismissed');
+        const wasDismissed = localStorage.getItem("pwa-install-dismissed");
         if (wasDismissed) {
           const dismissedTime = parseInt(wasDismissed, 10);
-          const daysSinceDismissed = (Date.now() - dismissedTime) / (1000 * 60 * 60 * 24);
+          const daysSinceDismissed =
+            (Date.now() - dismissedTime) / (1000 * 60 * 60 * 24);
           // Show again after 7 days
           if (daysSinceDismissed < 7) {
             setShowPrompt(false);
@@ -69,13 +73,16 @@ export function InstallPrompt() {
       checkPrompt();
     };
 
-    window.addEventListener('pwa-install-available', handlePWAInstallAvailable);
-    
+    window.addEventListener("pwa-install-available", handlePWAInstallAvailable);
+
     // Check immediately in case prompt was already available
     checkPrompt();
 
     return () => {
-      window.removeEventListener('pwa-install-available', handlePWAInstallAvailable);
+      window.removeEventListener(
+        "pwa-install-available",
+        handlePWAInstallAvailable,
+      );
     };
   }, []);
 
@@ -88,7 +95,7 @@ export function InstallPrompt() {
 
   const handleDismiss = () => {
     setShowPrompt(false);
-    localStorage.setItem('pwa-install-dismissed', Date.now().toString());
+    localStorage.setItem("pwa-install-dismissed", Date.now().toString());
   };
 
   if (!showPrompt) {
@@ -96,7 +103,12 @@ export function InstallPrompt() {
   }
 
   return (
-    <div className="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:w-96 z-50">
+    <div
+      className="fixed left-4 right-4 md:left-auto md:right-4 md:w-96 z-50"
+      style={{
+        bottom: "calc(1rem + var(--safe-area-inset-bottom))",
+      }}
+    >
       <div className="bg-surface-2 border border-white/10 rounded-lg p-4 shadow-lg">
         <div className="flex items-start gap-3">
           <div className="flex-shrink-0">
@@ -116,18 +128,22 @@ export function InstallPrompt() {
                   Install COPE on your iPhone or iPad:
                 </p>
                 <ol className="text-white/70 text-xs space-y-1 mb-3 list-decimal list-inside">
-                  <li>Tap the <Share2 className="w-3 h-3 inline" /> Share button</li>
+                  <li>
+                    Tap the <Share2 className="w-3 h-3 inline" /> Share button
+                  </li>
                   <li>Scroll down and tap "Add to Home Screen"</li>
                   <li>Tap "Add" to confirm</li>
                 </ol>
               </>
             ) : isAndroidDevice ? (
               <p className="text-white/60 text-sm mb-3">
-                Install our app for a better experience with offline access and faster loading.
+                Install our app for a better experience with offline access and
+                faster loading.
               </p>
             ) : (
               <p className="text-white/60 text-sm mb-3">
-                Install our app for a better experience with offline access and faster loading.
+                Install our app for a better experience with offline access and
+                faster loading.
               </p>
             )}
             <div className="flex gap-2">

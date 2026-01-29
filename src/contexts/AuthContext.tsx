@@ -16,8 +16,6 @@ import {
   updateUserWallet,
   updateUserBalance,
   updateUserProfile,
-  addWalletToWatchlist,
-  removeWalletFromWatchlist,
   getWatchlist,
   WatchedWallet,
   removeUserWallet,
@@ -355,7 +353,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   ) => {
     if (!user) throw new Error("User not authenticated");
     try {
-      await addWalletToWatchlist(user.uid, walletAddress, walletData);
+      const token = await user.getIdToken();
+      const base = import.meta.env.VITE_API_BASE_URL || "";
+      const res = await fetch(`${base}/api/watchlist/add`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          walletAddress,
+          ...walletData,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { error?: string }).error || res.statusText);
+      }
       await refreshProfile();
 
       // Sync webhook in background (don't wait for it)
@@ -374,7 +388,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const handleRemoveFromWatchlist = async (walletAddress: string) => {
     if (!user) throw new Error("User not authenticated");
     try {
-      await removeWalletFromWatchlist(user.uid, walletAddress);
+      const token = await user.getIdToken();
+      const base = import.meta.env.VITE_API_BASE_URL || "";
+      const res = await fetch(`${base}/api/watchlist/remove`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ walletAddress }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { error?: string }).error || res.statusText);
+      }
       await refreshProfile();
 
       // Sync webhook in background (don't wait for it)

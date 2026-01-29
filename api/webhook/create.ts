@@ -1,8 +1,9 @@
 // Vercel Serverless Function: Create/Update Helius webhook for watched wallets
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
+// Helius webhook API (documented: https://docs.helius.dev/api-reference/webhooks)
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
-const HELIUS_API_URL = "https://api.helius.xyz/v0/webhooks";
+const HELIUS_API_URL = "https://api-mainnet.helius-rpc.com/v0/webhooks";
 
 /**
  * Create or update a Helius webhook for monitoring wallet addresses
@@ -34,17 +35,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       process.env.WEBHOOK_URL ||
       `${req.headers.origin || "https://your-domain.vercel.app"}/api/webhook/transaction`;
 
-    // If webhookId is provided, update existing webhook
+    // If webhookId is provided, update existing webhook (PUT /v0/webhooks/{webhookID} per Helius docs)
     if (webhookId) {
       const updateResponse = await fetch(
-        `${HELIUS_API_URL}?api-key=${HELIUS_API_KEY}`,
+        `${HELIUS_API_URL}/${webhookId}?api-key=${HELIUS_API_KEY}`,
         {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            webhookID: webhookId,
+            webhookURL:
+              process.env.WEBHOOK_URL ||
+              `${req.headers.origin || "https://your-domain.vercel.app"}/api/webhook/transaction`,
             transactionTypes: ["ANY"],
             accountAddresses,
             webhookType: "enhanced",

@@ -79,6 +79,10 @@ See [PWA_SETUP.md](./PWA_SETUP.md) for detailed PWA setup and configuration.
 
 For X/Twitter sign-in with redirect on mobile (and to fix init.json 404 / iframe errors), see [FIREBASE_AUTH_MOBILE.md](./FIREBASE_AUTH_MOBILE.md).
 
+### Firestore rules and webhooks (Alerts)
+
+Security rules (RLS) and how notifications reach the Alerts page: see [docs/WEBHOOKS_AND_ALERTS.md](./docs/WEBHOOKS_AND_ALERTS.md). Deploy Firestore rules with `firebase deploy --only firestore:rules`.
+
 ### Environment Variables
 
 Create a `.env` file in the root directory for environment-specific configuration:

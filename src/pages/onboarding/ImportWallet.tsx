@@ -139,7 +139,13 @@ export function ImportWallet() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E] flex flex-col">
+    <div
+      className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E] flex flex-col"
+      style={{
+        paddingTop: "var(--safe-area-inset-top)",
+        paddingBottom: "var(--safe-area-inset-bottom)",
+      }}
+    >
       <div className="p-4">
         <Button variant="icon" onClick={() => navigate(-1)}>
           <ArrowLeft className="w-5 h-5" />

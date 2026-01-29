@@ -1,7 +1,7 @@
-import { ReactNode } from 'react';
-import { Navigate, useLocation } from 'react-router';
-import { useAuth } from '@/contexts/AuthContext';
-import { Loader2 } from 'lucide-react';
+import { ReactNode } from "react";
+import { Navigate, useLocation } from "react-router";
+import { useAuth } from "@/contexts/AuthContext";
+import { Loader2 } from "lucide-react";
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -13,14 +13,24 @@ interface ProtectedRouteProps {
  * ProtectedRoute component that ensures user is authenticated
  * Optionally requires wallet to be connected
  */
-export function ProtectedRoute({ children, requireWallet = false, allowWithoutWallet = false }: ProtectedRouteProps) {
+export function ProtectedRoute({
+  children,
+  requireWallet = false,
+  allowWithoutWallet = false,
+}: ProtectedRouteProps) {
   const { user, userProfile, loading, isAuthenticated } = useAuth();
   const location = useLocation();
 
   // Show loading state while checking auth
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E] flex items-center justify-center">
+      <div
+        className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E] flex items-center justify-center"
+        style={{
+          paddingTop: "var(--safe-area-inset-top)",
+          paddingBottom: "var(--safe-area-inset-bottom)",
+        }}
+      >
         <div className="text-center">
           <Loader2 className="w-8 h-8 mx-auto mb-4 animate-spin text-[#12d585]" />
           <p className="text-white/60">Loading...</p>
@@ -35,9 +45,10 @@ export function ProtectedRoute({ children, requireWallet = false, allowWithoutWa
   }
 
   // Check if we're on a wallet setup page - allow access to these pages
-  const isWalletSetupPage = location.pathname.startsWith('/auth/wallet-setup') || 
-                           location.pathname.startsWith('/auth/import-wallet') ||
-                           location.pathname.startsWith('/wallet/fund');
+  const isWalletSetupPage =
+    location.pathname.startsWith("/auth/wallet-setup") ||
+    location.pathname.startsWith("/auth/import-wallet") ||
+    location.pathname.startsWith("/wallet/fund");
 
   // If this is a wallet setup page, allow access without wallet
   if (isWalletSetupPage || allowWithoutWallet) {
@@ -51,7 +62,8 @@ export function ProtectedRoute({ children, requireWallet = false, allowWithoutWa
   // 2. They don't have a walletAddress AND isNew is undefined (new user without wallet)
   const hasWallet = !!userProfile?.walletAddress;
   const isNewUser = userProfile?.isNew === true;
-  const needsWalletSetup = !hasWallet && (isNewUser || userProfile?.isNew === undefined);
+  const needsWalletSetup =
+    !hasWallet && (isNewUser || userProfile?.isNew === undefined);
 
   if (needsWalletSetup) {
     return <Navigate to="/auth/wallet-setup" replace />;

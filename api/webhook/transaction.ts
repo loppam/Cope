@@ -242,27 +242,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         walletAddresses.add(account.account);
       });
 
-      // For each wallet address, check if it's in any user's watchlist
+      // For each wallet address, find users watching it (per-user, not platform-wide)
       for (const walletAddress of walletAddresses) {
-        // Since Firestore doesn't support nested array queries easily,
-        // we'll need to get all users and filter client-side
-        // For better performance, we can maintain a separate collection
-        const allUsersSnapshot = await db.collection("users").get();
+        // Prefer reverse index: watchedWallets/{walletAddress} -> { watchers: { [uid]: { nickname? } } }
+        const watchedDoc = await db
+          .collection("watchedWallets")
+          .doc(walletAddress)
+          .get();
+        const watchersMap = watchedDoc.exists
+          ? (watchedDoc.data()?.watchers as Record<
+              string,
+              { nickname?: string }
+            >) || {}
+          : null;
 
-        const usersWithWallet = allUsersSnapshot.docs.filter((doc) => {
-          const userData = doc.data();
-          const watchlist = userData.watchlist || [];
-          return watchlist.some((w: any) => w.address === walletAddress);
-        });
+        let usersWithWallet: Array<{ id: string; data: () => any }>;
+        if (watchersMap && Object.keys(watchersMap).length > 0) {
+          // Use reverse index: only fetch user docs for watchers
+          const userIds = Object.keys(watchersMap);
+          usersWithWallet = await Promise.all(
+            userIds.map(async (uid) => {
+              const userSnap = await db.collection("users").doc(uid).get();
+              return userSnap.exists
+                ? { id: userSnap.id, data: () => userSnap.data() }
+                : null;
+            }),
+          ).then(
+            (arr) =>
+              arr.filter(Boolean) as Array<{ id: string; data: () => any }>,
+          );
+        } else {
+          // Fallback: no index yet (legacy), scan all users
+          const allUsersSnapshot = await db.collection("users").get();
+          usersWithWallet = allUsersSnapshot.docs
+            .filter((doc) => {
+              const userData = doc.data();
+              const watchlist = userData.watchlist || [];
+              return watchlist.some((w: any) => w.address === walletAddress);
+            })
+            .map((doc) => ({ id: doc.id, data: () => doc.data() }));
+        }
 
-        // Create notifications for each user watching this wallet
+        // Create notifications for each user watching this wallet (per-user, not platform-wide)
         for (const userDoc of usersWithWallet) {
           const userId = userDoc.id;
           const userData = userDoc.data();
-          const watchlist = userData.watchlist || [];
+          const watchlist = userData?.watchlist || [];
           const watchedWallet = watchlist.find(
             (w: any) => w.address === walletAddress,
           );
+          const nickname =
+            (watchersMap && watchersMap[userId]?.nickname) ||
+            watchedWallet?.nickname;
 
           // Determine notification type and details
           const tokenTransfers = tx.tokenTransfers || [];
@@ -317,8 +348,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               : hasTokenTransfer
                 ? `Token Swap Detected`
                 : `Transaction Detected`,
-            message: watchedWallet?.nickname
-              ? `${watchedWallet.nickname} made a ${isLargeTrade ? "large trade" : hasTokenTransfer ? "token swap" : "transaction"}`
+            message: nickname
+              ? `${nickname} made a ${isLargeTrade ? "large trade" : hasTokenTransfer ? "token swap" : "transaction"}`
               : `Watched wallet ${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)} made a ${isLargeTrade ? "large trade" : hasTokenTransfer ? "token swap" : "transaction"}`,
             txHash: tx.signature,
             tokenAddress,
@@ -357,40 +388,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             console.error("Error sending push notification:", pushError);
           }
 
-          // Send push notification if user has push enabled
-          try {
-            const userData = userDoc.data();
-            if (userData?.pushEnabled && userData?.pushSubscription) {
-              // Send push notification (using Web Push API)
-              // Note: This requires VAPID keys to be configured
-              // For now, we'll just log - actual push sending would require VAPID setup
-              console.log(
-                `Push notification queued for user ${userId}: ${notificationData.title}`,
-              );
-
-              // In production, you would send the push notification here using web-push library
-              // const webpush = require('web-push');
-              // await webpush.sendNotification(
-              //   userData.pushSubscription,
-              //   JSON.stringify({
-              //     title: notificationData.title,
-              //     body: notificationData.message,
-              //     icon: '/icons/icon-192x192.png',
-              //     badge: '/icons/icon-96x96.png',
-              //     data: {
-              //       url: `/app/alerts`,
-              //       notificationId: notificationRef.id,
-              //     },
-              //   })
-              // );
-            }
-          } catch (pushError) {
-            // Don't fail the webhook if push fails
-            console.error("Error sending push notification:", pushError);
-          }
-
-          // Update last checked timestamp for the wallet
-          const updatedWatchlist = watchlist.map((w: any) =>
+          // Update last checked timestamp for the wallet in user's watchlist
+          const updatedWatchlist = (userData?.watchlist || []).map((w: any) =>
             w.address === walletAddress
               ? {
                   ...w,
@@ -400,7 +399,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               : w,
           );
 
-          await userDoc.ref.update({
+          await db.collection("users").doc(userId).update({
             watchlist: updatedWatchlist,
             updatedAt: new Date(),
           });

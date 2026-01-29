@@ -1,0 +1,30 @@
+rules_version = '2';
+// Firestore security rules (RLS) for COPE
+// Deploy with: firebase deploy --only firestore:rules
+// Docs: https://firebase.google.com/docs/firestore/security/get-started
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Users: each user can only read/write their own profile (client reads profile/watchlist; watchlist add/remove goes via API with Admin SDK)
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Notifications: created by transaction webhook (Admin SDK). Clients can only read/update/delete their own (Alerts page).
+    match /notifications/{notificationId} {
+      allow read, update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if false; // Only server (webhook) creates via Admin SDK
+    }
+
+    // Push tokens: stored by API (Admin SDK). Client does not read/write this collection directly; allow own for future use.
+    match /users/{userId}/pushTokens/{tokenId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Watched wallets reverse index: server-only (API/webhook). No client access.
+    match /watchedWallets/{walletAddress} {
+      allow read, write: if false;
+    }
+  }
+}

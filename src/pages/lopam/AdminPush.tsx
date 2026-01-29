@@ -64,7 +64,13 @@ export function AdminPush() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E] p-6">
+    <div
+      className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E] p-6"
+      style={{
+        paddingTop: "calc(1.5rem + var(--safe-area-inset-top))",
+        paddingBottom: "calc(1.5rem + var(--safe-area-inset-bottom))",
+      }}
+    >
       <div className="max-w-[600px] mx-auto">
         <h1 className="text-3xl font-bold mb-4">Lopam Push Console</h1>
         <Card className="space-y-4 p-6 mb-4">

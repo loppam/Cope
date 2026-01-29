@@ -1,11 +1,11 @@
-import { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router';
-import { Button } from '@/components/Button';
-import { Card } from '@/components/Card';
-import { ArrowLeft, Copy, Eye, EyeOff, Check } from 'lucide-react';
-import { QRCodeSVG } from 'qrcode.react';
-import { toast } from 'sonner';
-import { useAuth } from '@/contexts/AuthContext';
+import { useState } from "react";
+import { useNavigate, useLocation } from "react-router";
+import { Button } from "@/components/Button";
+import { Card } from "@/components/Card";
+import { ArrowLeft, Copy, Eye, EyeOff, Check } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 
 export function FundWallet() {
   const navigate = useNavigate();
@@ -14,27 +14,38 @@ export function FundWallet() {
   const [copied, setCopied] = useState(false);
   const [showMnemonic, setShowMnemonic] = useState(false);
   const [mnemonicSaved, setMnemonicSaved] = useState(false);
-  
+
   // Get wallet data from location state or Firebase
-  const locationState = location.state as { mnemonic?: string; publicKey?: string; isNewWallet?: boolean } | null;
-  const walletAddress = locationState?.publicKey || userProfile?.walletAddress || '';
+  const locationState = location.state as {
+    mnemonic?: string;
+    publicKey?: string;
+    isNewWallet?: boolean;
+  } | null;
+  const walletAddress =
+    locationState?.publicKey || userProfile?.walletAddress || "";
   const mnemonic = locationState?.mnemonic;
   const isNewWallet = locationState?.isNewWallet || false;
 
   const copyAddress = () => {
     navigator.clipboard.writeText(walletAddress);
     setCopied(true);
-    toast.success('Address copied!');
+    toast.success("Address copied!");
     setTimeout(() => setCopied(false), 2000);
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E] flex flex-col">
+    <div
+      className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E] flex flex-col"
+      style={{
+        paddingTop: "var(--safe-area-inset-top)",
+        paddingBottom: "var(--safe-area-inset-bottom)",
+      }}
+    >
       <div className="p-4 flex items-center justify-between">
         <Button variant="icon" onClick={() => navigate(-1)}>
           <ArrowLeft className="w-5 h-5" />
         </Button>
-        <Button variant="text" onClick={() => navigate('/app/home')}>
+        <Button variant="text" onClick={() => navigate("/app/home")}>
           Skip for now
         </Button>
       </div>
@@ -54,18 +65,26 @@ export function FundWallet() {
                   <span>Save Your Recovery Phrase</span>
                 </h3>
                 <p className="text-sm text-white/70 mb-4">
-                  Write down these 12 words in order. This is the only way to recover your wallet if you lose access.
+                  Write down these 12 words in order. This is the only way to
+                  recover your wallet if you lose access.
                 </p>
-                
+
                 {!mnemonicSaved ? (
                   <>
                     <div className="relative">
-                      <div className={`grid grid-cols-3 gap-2 p-4 rounded-[12px] bg-[#000000] border ${showMnemonic ? 'border-[#12d585]/50' : 'border-white/10'}`}>
-                        {mnemonic.split(' ').map((word, index) => (
-                          <div key={index} className="flex items-center gap-1 text-sm">
-                            <span className="text-white/40 text-xs">{index + 1}.</span>
+                      <div
+                        className={`grid grid-cols-3 gap-2 p-4 rounded-[12px] bg-[#000000] border ${showMnemonic ? "border-[#12d585]/50" : "border-white/10"}`}
+                      >
+                        {mnemonic.split(" ").map((word, index) => (
+                          <div
+                            key={index}
+                            className="flex items-center gap-1 text-sm"
+                          >
+                            <span className="text-white/40 text-xs">
+                              {index + 1}.
+                            </span>
                             <span className="font-mono text-white/90">
-                              {showMnemonic ? word : '••••••••'}
+                              {showMnemonic ? word : "••••••••"}
                             </span>
                           </div>
                         ))}
@@ -74,14 +93,18 @@ export function FundWallet() {
                         onClick={() => setShowMnemonic(!showMnemonic)}
                         className="absolute top-2 right-2 text-white/50 hover:text-white"
                       >
-                        {showMnemonic ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        {showMnemonic ? (
+                          <EyeOff className="w-4 h-4" />
+                        ) : (
+                          <Eye className="w-4 h-4" />
+                        )}
                       </button>
                     </div>
-                    
+
                     <Button
                       onClick={() => {
                         navigator.clipboard.writeText(mnemonic);
-                        toast.success('Recovery phrase copied!');
+                        toast.success("Recovery phrase copied!");
                       }}
                       variant="outline"
                       className="w-full mt-3 text-[#FFB84D] border-[#FFB84D]/30 hover:bg-[#FFB84D]/10"
@@ -89,7 +112,7 @@ export function FundWallet() {
                       <Copy className="w-4 h-4 mr-2" />
                       Copy Recovery Phrase
                     </Button>
-                    
+
                     <Button
                       onClick={() => setMnemonicSaved(true)}
                       className="w-full mt-2 bg-[#12d585] hover:bg-[#12d585]/90 text-[#000000]"
@@ -131,7 +154,9 @@ export function FundWallet() {
           {walletAddress && (
             <Card>
               <div className="mb-3">
-                <p className="text-sm text-white/60 mb-2">Your Wallet Address</p>
+                <p className="text-sm text-white/60 mb-2">
+                  Your Wallet Address
+                </p>
                 <div className="flex items-center gap-2">
                   <code className="flex-1 px-3 py-2 bg-[#000000] rounded-[12px] text-sm font-mono text-white/90 overflow-hidden text-ellipsis">
                     {walletAddress}
@@ -150,12 +175,12 @@ export function FundWallet() {
             </p>
           </div>
 
-          <Button onClick={() => navigate('/app/home')} className="w-full h-12">
+          <Button onClick={() => navigate("/app/home")} className="w-full h-12">
             I've Deposited
           </Button>
 
           <button
-            onClick={() => navigate('/app/home')}
+            onClick={() => navigate("/app/home")}
             className="w-full text-center text-sm text-white/60 hover:text-white"
           >
             Continue without funding

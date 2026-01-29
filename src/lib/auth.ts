@@ -19,8 +19,14 @@ import {
   getDocs,
   limit,
   orderBy,
+  type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { auth, db } from "./firebase";
+
+// Treat absence of isPublic as public (true). If the field exists, use its boolean value.
+function isUserPublic(data: { isPublic?: boolean }): boolean {
+  return data.isPublic !== false;
+}
 
 // Twitter OAuth Provider
 const twitterProvider = new TwitterAuthProvider();
@@ -49,7 +55,7 @@ function isMobileDevice(): boolean {
 // IMPORTANT: This function preserves existing wallet data - it only sets wallet fields
 // if they don't already exist (for new users only)
 async function saveUserProfile(user: User, credential: any): Promise<void> {
-  // Extract Twitter handle from displayName
+  // Extract Twitter handle from displayName (store as-is; search is case-insensitive)
   let xHandle = "";
   if (user.displayName) {
     xHandle = user.displayName.startsWith("@")
@@ -668,11 +674,7 @@ export async function findUserByWalletAddress(
     const userDoc = snapshot.docs[0];
     const userData = userDoc.data();
 
-    // If requirePublic is true, only return if user is public
-    // Default to public if isPublic field doesn't exist (for existing users)
-    // Only filter out if isPublic is explicitly false
-    const isPublic = userData.isPublic !== false; // Default to true if undefined/null
-    if (requirePublic && !isPublic) {
+    if (requirePublic && !isUserPublic(userData)) {
       return null;
     }
 
@@ -682,7 +684,7 @@ export async function findUserByWalletAddress(
       xHandle: userData.xHandle || null,
       avatar: userData.avatar || userData.photoURL || null,
       walletAddress: userData.walletAddress,
-      isPublic: userData.isPublic !== false, // Default to true if undefined
+      isPublic: isUserPublic(userData),
       // Add any other user data you want to return
     };
   } catch (error) {
@@ -691,51 +693,60 @@ export async function findUserByWalletAddress(
   }
 }
 
-// Find user by X handle (Twitter username)
-// Only returns public users (or users without isPublic field - treated as public by default)
+// Find user by X handle (Twitter username); case-insensitive so existing users are found
+// Only returns public users: absence of isPublic → public; if exists, use the boolean
 export async function findUserByXHandle(xHandle: string) {
   try {
-    // Normalize handle - ensure it starts with @
-    const normalizedHandle = xHandle.startsWith("@")
-      ? xHandle.toLowerCase()
-      : `@${xHandle.toLowerCase()}`;
+    const withAt = xHandle.trim().startsWith("@")
+      ? xHandle.trim()
+      : `@${xHandle.trim()}`;
+    const normalizedHandle = withAt.toLowerCase();
 
     const usersRef = collection(db, "users");
-    // Query for users with matching X handle
-    // Note: Firestore doesn't support != null queries well, so we query all and filter
-    const q = query(usersRef, where("xHandle", "==", normalizedHandle));
-    const snapshot = await getDocs(q);
+    // Query two case variants so we match stored "@LopamEth" when user types "@lopameth"
+    const capitalized =
+      normalizedHandle.length > 1
+        ? "@" +
+          normalizedHandle.slice(1).charAt(0).toUpperCase() +
+          normalizedHandle.slice(2)
+        : normalizedHandle;
+    const prefixes = [normalizedHandle, capitalized].filter(
+      (p, i, arr) => arr.indexOf(p) === i,
+    );
 
-    if (snapshot.empty) {
-      return null;
+    const seenIds = new Set<string>();
+    const allDocs: QueryDocumentSnapshot[] = [];
+    for (const prefix of prefixes) {
+      const q = query(
+        usersRef,
+        where("xHandle", ">=", prefix),
+        where("xHandle", "<=", prefix + "\uf8ff"),
+        orderBy("xHandle"),
+        limit(20),
+      );
+      const snapshot = await getDocs(q);
+      snapshot.docs.forEach((d) => {
+        if (!seenIds.has(d.id)) {
+          seenIds.add(d.id);
+          allDocs.push(d);
+        }
+      });
     }
+    const exactMatch = allDocs.find(
+      (d) => (d.data().xHandle || "").toLowerCase() === normalizedHandle,
+    );
+    if (!exactMatch) return null;
 
-    // Filter for public users with wallets (treat missing isPublic as public)
-    const publicUsers = snapshot.docs.filter((doc) => {
-      const data = doc.data();
-      // User must have a wallet address
-      if (!data.walletAddress) {
-        return false;
-      }
-      // User is public if isPublic is not explicitly false
-      return data.isPublic !== false;
-    });
-
-    if (publicUsers.length === 0) {
-      return null;
-    }
-
-    // Get the first matching public user
-    const userDoc = publicUsers[0];
-    const userData = userDoc.data();
+    const userData = exactMatch.data();
+    if (!userData.walletAddress || !isUserPublic(userData)) return null;
 
     return {
-      uid: userDoc.id,
+      uid: exactMatch.id,
       displayName: userData.displayName || userData.xHandle || null,
       xHandle: userData.xHandle || null,
       avatar: userData.avatar || userData.photoURL || null,
       walletAddress: userData.walletAddress,
-      isPublic: userData.isPublic !== false, // Default to true if undefined
+      isPublic: isUserPublic(userData),
     };
   } catch (error) {
     console.error("Error finding user by X handle:", error);
@@ -753,8 +764,8 @@ export interface UserSearchResult {
   isPublic?: boolean;
 }
 
-// Search users by X handle prefix (for dropdown suggestions)
-// Only returns public users; absence of isPublic field is treated as true
+// Search users by X handle prefix (for dropdown suggestions); case-insensitive
+// Only returns public users: absence of isPublic → public; if exists, use the boolean
 export async function searchUsersByHandle(
   handleQuery: string,
   limitCount: number = 20,
@@ -767,20 +778,43 @@ export async function searchUsersByHandle(
       ? trimmed.toLowerCase()
       : `@${trimmed.toLowerCase()}`;
 
-    const usersRef = collection(db, "users");
-    const q = query(
-      usersRef,
-      where("xHandle", ">=", normalizedPrefix),
-      where("xHandle", "<=", normalizedPrefix + "\uf8ff"),
-      orderBy("xHandle"),
-      limit(limitCount * 2),
+    // Query two case variants so we match stored "@LopamEth" when user types "lopam"
+    const capitalized =
+      normalizedPrefix.length > 1
+        ? "@" +
+          normalizedPrefix.slice(1).charAt(0).toUpperCase() +
+          normalizedPrefix.slice(2)
+        : normalizedPrefix;
+    const prefixes = [normalizedPrefix, capitalized].filter(
+      (p, i, arr) => arr.indexOf(p) === i,
     );
-    const snapshot = await getDocs(q);
 
-    const publicUsers = snapshot.docs.filter((docSnap) => {
+    const usersRef = collection(db, "users");
+    const seenIds = new Set<string>();
+    const mergedDocs: QueryDocumentSnapshot[] = [];
+    for (const prefix of prefixes) {
+      const q = query(
+        usersRef,
+        where("xHandle", ">=", prefix),
+        where("xHandle", "<=", prefix + "\uf8ff"),
+        orderBy("xHandle"),
+        limit(limitCount * 2),
+      );
+      const snapshot = await getDocs(q);
+      snapshot.docs.forEach((d) => {
+        if (!seenIds.has(d.id)) {
+          seenIds.add(d.id);
+          mergedDocs.push(d);
+        }
+      });
+    }
+
+    const prefixLower = normalizedPrefix.toLowerCase();
+    const publicUsers = mergedDocs.filter((docSnap) => {
       const data = docSnap.data();
       if (!data.walletAddress) return false;
-      return data.isPublic !== false; // default to true if undefined
+      if (!isUserPublic(data)) return false;
+      return (data.xHandle || "").toLowerCase().startsWith(prefixLower);
     });
 
     return publicUsers.slice(0, limitCount).map((docSnap) => {
@@ -791,11 +825,14 @@ export async function searchUsersByHandle(
         xHandle: userData.xHandle || null,
         avatar: userData.avatar || userData.photoURL || null,
         walletAddress: userData.walletAddress,
-        isPublic: userData.isPublic !== false,
+        isPublic: isUserPublic(userData),
       };
     });
   } catch (error) {
     console.error("Error searching users by handle:", error);
+    if (error && typeof (error as { code?: number }).code !== "undefined") {
+      console.error("Search error details:", error);
+    }
     return [];
   }
 }
@@ -820,11 +857,10 @@ export async function updatePublicWalletStatus(uid: string, isPublic: boolean) {
 }
 
 // Get public wallets (for future discovery feature)
-// Includes users with isPublic: true OR users without isPublic field (default public)
+// Absence of isPublic → public; if exists, use the boolean
 export async function getPublicWallets(limitCount: number = 50) {
   try {
     const usersRef = collection(db, "users");
-    // Query all users with wallets, then filter for public ones
     const q = query(
       usersRef,
       where("walletAddress", "!=", null),
@@ -833,13 +869,8 @@ export async function getPublicWallets(limitCount: number = 50) {
 
     const snapshot = await getDocs(q);
 
-    // Filter for public users (treat missing isPublic as public)
     const publicUsers = snapshot.docs
-      .filter((doc) => {
-        const data = doc.data();
-        // User is public if isPublic is not explicitly false
-        return data.isPublic !== false;
-      })
+      .filter((doc) => isUserPublic(doc.data()))
       .slice(0, limitCount);
 
     return publicUsers.map((doc) => ({

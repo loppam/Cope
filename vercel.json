@@ -1,6 +1,14 @@
 {
   "rewrites": [
     {
+      "source": "/__/auth/(.*)",
+      "destination": "https://dplug-687cf.firebaseapp.com/__/auth/$1"
+    },
+    {
+      "source": "/__/firebase/init.json",
+      "destination": "/api/firebase-init"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

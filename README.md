@@ -14,7 +14,7 @@ A modern Progressive Web App (PWA) for cryptocurrency trading and wallet managem
 
 ## 📋 Prerequisites
 
-- Node.js 18+ 
+- Node.js 18+
 - npm or yarn
 
 ## 🛠️ Installation
@@ -75,6 +75,10 @@ cope/
 
 See [PWA_SETUP.md](./PWA_SETUP.md) for detailed PWA setup and configuration.
 
+### Firebase Auth on Mobile (redirect / Safari)
+
+For X/Twitter sign-in with redirect on mobile (and to fix init.json 404 / iframe errors), see [FIREBASE_AUTH_MOBILE.md](./FIREBASE_AUTH_MOBILE.md).
+
 ### Environment Variables
 
 Create a `.env` file in the root directory for environment-specific configuration:
@@ -110,6 +114,7 @@ npm run preview
 ## 📦 Build
 
 The production build includes:
+
 - Optimized and minified code
 - Service worker for offline support
 - PWA manifest
@@ -124,6 +129,7 @@ Output will be in the `dist/` directory.
 ## 🎨 Styling
 
 The app uses:
+
 - **Tailwind CSS** for utility-first styling
 - **Custom theme** in `src/styles/theme.css`
 - **Responsive design** for mobile and desktop
@@ -154,16 +160,19 @@ See [ATTRIBUTIONS.md](./ATTRIBUTIONS.md) for license information.
 ## 🐛 Troubleshooting
 
 ### PWA not working
+
 - Ensure you're using HTTPS (or localhost)
 - Check browser console for service worker errors
 - Verify manifest.json is valid
 
 ### Icons not showing
+
 - Generate icons using `npm run generate-icons`
 - Verify all icon files exist in `public/icons/`
 - Check manifest.json icon paths
 
 ### Build errors
+
 - Clear `node_modules` and reinstall
 - Check TypeScript errors
 - Verify all dependencies are installed

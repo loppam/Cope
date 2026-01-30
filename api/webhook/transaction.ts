@@ -369,6 +369,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Helius sends an array of transactions
     const transactions = Array.isArray(payload) ? payload : [payload];
+    console.log("[Webhook] Received", transactions.length, "transaction(s)");
 
     // Filter to BUY/SELL/SWAP and collect unique primary token mints for symbol resolution (one /tokens/:mint per mint per request)
     const processableTx = transactions.filter(
@@ -633,14 +634,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    return res
-      .status(200)
-      .json({ success: true, processed: transactions.length });
+    const response = { success: true, processed: transactions.length };
+    console.log("[Webhook] Response:", JSON.stringify(response));
+    return res.status(200).json(response);
   } catch (error: any) {
     console.error("Webhook processing error:", error);
-    return res
-      .status(500)
-      .json({ error: error.message || "Internal server error" });
+    const errorResponse = {
+      error: error.message || "Internal server error",
+    };
+    console.log("[Webhook] Error response:", JSON.stringify(errorResponse));
+    return res.status(500).json(errorResponse);
   }
 }
 

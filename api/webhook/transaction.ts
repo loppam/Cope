@@ -189,38 +189,59 @@ async function getSolPrice(): Promise<number> {
 }
 
 /**
- * Fetch token symbol/name from SolanaTracker for notification text.
+ * Fetch token symbol/name from Helius DAS getAsset for notification text.
+ * Replaces SolanaTracker /tokens/:mint to use the same Helius API key as the webhook.
  */
 async function getTokenSymbol(mint: string): Promise<string> {
   const cached = tokenSymbolCache.get(mint);
   if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
     return cached.symbol;
   }
+  const fallback = `${mint.slice(0, 4)}...${mint.slice(-4)}`;
   try {
     const apiKey =
-      process.env.VITE_SOLANATRACKER_API_KEY ||
-      process.env.SOLANATRACKER_API_KEY;
-    if (!apiKey) return `${mint.slice(0, 4)}...${mint.slice(-4)}`;
+      process.env.HELIUS_API_KEY || process.env.VITE_HELIUS_API_KEY;
+    if (!apiKey) return fallback;
     const response = await fetchWithRetry(
-      `https://data.solanatracker.io/tokens/${mint}`,
+      `https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(apiKey)}`,
       {
-        headers: {
-          "x-api-key": apiKey,
-          "Content-Type": "application/json",
-        },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: "1",
+          method: "getAsset",
+          params: {
+            id: mint,
+            options: {
+              showUnverifiedCollections: false,
+              showCollectionMetadata: false,
+              showFungible: false,
+              showInscription: false,
+            },
+          },
+        }),
       },
     );
-    if (!response.ok) return `${mint.slice(0, 4)}...${mint.slice(-4)}`;
-    const data = await response.json();
+    if (!response.ok) return fallback;
+    const data = (await response.json()) as {
+      result?: {
+        content?: { metadata?: { symbol?: string; name?: string } };
+        mint_extensions?: { metadata?: { symbol?: string; name?: string } };
+      };
+    };
+    const r = data?.result;
     const symbol =
-      data.token?.symbol ||
-      data.token?.name ||
-      `${mint.slice(0, 4)}...${mint.slice(-4)}`;
+      r?.content?.metadata?.symbol ??
+      r?.content?.metadata?.name ??
+      r?.mint_extensions?.metadata?.symbol ??
+      r?.mint_extensions?.metadata?.name ??
+      fallback;
     tokenSymbolCache.set(mint, { symbol, timestamp: Date.now() });
     return symbol;
   } catch (error) {
     console.error(`Error fetching token symbol for ${mint}:`, error);
-    return `${mint.slice(0, 4)}...${mint.slice(-4)}`;
+    return fallback;
   }
 }
 
@@ -349,12 +370,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Helius sends an array of transactions
     const transactions = Array.isArray(payload) ? payload : [payload];
 
-    for (const tx of transactions) {
-      // Only process BUY, SELL, SWAP (enhanced webhook types)
+    // Filter to BUY/SELL/SWAP and collect unique primary token mints for symbol resolution (one /tokens/:mint per mint per request)
+    const processableTx = transactions.filter(
+      (tx) => tx.type === "BUY" || tx.type === "SELL" || tx.type === "SWAP",
+    );
+    const uniqueMints = [
+      ...new Set(
+        processableTx
+          .map((tx) => getPrimaryTokenMint(tx))
+          .filter((m): m is string => !!m),
+      ),
+    ];
+    const symbolByMint = new Map<string, string>();
+    await Promise.all(
+      uniqueMints.map(async (mint) => {
+        const symbol = await getTokenSymbol(mint);
+        symbolByMint.set(mint, symbol);
+      }),
+    );
+
+    for (const tx of processableTx) {
       const isBuy = tx.type === "BUY";
       const isSell = tx.type === "SELL";
       const isSwap = tx.type === "SWAP";
-      if (!isBuy && !isSell && !isSwap) continue;
 
       // Extract wallet addresses from the transaction
       const walletAddresses = new Set<string>();
@@ -425,7 +463,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : null;
 
       const tokenSymbol = tokenAddress
-        ? await getTokenSymbol(tokenAddress)
+        ? (symbolByMint.get(tokenAddress) ?? "SOL")
         : "SOL";
       const amountUsdFormatted =
         amountUsd >= 1
@@ -523,9 +561,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               notificationMessage = `${displayName} had a transaction (${amountUsdFormatted})`;
             }
 
-            // Create notification
-            const notificationRef = db.collection("notifications").doc();
-            // Firestore does not accept undefined; use null for optional tokenAddress
+            // Create/update notification with deterministic id (tx + user) so retries/duplicate delivery don't create duplicates
+            const notificationId = createHash("sha256")
+              .update(`${tx.signature}:${userId}`)
+              .digest("hex");
+            const notificationRef = db
+              .collection("notifications")
+              .doc(notificationId);
             const notificationData = {
               userId,
               walletAddress,
@@ -541,7 +583,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               createdAt: new Date(),
             };
 
-            await notificationRef.set(notificationData);
+            await notificationRef.set(notificationData, { merge: true });
 
             // Push notification
             try {

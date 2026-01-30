@@ -455,6 +455,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         amountUsd += solAmount * solPrice;
       }
 
+      // SWAP: use net SOL balance decrease (fee payer) as the swap amount in USD
+      if (isSwap && tx.feePayer) {
+        const feePayerEntry = tx.accountData?.find(
+          (acc) => acc.account === tx.feePayer,
+        );
+        const nativeChange = feePayerEntry?.nativeBalanceChange;
+        if (nativeChange != null && nativeChange < 0) {
+          const netSolSpentLamports = Math.abs(nativeChange);
+          const solPrice = await getSolPrice();
+          const swapAmountUsd = (netSolSpentLamports / 1e9) * solPrice;
+          amountUsd = swapAmountUsd;
+        }
+      }
+
       const notificationType = isBuy
         ? "buy"
         : isSell
@@ -575,6 +589,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const notificationRef = db
               .collection("notifications")
               .doc(notificationId);
+
+            // Idempotency: if this notification already exists (duplicate webhook delivery), skip write and push
+            const existingSnap = await notificationRef.get();
+            if (existingSnap.exists) {
+              // Helius sent the same tx again – avoid duplicate in-app notification and duplicate push
+              continue;
+            }
+
             const notificationData = {
               userId,
               walletAddress,

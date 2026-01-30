@@ -367,6 +367,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const payload = req.body as HeliusWebhookPayload[] | HeliusWebhookPayload;
 
+    // Log raw payload as received (before any parsing)
+    console.log(
+      "[Webhook] Raw payload (as received):",
+      JSON.stringify(req.body, null, 2),
+    );
+
     // Helius sends an array of transactions
     const transactions = Array.isArray(payload) ? payload : [payload];
     console.log("[Webhook] Received", transactions.length, "transaction(s)");

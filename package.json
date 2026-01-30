@@ -7,9 +7,11 @@
     "build": "vite build",
     "dev": "vite",
     "preview": "vite preview",
-    "generate-icons": "node scripts/generate-icons.js"
+    "generate-icons": "node scripts/generate-icons.js",
+    "claim-jupiter-fees": "node scripts/claim-jupiter-referral-fees.mjs"
   },
   "dependencies": {
+    "@jup-ag/referral-sdk": "^0.3.0",
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",
     "@mui/icons-material": "7.3.5",

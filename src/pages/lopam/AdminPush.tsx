@@ -12,6 +12,42 @@ export function AdminPush() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [claimLoading, setClaimLoading] = useState(false);
+  const [claimSuccess, setClaimSuccess] = useState<string | null>(null);
+  const [claimError, setClaimError] = useState<string | null>(null);
+
+  const handleClaimJupiterFees = async () => {
+    setClaimLoading(true);
+    setClaimError(null);
+    setClaimSuccess(null);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        throw new Error("Authentication required");
+      }
+      const response = await fetch("/api/jupiter/claim-fees", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.message || data.error || "Failed to claim fees");
+      }
+      const msg =
+        data.message ||
+        (data.count > 0
+          ? `Claimed ${data.count} fee transaction(s). Signatures: ${(data.signatures || []).join(", ")}`
+          : "No claimable fees.");
+      setClaimSuccess(msg);
+    } catch (err) {
+      setClaimError((err as Error).message);
+    } finally {
+      setClaimLoading(false);
+    }
+  };
 
   const handleSubmit = async () => {
     if (!title || !body) {
@@ -118,6 +154,28 @@ export function AdminPush() {
           {success && <p className="text-sm text-[#12d585]">{success}</p>}
           <Button onClick={handleSubmit} disabled={loading} className="w-full">
             {loading ? "Sending..." : "Send Push"}
+          </Button>
+        </Card>
+
+        <Card className="space-y-4 p-6 mt-4">
+          <h2 className="text-lg font-semibold">Jupiter referral fees</h2>
+          <p className="text-sm text-white/60">
+            Claim accumulated referral fees from your Jupiter referral token
+            accounts. Requires JUPITER_REFERRAL_ACCOUNT, SOLANA_RPC_URL, and
+            KEYPAIR_JSON set in the API environment.
+          </p>
+          {claimError && <p className="text-sm text-[#FF4757]">{claimError}</p>}
+          {claimSuccess && (
+            <p className="text-sm text-[#12d585] whitespace-pre-wrap">
+              {claimSuccess}
+            </p>
+          )}
+          <Button
+            onClick={handleClaimJupiterFees}
+            disabled={claimLoading}
+            className="w-full"
+          >
+            {claimLoading ? "Claiming..." : "Claim Jupiter fees"}
           </Button>
         </Card>
       </div>

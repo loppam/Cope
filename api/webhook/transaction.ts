@@ -57,6 +57,16 @@ const tokenSymbolCache = new Map<
 >();
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
+const JUPITER_API_BASE = "https://api.jup.ag";
+
+/** Jupiter Price API v3 response entry */
+interface JupiterPriceData {
+  usdPrice: number;
+  blockId?: number;
+  decimals?: number;
+  priceChange24h?: number;
+}
+
 /** Fetch with one retry on 429 (rate limit). */
 async function fetchWithRetry(
   url: string,
@@ -81,81 +91,75 @@ async function fetchWithRetry(
 }
 
 /**
- * Fetch token price from SolanaTracker API
+ * Fetch token price(s) from Jupiter Price API v3
+ * https://api.jup.ag/price/v3?ids=<mint>
+ */
+async function getJupiterPrices(
+  mints: string[],
+): Promise<Record<string, number>> {
+  if (mints.length === 0) return {};
+  const apiKey =
+    process.env.VITE_JUPITER_API_KEY || process.env.JUPITER_API_KEY;
+  if (!apiKey) {
+    console.warn("Jupiter API key not configured, using fallback prices");
+    return {};
+  }
+  const ids = [...new Set(mints)].join(",");
+  const url = `${JUPITER_API_BASE}/price/v3?ids=${encodeURIComponent(ids)}`;
+  try {
+    const response = await fetchWithRetry(url, {
+      headers: {
+        "x-api-key": apiKey,
+        "Content-Type": "application/json",
+      },
+    });
+    if (!response.ok) {
+      console.warn(`Jupiter price API error: ${response.status}`);
+      return {};
+    }
+    const data = (await response.json()) as Record<string, JupiterPriceData>;
+    const out: Record<string, number> = {};
+    for (const mint of mints) {
+      const entry = data[mint];
+      out[mint] =
+        entry && typeof entry.usdPrice === "number" ? entry.usdPrice : 0;
+    }
+    return out;
+  } catch (error) {
+    console.error("Error fetching Jupiter prices:", error);
+    return {};
+  }
+}
+
+/**
+ * Fetch token price from Jupiter Price API v3
  */
 async function getTokenPrice(mint: string): Promise<number> {
-  // Check cache first
   const cached = priceCache.get(mint);
   if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
     return cached.price;
   }
-
-  try {
-    const apiKey =
-      process.env.VITE_SOLANATRACKER_API_KEY ||
-      process.env.SOLANATRACKER_API_KEY;
-    if (!apiKey) {
-      console.warn(
-        "SolanaTracker API key not configured, using fallback price",
-      );
-      return 0;
-    }
-
-    const response = await fetchWithRetry(
-      `https://data.solanatracker.io/tokens/${mint}`,
-      {
-        headers: {
-          "x-api-key": apiKey,
-          "Content-Type": "application/json",
-        },
-      },
-    );
-
-    if (!response.ok) {
-      console.warn(
-        `Failed to fetch token price for ${mint}: ${response.status}`,
-      );
-      return 0;
-    }
-
-    const data = await response.json();
-    // Get price from primary pool (highest liquidity)
-    const pools = data.pools || [];
-    if (pools.length > 0) {
-      const primaryPool = pools.reduce((best: any, current: any) => {
-        const bestLiquidity = best?.liquidity?.usd || 0;
-        const currentLiquidity = current?.liquidity?.usd || 0;
-        return currentLiquidity > bestLiquidity ? current : best;
-      });
-
-      const price = primaryPool?.price?.usd || 0;
-      // Cache the price
-      priceCache.set(mint, { price, timestamp: Date.now() });
-      return price;
-    }
-
-    return 0;
-  } catch (error) {
-    console.error(`Error fetching token price for ${mint}:`, error);
-    return 0;
+  const prices = await getJupiterPrices([mint]);
+  const price = prices[mint] ?? 0;
+  if (price > 0) {
+    priceCache.set(mint, { price, timestamp: Date.now() });
   }
+  return price;
 }
 
 const PRICES_COLLECTION = "prices";
 const SOL_PRICE_DOC_ID = "SOL";
 
 /**
- * Fetch SOL price: Firestore cache (5 min) shared across all invocations, then SolanaTracker.
+ * Fetch SOL price: Firestore cache (5 min) shared across invocations, then Jupiter /price/v3.
  */
 async function getSolPrice(): Promise<number> {
-  // In-memory cache first (same invocation)
   const cached = priceCache.get("SOL");
   if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
     return cached.price;
   }
 
   try {
-    // Firestore cache (shared across all serverless invocations)
     const priceRef = db.collection(PRICES_COLLECTION).doc(SOL_PRICE_DOC_ID);
     const priceSnap = await priceRef.get();
     if (priceSnap.exists) {
@@ -172,36 +176,9 @@ async function getSolPrice(): Promise<number> {
       }
     }
 
-    const apiKey =
-      process.env.VITE_SOLANATRACKER_API_KEY ||
-      process.env.SOLANATRACKER_API_KEY;
-    if (!apiKey) {
-      console.warn(
-        "SolanaTracker API key not configured, using fallback SOL price",
-      );
-      return 150; // Fallback price
-    }
-
-    const response = await fetchWithRetry(
-      "https://data.solanatracker.io/price",
-      {
-        headers: {
-          "x-api-key": apiKey,
-          "Content-Type": "application/json",
-        },
-      },
-    );
-
-    if (!response.ok) {
-      console.warn(`Failed to fetch SOL price: ${response.status}`);
-      return 150; // Fallback price
-    }
-
-    const data = await response.json();
-    const price = data.price || 150;
+    const prices = await getJupiterPrices([WRAPPED_SOL_MINT]);
+    const price = prices[WRAPPED_SOL_MINT] ?? 150;
     const now = Date.now();
-
-    // Update Firestore so other invocations get this price for 5 mins
     await priceRef.set({ price, updatedAt: now }, { merge: true });
     priceCache.set("SOL", { price, timestamp: now });
     return price;
@@ -405,11 +382,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
 
-      // Compute price/symbol once per tx (reduces SolanaTracker API calls and 429 rate limits).
-      // Note: Helius sends one webhook POST per transaction; each POST runs in a separate
-      // serverless invocation, so in-memory cache doesn't help across requests. High tx volume
-      // = many invocations = many getSolPrice/getTokenPrice calls. Consider a shared cache
-      // (e.g. Vercel KV / Upstash Redis) with ~60s TTL for SOL/token prices to cut 429s.
+      // Compute price/symbol once per tx (Jupiter /price/v3, cached in-memory and Firestore for SOL).
       const tokenTransfers = tx.tokenTransfers || [];
       const nativeTransfers = tx.nativeTransfers || [];
       const hasTokenTransfer = tokenTransfers.length > 0;
@@ -417,12 +390,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       let amountUsd = 0;
       if (hasTokenTransfer) {
-        const tokenPricePromises = tokenTransfers.map(async (transfer) => {
-          const tokenPrice = await getTokenPrice(transfer.mint);
-          return tokenPrice * (transfer.tokenAmount || 0);
-        });
-        const tokenAmounts = await Promise.all(tokenPricePromises);
-        amountUsd += tokenAmounts.reduce((sum, amount) => sum + amount, 0);
+        const mints = tokenTransfers.map((t) => t.mint);
+        const tokenPrices = await getJupiterPrices(mints);
+        for (const transfer of tokenTransfers) {
+          const price =
+            priceCache.get(transfer.mint)?.price ??
+            tokenPrices[transfer.mint] ??
+            0;
+          if (price > 0) {
+            priceCache.set(transfer.mint, { price, timestamp: Date.now() });
+          }
+          amountUsd += price * (transfer.tokenAmount || 0);
+        }
       }
       if (hasNativeTransfer) {
         const solPrice = await getSolPrice();

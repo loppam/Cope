@@ -1,7 +1,7 @@
 // SolanaTracker Data API integration for Solana wallet analytics
-import { apiCache } from './cache';
+import { apiCache } from "./cache";
 
-const SOLANATRACKER_API_BASE = 'https://data.solanatracker.io';
+const SOLANATRACKER_API_BASE = "https://data.solanatracker.io";
 
 /**
  * Get SolanaTracker API key from environment
@@ -9,7 +9,9 @@ const SOLANATRACKER_API_BASE = 'https://data.solanatracker.io';
 function getApiKey(): string {
   const apiKey = import.meta.env.VITE_SOLANATRACKER_API_KEY;
   if (!apiKey) {
-    throw new Error('SolanaTracker API key not configured. Add VITE_SOLANATRACKER_API_KEY to .env');
+    throw new Error(
+      "SolanaTracker API key not configured. Add VITE_SOLANATRACKER_API_KEY to .env",
+    );
   }
   return apiKey;
 }
@@ -21,21 +23,25 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** 1 RPS throttle for PnL API - last time a PnL request was started (ms) */
+let lastPnlRequestTime = 0;
+const PNL_MIN_INTERVAL_MS = 1000;
+
 /**
  * Make a request to SolanaTracker API with retry logic and exponential backoff
  */
 async function solanatrackerRequest<T>(
   endpoint: string,
   options: {
-    method?: 'GET' | 'POST';
+    method?: "GET" | "POST";
     params?: Record<string, any>;
     body?: any;
     retries?: number;
     baseDelay?: number;
-  } = {}
+  } = {},
 ): Promise<T> {
   const {
-    method = 'GET',
+    method = "GET",
     params,
     body,
     retries = 3,
@@ -44,9 +50,9 @@ async function solanatrackerRequest<T>(
 
   const apiKey = getApiKey();
   const url = new URL(`${SOLANATRACKER_API_BASE}${endpoint}`);
-  
+
   // Add query params for GET requests
-  if (method === 'GET' && params) {
+  if (method === "GET" && params) {
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined && value !== null) {
         url.searchParams.append(key, String(value));
@@ -59,47 +65,60 @@ async function solanatrackerRequest<T>(
       const fetchOptions: RequestInit = {
         method,
         headers: {
-          'x-api-key': apiKey,
-          'Content-Type': 'application/json',
+          "x-api-key": apiKey,
+          "Content-Type": "application/json",
         },
       };
 
       // Add body for POST requests
-      if (method === 'POST' && body) {
+      if (method === "POST" && body) {
         fetchOptions.body = JSON.stringify(body);
       }
 
       const response = await fetch(url.toString(), fetchOptions);
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({ message: 'Unknown error' }));
-        const errorMessage = error.message || `SolanaTracker API error: ${response.status}`;
-        
+        const error = await response
+          .json()
+          .catch(() => ({ message: "Unknown error" }));
+        const errorMessage =
+          error.message || `SolanaTracker API error: ${response.status}`;
+
         // Retry on rate limit (429) or server errors (5xx)
-        if ((response.status === 429 || response.status >= 500) && attempt < retries) {
+        if (
+          (response.status === 429 || response.status >= 500) &&
+          attempt < retries
+        ) {
           const waitTime = baseDelay * Math.pow(2, attempt);
-          console.warn(`Rate limited. Retrying in ${waitTime}ms... (attempt ${attempt + 1}/${retries + 1})`);
+          console.warn(
+            `Rate limited. Retrying in ${waitTime}ms... (attempt ${attempt + 1}/${retries + 1})`,
+          );
           await delay(waitTime);
           continue;
         }
-        
+
         throw new Error(errorMessage);
       }
 
       return response.json();
     } catch (error: any) {
       // If it's the last attempt or not a retryable error, throw
-      if (attempt === retries || (error.message && !error.message.includes('429') && !error.message.includes('5'))) {
+      if (
+        attempt === retries ||
+        (error.message &&
+          !error.message.includes("429") &&
+          !error.message.includes("5"))
+      ) {
         throw error;
       }
-      
+
       // Exponential backoff for network errors
       const waitTime = baseDelay * Math.pow(2, attempt);
       await delay(waitTime);
     }
   }
 
-  throw new Error('Max retries exceeded');
+  throw new Error("Max retries exceeded");
 }
 
 /**
@@ -236,12 +255,12 @@ export interface TokenInfoResponse {
     };
   }>;
   events?: {
-    '1m'?: { priceChangePercentage: number };
-    '5m'?: { priceChangePercentage: number };
-    '15m'?: { priceChangePercentage: number };
-    '30m'?: { priceChangePercentage: number };
-    '1h'?: { priceChangePercentage: number };
-    '24h'?: { priceChangePercentage: number };
+    "1m"?: { priceChangePercentage: number };
+    "5m"?: { priceChangePercentage: number };
+    "15m"?: { priceChangePercentage: number };
+    "30m"?: { priceChangePercentage: number };
+    "1h"?: { priceChangePercentage: number };
+    "24h"?: { priceChangePercentage: number };
   };
   risk?: {
     snipers?: { count: number; totalBalance: number; totalPercentage: number };
@@ -251,7 +270,12 @@ export interface TokenInfoResponse {
     dev?: { percentage: number; amount: number };
     fees?: { totalTrading: number; totalTips: number; total: number };
     rugged?: boolean;
-    risks?: Array<{ name: string; description: string; level: string; score: number }>;
+    risks?: Array<{
+      name: string;
+      description: string;
+      level: string;
+      score: number;
+    }>;
     score?: number;
     jupiterVerified?: boolean;
   };
@@ -261,37 +285,25 @@ export interface TokenInfoResponse {
   holders: number;
 }
 
-/**
- * Get complete token information by mint address
- * Returns comprehensive token data with price, market cap, liquidity, etc.
- */
-export async function getTokenInfo(tokenAddress: string): Promise<TokenInfoResponse> {
-  try {
-    const response = await solanatrackerRequest<TokenInfoResponse>(`/tokens/${tokenAddress}`, {
-      method: 'GET',
-      retries: 3,
-      baseDelay: 1000,
-    });
-    return response;
-  } catch (error) {
-    console.error('Error fetching token info:', error);
-    throw error;
-  }
-}
+// Token info now provided by Jupiter API
+// Re-exported below
 
 /**
  * Convert TokenInfoResponse to TokenSearchResult format for compatibility
  */
-export function convertTokenInfoToSearchResult(tokenInfo: TokenInfoResponse): TokenSearchResult {
+export function convertTokenInfoToSearchResult(
+  tokenInfo: TokenInfoResponse,
+): TokenSearchResult {
   // Get primary pool (pool with highest liquidity USD for most accurate price/market cap)
-  const primaryPool = tokenInfo.pools && tokenInfo.pools.length > 0
-    ? tokenInfo.pools.reduce((best, current) => {
-        const bestLiquidity = best?.liquidity?.usd || 0;
-        const currentLiquidity = current?.liquidity?.usd || 0;
-        return currentLiquidity > bestLiquidity ? current : best;
-      })
-    : undefined;
-  
+  const primaryPool =
+    tokenInfo.pools && tokenInfo.pools.length > 0
+      ? tokenInfo.pools.reduce((best, current) => {
+          const bestLiquidity = best?.liquidity?.usd || 0;
+          const currentLiquidity = current?.liquidity?.usd || 0;
+          return currentLiquidity > bestLiquidity ? current : best;
+        })
+      : undefined;
+
   return {
     id: tokenInfo.token.mint,
     name: tokenInfo.token.name,
@@ -299,7 +311,9 @@ export function convertTokenInfoToSearchResult(tokenInfo: TokenInfoResponse): To
     mint: tokenInfo.token.mint,
     image: tokenInfo.token.image,
     decimals: tokenInfo.token.decimals,
-    hasSocials: !!tokenInfo.token.strictSocials && Object.keys(tokenInfo.token.strictSocials).length > 0,
+    hasSocials:
+      !!tokenInfo.token.strictSocials &&
+      Object.keys(tokenInfo.token.strictSocials).length > 0,
     poolAddress: primaryPool?.poolId,
     liquidityUsd: primaryPool?.liquidity?.usd,
     marketCapUsd: primaryPool?.marketCap?.usd,
@@ -310,79 +324,56 @@ export function convertTokenInfoToSearchResult(tokenInfo: TokenInfoResponse): To
     freezeAuthority: null,
     mintAuthority: null,
     deployer: primaryPool?.deployer || tokenInfo.token.creation?.creator,
-    status: tokenInfo.token.creation ? 'active' : undefined,
-    createdAt: tokenInfo.token.creation?.created_time ? tokenInfo.token.creation.created_time * 1000 : undefined,
+    status: tokenInfo.token.creation ? "active" : undefined,
+    createdAt: tokenInfo.token.creation?.created_time
+      ? tokenInfo.token.creation.created_time * 1000
+      : undefined,
     holders: tokenInfo.holders,
-    launchpad: tokenInfo.token.creation ? {
-      curvePercentage: undefined, // Not available in this endpoint
-    } : undefined,
+    launchpad: tokenInfo.token.creation
+      ? {
+          curvePercentage: undefined, // Not available in this endpoint
+        }
+      : undefined,
     buys: tokenInfo.buys,
     sells: tokenInfo.sells,
     totalTransactions: tokenInfo.txns,
     volume_24h: primaryPool?.txns?.volume24h,
     top10: tokenInfo.risk?.top10,
     dev: tokenInfo.risk?.dev?.percentage,
-    bundlers: tokenInfo.risk?.bundlers ? {
-      count: tokenInfo.risk.bundlers.count,
-      balance: tokenInfo.risk.bundlers.totalBalance,
-      percentage: tokenInfo.risk.bundlers.totalPercentage,
-    } : undefined,
+    bundlers: tokenInfo.risk?.bundlers
+      ? {
+          count: tokenInfo.risk.bundlers.count,
+          balance: tokenInfo.risk.bundlers.totalBalance,
+          percentage: tokenInfo.risk.bundlers.totalPercentage,
+        }
+      : undefined,
     riskScore: tokenInfo.risk?.score,
-    socials: tokenInfo.token.strictSocials ? {
-      twitter: tokenInfo.token.strictSocials.twitter,
-      website: tokenInfo.token.strictSocials.website,
-      telegram: tokenInfo.token.strictSocials.telegram,
-    } : undefined,
-    fees: tokenInfo.risk?.fees ? {
-      total: tokenInfo.risk.fees.total,
-      totalTrading: tokenInfo.risk.fees.totalTrading,
-      totalTips: tokenInfo.risk.fees.totalTips,
-    } : undefined,
-    tokenDetails: tokenInfo.token.creation ? {
-      creator: tokenInfo.token.creation.creator,
-      tx: tokenInfo.token.creation.created_tx,
-      time: tokenInfo.token.creation.created_time * 1000,
-    } : undefined,
+    socials: tokenInfo.token.strictSocials
+      ? {
+          twitter: tokenInfo.token.strictSocials.twitter,
+          website: tokenInfo.token.strictSocials.website,
+          telegram: tokenInfo.token.strictSocials.telegram,
+        }
+      : undefined,
+    fees: tokenInfo.risk?.fees
+      ? {
+          total: tokenInfo.risk.fees.total,
+          totalTrading: tokenInfo.risk.fees.totalTrading,
+          totalTips: tokenInfo.risk.fees.totalTips,
+        }
+      : undefined,
+    tokenDetails: tokenInfo.token.creation
+      ? {
+          creator: tokenInfo.token.creation.creator,
+          tx: tokenInfo.token.creation.created_tx,
+          time: tokenInfo.token.creation.created_time * 1000,
+        }
+      : undefined,
   };
 }
 
-/**
- * Search for tokens by symbol or name
- * Use this for the UI search bar to resolve token symbols/names to mint addresses
- * Based on SolanaTracker API, the search query is passed as a query parameter
- */
-export async function searchTokens(
-  query: string,
-  page: number = 1,
-  limit: number = 100,
-  sortBy: string = 'createdAt',
-  sortOrder: 'asc' | 'desc' = 'desc'
-): Promise<TokenSearchResponse> {
-  if (!query || query.trim().length === 0) {
-    return {
-      status: 'success',
-      data: [],
-      total: 0,
-      pages: 0,
-      page: 1,
-      hasMore: false,
-    };
-  }
-
-  // SolanaTracker search API - uses 'query' parameter for symbol, name, or address
-  const params: Record<string, any> = {
-    page,
-    limit,
-    sortBy,
-    sortOrder,
-    query: query.trim(), // Searches by symbol, name, or address
-  };
-
-  return solanatrackerRequest<TokenSearchResponse>('/search', {
-    method: 'GET',
-    params,
-  });
-}
+// Token search now provided by Jupiter API
+// Re-exported below
 
 /**
  * Token Trade Interface - matches SolanaTracker response
@@ -393,7 +384,7 @@ export interface TokenTrade {
   priceUsd: number;
   volume: number;
   volumeSol: number;
-  type: 'buy' | 'sell';
+  type: "buy" | "sell";
   wallet: string;
   time: number;
   program: string;
@@ -407,12 +398,15 @@ export interface TokenTradesResponse {
 // TokenTransaction interfaces are now imported from birdeye.ts
 
 // Re-export Birdeye functions for token transactions (SolanaTracker trades endpoint doesn't have the right structure)
-export { 
-  getTokenTransactions, 
+export {
+  getTokenTransactions,
   getTokenTransactionsPaginated,
   type TokenTransaction,
-  type TokenTransactionsResponse
-} from './birdeye';
+  type TokenTransactionsResponse,
+} from "./birdeye";
+
+// Re-export Jupiter functions for token search, info, and SOL price
+export { searchTokens, getTokenInfo, getSolPrice } from "./jupiter";
 
 /**
  * Price Response Interface
@@ -425,21 +419,8 @@ export interface PriceResponse {
   lastUpdated: number;
 }
 
-/**
- * Get SOL price for USD calculations
- */
-export async function getSolPrice(): Promise<number> {
-  try {
-    const response = await solanatrackerRequest<PriceResponse>('/price', {
-      method: 'GET',
-    });
-    return response.price || 0;
-  } catch (error) {
-    console.error('Error fetching SOL price:', error);
-    // Fallback to approximate price
-    return 150;
-  }
-}
+// SOL price now provided by Jupiter API
+// Re-exported below
 
 /**
  * Wallet PnL Response Interface - matches SolanaTracker response
@@ -508,9 +489,12 @@ export interface WalletPnLSummaryResponse {
  * Get raw wallet PnL data (all tokens)
  * Uses cache to avoid redundant API calls
  */
-export async function getWalletPnL(walletAddress: string, useCache: boolean = true): Promise<WalletPnLResponse> {
+export async function getWalletPnL(
+  walletAddress: string,
+  useCache: boolean = true,
+): Promise<WalletPnLResponse> {
   const cacheKey = `wallet_pnl_${walletAddress}`;
-  
+
   // Check cache first
   if (useCache) {
     const cached = apiCache.get<WalletPnLResponse>(cacheKey);
@@ -519,21 +503,32 @@ export async function getWalletPnL(walletAddress: string, useCache: boolean = tr
     }
   }
 
+  // Throttle to 1 RPS for PnL API (rate limit)
+  const now = Date.now();
+  const elapsed = now - lastPnlRequestTime;
+  if (elapsed < PNL_MIN_INTERVAL_MS) {
+    await delay(PNL_MIN_INTERVAL_MS - elapsed);
+  }
+  lastPnlRequestTime = Date.now();
+
   try {
-    const response = await solanatrackerRequest<WalletPnLResponse>(`/pnl/${walletAddress}`, {
-      method: 'GET',
-      retries: 5,
-      baseDelay: 2000,
-    });
-    
+    const response = await solanatrackerRequest<WalletPnLResponse>(
+      `/pnl/${walletAddress}`,
+      {
+        method: "GET",
+        retries: 5,
+        baseDelay: 2000,
+      },
+    );
+
     // Cache the response for 1 minute (60 seconds) to reduce API usage
     if (useCache) {
       apiCache.set(cacheKey, response, 60000);
     }
-    
+
     return response;
   } catch (error) {
-    console.error('Error fetching wallet PnL:', error);
+    console.error("Error fetching wallet PnL:", error);
     throw error;
   }
 }
@@ -544,7 +539,7 @@ export async function getWalletPnL(walletAddress: string, useCache: boolean = tr
  */
 export async function getWalletPnLSummary(
   walletAddress: string,
-  duration: 'all' | '90d' | '30d' | '7d' | '24h' = 'all'
+  duration: "all" | "90d" | "30d" | "7d" | "24h" = "all",
 ): Promise<WalletPnLSummaryResponse> {
   try {
     const response = await getWalletPnL(walletAddress);
@@ -583,15 +578,11 @@ export async function getWalletPnLSummary(
     });
 
     const totalPnL = totalRealized + totalUnrealized;
-    const winRate = totalWins + totalLosses > 0 
-      ? totalWins / (totalWins + totalLosses) 
-      : 0;
-    const avgProfitPerTrade = totalTrades > 0 
-      ? totalRealized / totalTrades 
-      : 0;
-    const realizedProfitPercent = totalInvested > 0 
-      ? (totalRealized / totalInvested) * 100 
-      : 0;
+    const winRate =
+      totalWins + totalLosses > 0 ? totalWins / (totalWins + totalLosses) : 0;
+    const avgProfitPerTrade = totalTrades > 0 ? totalRealized / totalTrades : 0;
+    const realizedProfitPercent =
+      totalInvested > 0 ? (totalRealized / totalInvested) * 100 : 0;
 
     const summary: WalletPnLSummary = {
       unique_tokens: tokenEntries.length,
@@ -624,7 +615,7 @@ export async function getWalletPnLSummary(
       },
     };
   } catch (error) {
-    console.error('Error fetching wallet PnL:', error);
+    console.error("Error fetching wallet PnL:", error);
     throw error;
   }
 }
@@ -634,19 +625,22 @@ export async function getWalletPnLSummary(
  */
 export async function getWalletTokenPnL(
   walletAddress: string,
-  tokenAddress: string
+  tokenAddress: string,
 ): Promise<TokenPnLData | null> {
   try {
-    const response = await solanatrackerRequest<WalletPnLResponse>(`/pnl/${walletAddress}/${tokenAddress}`, {
-      method: 'GET',
-    });
+    const response = await solanatrackerRequest<WalletPnLResponse>(
+      `/pnl/${walletAddress}/${tokenAddress}`,
+      {
+        method: "GET",
+      },
+    );
 
     // The API might return the same structure or a single token
     // Adjust based on actual API response
     const tokens = response.tokens || {};
     return tokens[tokenAddress] || null;
   } catch (error) {
-    console.error('Error fetching wallet token PnL:', error);
+    console.error("Error fetching wallet token PnL:", error);
     return null;
   }
 }
@@ -665,7 +659,7 @@ export interface ScannerWallet {
 
 /**
  * Scan for wallets that traded multiple tokens using transaction data
- * 
+ *
  * Flow:
  * 1. For each token, fetch transactions from Birdeye
  * 2. Extract unique wallet addresses from transaction 'owner' field
@@ -676,7 +670,7 @@ export interface ScannerWallet {
 export async function scanWalletsForTokens(
   tokenMints: string[],
   minMatches: number = 2,
-  minTrades: number = 2
+  minTrades: number = 2,
 ): Promise<ScannerWallet[]> {
   try {
     // Step 1: Get transactions for each token from Birdeye
@@ -685,9 +679,13 @@ export async function scanWalletsForTokens(
       const mint = tokenMints[i];
       try {
         // Get trades for each token
-        const transactions = await getTokenTransactionsPaginated(mint, 10, 'all');
+        const transactions = await getTokenTransactionsPaginated(
+          mint,
+          10,
+          "all",
+        );
         allTransactionsByToken.push(transactions);
-        
+
         // Add delay between tokens (600ms) to respect rate limits
         if (i < tokenMints.length - 1) {
           await delay(600);
@@ -709,11 +707,11 @@ export async function scanWalletsForTokens(
     allTransactionsByToken.forEach((transactions, index) => {
       const tokenMint = tokenMints[index];
       const seenWallets = new Set<string>(); // Track unique wallets per token
-      
+
       transactions.forEach((tx) => {
         const wallet = tx.owner;
         if (!wallet) return; // Skip if no owner
-        
+
         // Initialize wallet tracking if not seen before
         if (!walletTokenMap.has(wallet)) {
           walletTokenMap.set(wallet, new Set());
@@ -721,24 +719,27 @@ export async function scanWalletsForTokens(
           walletInvestmentMap.set(wallet, 0);
           walletRemovedMap.set(wallet, 0);
         }
-        
+
         // Add this token to the wallet's set (only once per token)
         if (!seenWallets.has(wallet)) {
           walletTokenMap.get(wallet)!.add(tokenMint);
           seenWallets.add(wallet);
         }
-        
+
         // Increment transaction count for this wallet
-        walletTransactionCount.set(wallet, walletTransactionCount.get(wallet)! + 1);
-        
+        walletTransactionCount.set(
+          wallet,
+          walletTransactionCount.get(wallet)! + 1,
+        );
+
         // Track investment (buy) and removed (sell) separately
         // For buy: volume_usd represents what the wallet spent (investment)
         // For sell: volume_usd represents what the wallet received (removed)
-        if (tx.side === 'buy' || tx.tx_type === 'buy') {
+        if (tx.side === "buy" || tx.tx_type === "buy") {
           const investedUsd = tx.volume_usd || 0;
           const currentInvestment = walletInvestmentMap.get(wallet) || 0;
           walletInvestmentMap.set(wallet, currentInvestment + investedUsd);
-        } else if (tx.side === 'sell' || tx.tx_type === 'sell') {
+        } else if (tx.side === "sell" || tx.tx_type === "sell") {
           const removedUsd = tx.volume_usd || 0;
           const currentRemoved = walletRemovedMap.get(wallet) || 0;
           walletRemovedMap.set(wallet, currentRemoved + removedUsd);
@@ -779,7 +780,7 @@ export async function scanWalletsForTokens(
     // Step 5: Sort by highest investment to lowest
     return wallets.sort((a, b) => b.totalInvested - a.totalInvested);
   } catch (error) {
-    console.error('Error scanning wallets:', error);
+    console.error("Error scanning wallets:", error);
     throw error;
   }
 }
@@ -831,12 +832,12 @@ export interface WalletPositionToken {
     lastUpdated: number;
   }>;
   events?: {
-    '1m'?: { priceChangePercentage: number };
-    '5m'?: { priceChangePercentage: number };
-    '15m'?: { priceChangePercentage: number };
-    '30m'?: { priceChangePercentage: number };
-    '1h'?: { priceChangePercentage: number };
-    '24h'?: { priceChangePercentage: number };
+    "1m"?: { priceChangePercentage: number };
+    "5m"?: { priceChangePercentage: number };
+    "15m"?: { priceChangePercentage: number };
+    "30m"?: { priceChangePercentage: number };
+    "1h"?: { priceChangePercentage: number };
+    "24h"?: { priceChangePercentage: number };
   };
   risk?: {
     snipers?: { count: number; totalBalance: number; totalPercentage: number };
@@ -846,7 +847,12 @@ export interface WalletPositionToken {
     dev?: { percentage: number; amount: number };
     fees?: { totalTrading: number; totalTips: number; total: number };
     rugged?: boolean;
-    risks?: Array<{ name: string; description: string; level: string; score: number }>;
+    risks?: Array<{
+      name: string;
+      description: string;
+      level: string;
+      score: number;
+    }>;
     score?: number;
     jupiterVerified?: boolean;
   };
@@ -869,9 +875,12 @@ export interface WalletPositionsResponse {
  * This endpoint returns all tokens in the wallet with complete metadata
  * Uses cache to avoid redundant API calls
  */
-export async function getWalletPositions(walletAddress: string, useCache: boolean = true): Promise<WalletPositionsResponse> {
+export async function getWalletPositions(
+  walletAddress: string,
+  useCache: boolean = true,
+): Promise<WalletPositionsResponse> {
   const cacheKey = `wallet_positions_${walletAddress}`;
-  
+
   // Check cache first
   if (useCache) {
     const cached = apiCache.get<WalletPositionsResponse>(cacheKey);
@@ -881,20 +890,23 @@ export async function getWalletPositions(walletAddress: string, useCache: boolea
   }
 
   try {
-    const response = await solanatrackerRequest<WalletPositionsResponse>(`/wallet/${walletAddress}`, {
-      method: 'GET',
-      retries: 5,
-      baseDelay: 2000,
-    });
-    
+    const response = await solanatrackerRequest<WalletPositionsResponse>(
+      `/wallet/${walletAddress}`,
+      {
+        method: "GET",
+        retries: 5,
+        baseDelay: 2000,
+      },
+    );
+
     // Cache the response for 1 minute (60 seconds) to reduce API usage
     if (useCache) {
       apiCache.set(cacheKey, response, 60000);
     }
-    
+
     return response;
   } catch (error) {
-    console.error('Error fetching wallet positions:', error);
+    console.error("Error fetching wallet positions:", error);
     throw error;
   }
 }
@@ -915,19 +927,22 @@ export interface WalletAnalytics {
 
 export async function getWalletAnalytics(
   walletAddress: string,
-  duration: 'all' | '90d' | '30d' | '7d' | '24h' = 'all'
+  duration: "all" | "90d" | "30d" | "7d" | "24h" = "all",
 ): Promise<WalletAnalytics> {
   try {
     // Use PnL summary endpoint
     const pnlSummary = await getWalletPnLSummary(walletAddress, duration);
-    
+
     if (pnlSummary.success && pnlSummary.data?.summary) {
       const summary = pnlSummary.data.summary;
-      
+
       // Get token list from PnL response
-      const pnlResponse = await solanatrackerRequest<WalletPnLResponse>(`/pnl/${walletAddress}`, {
-        method: 'GET',
-      });
+      const pnlResponse = await solanatrackerRequest<WalletPnLResponse>(
+        `/pnl/${walletAddress}`,
+        {
+          method: "GET",
+        },
+      );
       const tokens = Object.keys(pnlResponse.tokens || []);
 
       return {
@@ -945,9 +960,9 @@ export async function getWalletAnalytics(
       };
     }
 
-    throw new Error('Failed to get wallet analytics');
+    throw new Error("Failed to get wallet analytics");
   } catch (error) {
-    console.error('Error getting wallet analytics:', error);
+    console.error("Error getting wallet analytics:", error);
     throw error;
   }
 }

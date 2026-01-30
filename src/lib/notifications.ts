@@ -312,6 +312,10 @@ export async function getPushNotificationStatus(): Promise<{
     if (!response.ok) {
       return { enabled: !!getStoredPushToken(), permission };
     }
+    const contentType = response.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+      return { enabled: !!getStoredPushToken(), permission };
+    }
     const data = await response.json();
     return { enabled: data.enabled, permission };
   } catch (error) {

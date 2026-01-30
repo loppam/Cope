@@ -15,10 +15,9 @@ import {
   getWalletPnL,
   TokenPnLData,
   getWalletPositions,
-  TokenSearchResult,
   getSolPrice,
 } from "@/lib/solanatracker";
-import { getSolBalance } from "@/lib/rpc";
+import { getSolBalance, getTokenAccounts } from "@/lib/rpc";
 import { apiCache } from "@/lib/cache";
 import { toast } from "sonner";
 
@@ -50,8 +49,12 @@ export function Positions() {
   const [summary, setSummary] = useState<any>(null);
   const [solBalance, setSolBalance] = useState<number>(0);
   const [solPrice, setSolPrice] = useState<number>(150);
+  const [usdcBalance, setUsdcBalance] = useState<number>(0);
 
   const walletAddress = userProfile?.walletAddress;
+
+  // Mainnet USDC mint (Circle)
+  const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
   const fetchPositions = async (forceRefresh: boolean = false) => {
     if (!walletAddress) {
@@ -62,95 +65,76 @@ export function Positions() {
     try {
       setRefreshing(true);
 
-      // Get wallet positions with full token details (single API call - no rate limits!)
-      // Also get PnL data in parallel
-      // Use cache unless force refresh
-      const [positionsResponse, pnlResponse] = await Promise.all([
-        getWalletPositions(walletAddress, !forceRefresh),
-        getWalletPnL(walletAddress, !forceRefresh).catch(() => ({
-          tokens: {},
-        })), // Fallback if PnL fails
-      ]);
+      // Phase 1: Load positions + SOL/USDC balance/price first so the list shows immediately
+      const positionsResponse = await getWalletPositions(
+        walletAddress,
+        !forceRefresh,
+      );
 
-      // Get summary (this internally uses getWalletPnL, but we already have it)
-      // We can compute summary from pnlResponse to avoid duplicate call
-      let summaryData: any = { data: { summary: null } };
-      try {
-        summaryData = await getWalletPnLSummary(walletAddress);
-      } catch (error) {
-        // If summary fails, we'll just not show it
-        console.warn("Failed to fetch summary:", error);
-      }
-      setSummary(summaryData.data?.summary);
-
-      // Get SOL balance and price
       let currentSolBalance = 0;
-      let currentSolPrice = 150; // Default fallback price
+      let currentSolPrice = 150;
+      let currentUsdcBalance = 0;
       try {
-        const [balance, price] = await Promise.all([
+        const [balance, price, tokenAccounts] = await Promise.all([
           getSolBalance(walletAddress),
           getSolPrice(),
+          getTokenAccounts(walletAddress),
         ]);
         currentSolBalance = balance;
         currentSolPrice = price;
         setSolBalance(balance);
         setSolPrice(price);
+        const usdcAccount = tokenAccounts.find((a) => a.mint === USDC_MINT);
+        currentUsdcBalance = usdcAccount?.uiAmount ?? 0;
+        setUsdcBalance(currentUsdcBalance);
       } catch (error) {
-        console.warn("Failed to fetch SOL balance/price:", error);
-        // Use state values as fallback if fetch fails
+        console.warn("Failed to fetch SOL/USDC balance or price:", error);
         currentSolBalance = solBalance;
         currentSolPrice = solPrice;
+        currentUsdcBalance = usdcBalance;
       }
 
-      // Merge position data with PnL data
-      const pnlTokens = pnlResponse.tokens || {};
       const positionsData: Position[] = [];
-
       for (const positionToken of positionsResponse.tokens) {
         const mint = positionToken.token.mint;
-
-        // Check if this is SOL token
         const isSOL =
           mint === "So11111111111111111111111111111111111111112" ||
           mint === "So11111111111111111111111111111111111111111";
+        const isUSDC = mint === USDC_MINT;
 
-        // For SOL, use calculated value (solBalance * solPrice) instead of API value
-        // For other tokens, use API value directly (already in USD)
         let tokenValue = positionToken.value || 0;
         let tokenAmount = positionToken.balance || 0;
 
         if (isSOL) {
-          // Use calculated SOL value and balance instead of API values
           tokenValue = currentSolBalance * currentSolPrice;
           tokenAmount = currentSolBalance;
+        } else if (isUSDC) {
+          tokenAmount = currentUsdcBalance;
+          tokenValue = currentUsdcBalance * 1;
         }
 
-        // Only show positions with value > 0 (filter out zero value positions)
-        // Token values from API are already in USD - use them directly
-        // SOL value is calculated separately using solBalance * solPrice
         if (tokenValue > 0) {
-          const tokenPnL = pnlTokens[mint];
-
           positionsData.push({
             mint,
             symbol: isSOL
               ? "SOL"
-              : positionToken.token.symbol || shortenAddress(mint),
+              : isUSDC
+                ? "USDC"
+                : positionToken.token.symbol || shortenAddress(mint),
             name: isSOL
               ? "Solana"
-              : positionToken.token.name || "Unknown Token",
+              : isUSDC
+                ? "USD Coin"
+                : positionToken.token.name || "Unknown Token",
             image: positionToken.token.image,
             amount: tokenAmount,
-            value: tokenValue, // Already in USD for tokens, calculated for SOL
-            pnl: tokenPnL?.total || 0,
-            pnlPercent:
-              tokenPnL?.cost_basis && tokenPnL.cost_basis > 0
-                ? ((tokenPnL.total || 0) / tokenPnL.cost_basis) * 100
-                : 0,
-            realized: tokenPnL?.realized || 0,
-            unrealized: tokenPnL?.unrealized || 0,
-            costBasis: tokenPnL?.cost_basis || 0,
-            tokenData: tokenPnL,
+            value: tokenValue,
+            pnl: 0,
+            pnlPercent: 0,
+            realized: 0,
+            unrealized: 0,
+            costBasis: 0,
+            tokenData: undefined,
             buys: positionToken.buys,
             sells: positionToken.sells,
             txns: positionToken.txns,
@@ -159,9 +143,49 @@ export function Positions() {
         }
       }
 
-      // Sort by value (highest first)
       positionsData.sort((a, b) => b.value - a.value);
       setPositions(positionsData);
+      setLoading(false);
+      setRefreshing(false);
+
+      // Yield so the UI actually paints the positions-first state (avoids batching with phase 2)
+      await new Promise((r) => setTimeout(r, 0));
+      // Brief delay before loading PnL so positions are visible first
+      await new Promise((r) => setTimeout(r, 1000));
+
+      // Phase 2: Load PnL and merge into positions (may be cached)
+      const pnlResponse = await getWalletPnL(
+        walletAddress,
+        !forceRefresh,
+      ).catch(() => ({ tokens: {} }));
+      let summaryData: any = { data: { summary: null } };
+      try {
+        summaryData = await getWalletPnLSummary(walletAddress);
+      } catch {
+        // ignore
+      }
+      setSummary(summaryData.data?.summary ?? null);
+
+      const pnlTokens: Record<string, TokenPnLData> = pnlResponse.tokens || {};
+      const merged = positionsData.map((pos) => {
+        const tokenPnL = pnlTokens[pos.mint];
+        const total = tokenPnL?.total ?? 0;
+        const totalInvested = tokenPnL?.total_invested ?? 0;
+        const costBasis = tokenPnL?.cost_basis ?? 0;
+        let pnlPercent = 0;
+        if (totalInvested > 0) pnlPercent = (total / totalInvested) * 100;
+        else if (costBasis > 0) pnlPercent = (total / costBasis) * 100;
+        return {
+          ...pos,
+          pnl: total,
+          pnlPercent,
+          realized: tokenPnL?.realized ?? 0,
+          unrealized: tokenPnL?.unrealized ?? 0,
+          costBasis,
+          tokenData: tokenPnL,
+        };
+      });
+      setPositions(merged);
     } catch (error: any) {
       console.error("Error fetching positions:", error);
       toast.error("Failed to load positions");
@@ -298,6 +322,7 @@ export function Positions() {
             const isSOL =
               position.mint === "So11111111111111111111111111111111111111112" ||
               position.mint === "So11111111111111111111111111111111111111111";
+            const isUSDC = position.mint === USDC_MINT;
 
             return (
               <Card
@@ -343,7 +368,7 @@ export function Positions() {
                     <p className="font-semibold">
                       {formatCurrency(position.value)}
                     </p>
-                    {!isSOL && (
+                    {!isSOL && !isUSDC && (
                       <p
                         className={`text-sm flex items-center gap-1 justify-end ${
                           position.pnl >= 0
@@ -362,8 +387,8 @@ export function Positions() {
                   </div>
                 </div>
 
-                {/* Token details - hide for SOL since PnL summary already includes it */}
-                {!isSOL && (
+                {/* Token details - hide for SOL and USDC (native/stablecoin) */}
+                {!isSOL && !isUSDC && (
                   <div className="pt-3 border-t border-white/6 space-y-2">
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-white/60">Total P&L</span>

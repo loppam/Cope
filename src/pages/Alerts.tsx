@@ -331,9 +331,7 @@ export function Alerts() {
             {/* Unread Notifications */}
             {unreadNotifications.length > 0 && (
               <div>
-                <h2 className="text-sm font-medium text-white/70 mb-3">
-                  Unread
-                </h2>
+                <h2 className="text-sm font-medium text-white mb-3">Unread</h2>
                 <div className="space-y-2">
                   {unreadNotifications.map((notification) => (
                     <Card
@@ -359,7 +357,7 @@ export function Alerts() {
                           <p className="text-sm text-white mb-2">
                             {notification.message}
                           </p>
-                          <div className="flex items-center gap-4 text-xs text-white/50">
+                          <div className="flex items-center gap-4 text-xs text-white/90">
                             <code className="font-mono">
                               {shortenAddress(notification.walletAddress)}
                             </code>
@@ -429,7 +427,7 @@ export function Alerts() {
             {/* Read Notifications */}
             {readNotifications.length > 0 && (
               <div>
-                <h2 className="text-sm font-medium text-white/70 mb-3">Read</h2>
+                <h2 className="text-sm font-medium text-white mb-3">Read</h2>
                 <div className="space-y-2">
                   {readNotifications.map((notification) => (
                     <Card
@@ -450,7 +448,7 @@ export function Alerts() {
                           <p className="text-sm text-white mb-2">
                             {notification.message}
                           </p>
-                          <div className="flex items-center gap-4 text-xs text-white/50">
+                          <div className="flex items-center gap-4 text-xs text-white/90">
                             <code className="font-mono">
                               {shortenAddress(notification.walletAddress)}
                             </code>

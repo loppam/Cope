@@ -584,23 +584,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               createdAt: new Date(),
             };
 
+            // Log parsed notification payload (visible in Vercel function logs)
+            const deepLink =
+              hasTokenTransfer && tokenAddress
+                ? `/token/${tokenAddress}`
+                : `/scanner/wallet/${walletAddress}`;
+            console.log(
+              "[Webhook] Notification payload:",
+              JSON.stringify({
+                type: notificationData.type,
+                title: notificationData.title,
+                message: notificationData.message,
+                walletAddress: notificationData.walletAddress,
+                txHash: notificationData.txHash,
+                tokenAddress: notificationData.tokenAddress,
+                amountUsd: notificationData.amountUsd,
+                tokenSymbol,
+                deepLink,
+              }),
+            );
+
             await notificationRef.set(notificationData, { merge: true });
 
             // Push notification
             try {
               const tokens = await getUserTokens(userId);
-              const invalidTokens = await sendToTokens(tokens, {
+              const pushPayload = {
                 title: notificationData.title,
                 body: notificationData.message,
-                deepLink:
-                  hasTokenTransfer && tokenAddress
-                    ? `/token/${tokenAddress}`
-                    : `/scanner/wallet/${walletAddress}`,
+                deepLink,
                 data: {
                   type: notificationData.type,
                   txHash: notificationData.txHash || "",
                 },
-              });
+              };
+              console.log(
+                "[Webhook] Push payload:",
+                JSON.stringify(pushPayload),
+              );
+              const invalidTokens = await sendToTokens(tokens, pushPayload);
               // Remove invalid tokens (doc ID is hash of token)
               for (const token of invalidTokens) {
                 await db

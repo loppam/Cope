@@ -1,5 +1,6 @@
 import { Outlet } from "react-router";
 import { BottomNav } from "@/components/BottomNav";
+import { AnimatePage } from "@/components/AnimatePage";
 
 export function MainLayout() {
   return (
@@ -10,7 +11,9 @@ export function MainLayout() {
         paddingBottom: "calc(8rem + var(--safe-area-inset-bottom))",
       }}
     >
-      <Outlet />
+      <AnimatePage>
+        <Outlet />
+      </AnimatePage>
       <BottomNav />
     </div>
   );

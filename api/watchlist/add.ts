@@ -69,6 +69,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const nickname = body.nickname ? String(body.nickname).trim() : undefined;
+  const onPlatform = body.onPlatform === true;
+  const followedUid =
+    typeof body.uid === "string" && body.uid.trim()
+      ? String(body.uid).trim()
+      : null;
+
   const walletData: Record<string, unknown> = {};
   if (body.matched != null) walletData.matched = body.matched;
   if (body.totalInvested != null) walletData.totalInvested = body.totalInvested;
@@ -87,6 +93,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const watchlist: Array<{
       address: string;
       nickname?: string;
+      onPlatform?: boolean;
+      uid?: string;
       addedAt?: unknown;
       [k: string]: unknown;
     }> = userData?.watchlist || [];
@@ -95,21 +103,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       (w: any) => w.address === walletAddress,
     );
     const now = new Date();
+    const existing =
+      existingIndex >= 0 ? (watchlist[existingIndex] as any) : null;
+
+    // For new entries: set onPlatform/uid from body. For updates: preserve existing unless explicitly provided
+    const hasOnPlatformInBody = "onPlatform" in body;
+    const onPlatformFinal = hasOnPlatformInBody
+      ? onPlatform
+      : (existing?.onPlatform ?? false);
+    const uidFinal =
+      hasOnPlatformInBody && onPlatform && followedUid
+        ? followedUid
+        : onPlatformFinal && existing?.uid
+          ? existing.uid
+          : onPlatformFinal && followedUid
+            ? followedUid
+            : undefined;
+
+    const entry = {
+      address: walletAddress,
+      addedAt: existing?.addedAt ?? now,
+      ...walletData,
+      ...(nickname !== undefined && { nickname }),
+      onPlatform: onPlatformFinal,
+      ...(onPlatformFinal && uidFinal && { uid: uidFinal }),
+      updatedAt: now,
+    };
 
     if (existingIndex >= 0) {
       watchlist[existingIndex] = {
         ...watchlist[existingIndex],
-        ...walletData,
-        ...(nickname !== undefined && { nickname }),
-        updatedAt: now,
+        ...entry,
       };
     } else {
-      watchlist.push({
-        address: walletAddress,
-        addedAt: now,
-        ...walletData,
-        ...(nickname !== undefined && { nickname }),
-      });
+      watchlist.push(entry);
     }
 
     await userRef.set(
@@ -120,19 +147,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       { merge: true },
     );
 
-    // Update reverse index so transaction webhook can notify only users watching this wallet (per-user)
-    const watchedRef = adminDb.collection("watchedWallets").doc(walletAddress);
-    const watchedSnap = await watchedRef.get();
-    const existingWatchers =
-      (watchedSnap.data()?.watchers as Record<
-        string,
-        { nickname?: string; addedAt?: string }
-      >) || {};
-    existingWatchers[uid] = {
-      nickname: nickname ?? undefined,
-      addedAt: now.toISOString(),
-    };
-    await watchedRef.set({ watchers: existingWatchers }, { merge: true });
+    // Reverse index (watchedWallets) is maintained by webhook/sync; trigger sync
+    const syncSecret = process.env.WEBHOOK_SYNC_SECRET;
+    const base = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : req.headers.origin || "";
+    if (syncSecret && base) {
+      fetch(`${base}/api/webhook/sync`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${syncSecret}`,
+          "Content-Type": "application/json",
+        },
+      }).catch((err) =>
+        console.error("[watchlist/add] webhook sync failed:", err),
+      );
+    }
 
     return res.status(200).json({ success: true, watchlist });
   } catch (error: any) {

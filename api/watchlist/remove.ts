@@ -64,8 +64,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const body = req.body || {};
   const walletAddress = (body.walletAddress || body.address || "").trim();
-  if (!walletAddress) {
-    return res.status(400).json({ error: "walletAddress is required" });
+  const removeByUid =
+    typeof body.uid === "string" && body.uid.trim() ? body.uid.trim() : null;
+
+  if (!walletAddress && !removeByUid) {
+    return res.status(400).json({
+      error: "walletAddress or uid is required",
+    });
   }
 
   try {
@@ -77,11 +82,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const userData = userSnap.data();
-    const watchlist: Array<{ address: string; [k: string]: unknown }> =
-      userData?.watchlist || [];
-    const filteredWatchlist = watchlist.filter(
-      (w: any) => w.address !== walletAddress,
-    );
+    const watchlist: Array<{
+      address: string;
+      uid?: string;
+      [k: string]: unknown;
+    }> = userData?.watchlist || [];
+    const filteredWatchlist = watchlist.filter((w: any) => {
+      if (removeByUid) return w.uid !== removeByUid;
+      return w.address !== walletAddress;
+    });
 
     await userRef.set(
       {
@@ -91,19 +100,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       { merge: true },
     );
 
-    // Remove this user from reverse index
-    const watchedRef = adminDb.collection("watchedWallets").doc(walletAddress);
-    const watchedSnap = await watchedRef.get();
-    const existingWatchers =
-      (watchedSnap.data()?.watchers as Record<string, unknown>) || {};
-    delete existingWatchers[uid];
-    if (Object.keys(existingWatchers).length === 0) {
-      await watchedRef.delete();
-    } else {
-      await watchedRef.set({ watchers: existingWatchers }, { merge: true });
-    }
-
-    // Update Helius webhook so this address is removed (even if client doesn't call sync)
+    // Reverse index (watchedWallets) and Helius webhook are maintained by sync
     const syncSecret = process.env.WEBHOOK_SYNC_SECRET;
     const base = process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}`

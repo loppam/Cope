@@ -9,7 +9,7 @@
       "destination": "/api/firebase-init"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!api/|__/).*)",
       "destination": "/index.html"
     }
   ],

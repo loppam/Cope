@@ -44,13 +44,18 @@ interface AuthContextType {
     walletAddress: string,
     walletData?: {
       nickname?: string;
+      onPlatform?: boolean;
+      uid?: string;
       matched?: number;
       totalInvested?: number;
       totalRemoved?: number;
       profitMargin?: number;
     },
   ) => Promise<void>;
-  removeFromWatchlist: (walletAddress: string) => Promise<void>;
+  removeFromWatchlist: (
+    walletAddress: string,
+    options?: { uid?: string },
+  ) => Promise<void>;
   watchlist: WatchedWallet[];
 }
 
@@ -345,6 +350,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     walletAddress: string,
     walletData?: {
       nickname?: string;
+      onPlatform?: boolean;
+      uid?: string;
       matched?: number;
       totalInvested?: number;
       totalRemoved?: number;
@@ -385,7 +392,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const handleRemoveFromWatchlist = async (walletAddress: string) => {
+  const handleRemoveFromWatchlist = async (
+    walletAddress: string,
+    options?: { uid?: string },
+  ) => {
     if (!user) throw new Error("User not authenticated");
     try {
       const token = await user.getIdToken();
@@ -396,7 +406,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ walletAddress }),
+        body: JSON.stringify({ walletAddress, ...options }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));

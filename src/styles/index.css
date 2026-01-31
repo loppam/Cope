@@ -7,6 +7,15 @@ html {
   scroll-behavior: smooth;
 }
 
+/* Hide scrollbar for horizontal overflow */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
@@ -46,18 +55,75 @@ html {
   }
 }
 
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.4s ease-out forwards;
 }
 
+.animate-slide-up {
+  animation: slideUp 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+.animate-delay-75 {
+  animation-delay: 75ms;
+}
 .animate-delay-100 {
   animation-delay: 100ms;
+}
+.animate-delay-150 {
+  animation-delay: 150ms;
 }
 .animate-delay-200 {
   animation-delay: 200ms;
 }
+.animate-delay-250 {
+  animation-delay: 250ms;
+}
 .animate-delay-300 {
   animation-delay: 300ms;
+}
+.animate-delay-400 {
+  animation-delay: 400ms;
 }
 
 /* Safe area utility classes */

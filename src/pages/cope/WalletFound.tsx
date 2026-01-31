@@ -1,12 +1,12 @@
-import { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router';
-import { Button } from '@/components/Button';
-import { Input } from '@/components/Input';
-import { Card } from '@/components/Card';
-import { Check, Star } from 'lucide-react';
-import { shortenAddress } from '@/lib/utils';
-import { toast } from 'sonner';
-import { useAuth } from '@/contexts/AuthContext';
+import { useState, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router";
+import { Button } from "@/components/Button";
+import { Input } from "@/components/Input";
+import { Card } from "@/components/Card";
+import { Check, Star } from "lucide-react";
+import { shortenAddress } from "@/lib/utils";
+import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface UserData {
   uid: string;
@@ -19,14 +19,14 @@ interface UserData {
 export function WalletFound() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { address, userData } = location.state as { 
-    address: string; 
+  const { address, userData } = location.state as {
+    address: string;
     userData?: UserData;
   };
   const { addToWatchlist, isAuthenticated } = useAuth();
-  
+
   // Use displayName from userData as default nickname
-  const displayName = userData?.displayName || userData?.xHandle || '';
+  const displayName = userData?.displayName || userData?.xHandle || "";
   const [nickname, setNickname] = useState(displayName);
   const [isAdding, setIsAdding] = useState(false);
 
@@ -39,17 +39,20 @@ export function WalletFound() {
 
   const handleCope = async () => {
     if (!isAuthenticated) {
-      toast.error('Please sign in to COPE wallets');
+      toast.error("Please sign in to COPE wallets");
       return;
     }
 
     try {
       setIsAdding(true);
-      // Use displayName as nickname if no custom nickname provided
       const finalNickname = nickname.trim() || displayName || undefined;
-      await addToWatchlist(address, { nickname: finalNickname });
-      toast.success('Wallet added to watchlist!');
-      navigate('/app/watchlist');
+      await addToWatchlist(address, {
+        nickname: finalNickname,
+        onPlatform: true,
+        uid: userData?.uid,
+      });
+      toast.success("Wallet added to watchlist!");
+      navigate("/app/watchlist");
     } catch (error: any) {
       // Error already handled in addToWatchlist
     } finally {
@@ -71,24 +74,29 @@ export function WalletFound() {
         <Card glass className="mb-6">
           <div className="text-center mb-4">
             {userData?.avatar ? (
-              <img 
-                src={userData.avatar} 
-                alt={displayName || 'User'} 
+              <img
+                src={userData.avatar}
+                alt={displayName || "User"}
                 className="w-16 h-16 mx-auto mb-3 rounded-full object-cover"
               />
             ) : (
               <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-gradient-to-br from-[#12d585] to-[#08b16b]" />
             )}
-            <h3 className="font-bold text-lg">
-              {displayName || 'COPE User'}
-            </h3>
-            <code className="text-sm text-white/50 font-mono">{shortenAddress(address)}</code>
+            <h3 className="font-bold text-lg">{displayName || "COPE User"}</h3>
+            <code className="text-sm text-white/50 font-mono">
+              {shortenAddress(address)}
+            </code>
           </div>
         </Card>
 
         <div className="mb-6">
           <label className="block text-sm font-medium mb-2">
-            Nickname {displayName && <span className="text-white/50 text-xs">(default: {displayName})</span>}
+            Nickname{" "}
+            {displayName && (
+              <span className="text-white/50 text-xs">
+                (default: {displayName})
+              </span>
+            )}
           </label>
           <Input
             placeholder={displayName || "e.g. Smart Trader, Whale..."}
@@ -102,16 +110,20 @@ export function WalletFound() {
           )}
         </div>
 
-        <Button 
-          onClick={handleCope} 
+        <Button
+          onClick={handleCope}
           disabled={isAdding}
           className="w-full h-12 mb-3"
         >
           <Star className="w-5 h-5" />
-          {isAdding ? 'Adding...' : 'Add to Watchlist'}
+          {isAdding ? "Adding..." : "Add to Watchlist"}
         </Button>
 
-        <Button variant="outline" onClick={() => navigate('/app/home')} className="w-full h-10">
+        <Button
+          variant="outline"
+          onClick={() => navigate("/app/home")}
+          className="w-full h-10"
+        >
           Back to Home
         </Button>
       </div>

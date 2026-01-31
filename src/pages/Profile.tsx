@@ -1,27 +1,23 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
+import { motion } from "motion/react";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import {
   Twitter,
   Wallet,
-  Settings,
   LogOut,
   ExternalLink,
   Trash2,
   RefreshCw,
   Bell,
-  Users,
   Globe,
   GlobeLock,
-  Eye,
-  ArrowRight,
 } from "lucide-react";
 import { shortenAddress } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { getSolBalance } from "@/lib/rpc";
 import {
-  getUnreadNotificationCount,
   getPushNotificationStatus,
   requestPermissionAndGetPushToken,
   savePushTokenWithPlatform,
@@ -29,28 +25,28 @@ import {
   getStoredPushToken,
 } from "@/lib/notifications";
 import { updatePublicWalletStatus } from "@/lib/auth";
+import { syncWebhook } from "@/lib/webhook";
+import { getFollowersCount } from "@/lib/profile";
 import { toast } from "sonner";
+import type { WatchedWallet } from "@/lib/auth";
 
 export function Profile() {
   const navigate = useNavigate();
-  const {
-    user,
-    userProfile,
-    signOut,
-    removeWallet,
-    loading,
-    watchlist,
-    updateProfile,
-  } = useAuth();
+  const { user, userProfile, signOut, removeWallet, loading, watchlist } =
+    useAuth();
   const [isRemovingWallet, setIsRemovingWallet] = useState(false);
   const [balance, setBalance] = useState<number>(userProfile?.balance || 0);
   const [isRefreshingBalance, setIsRefreshingBalance] = useState(false);
-  const [notificationCount, setNotificationCount] = useState(0);
+  const [followersCount, setFollowersCount] = useState<number | null>(null);
   const [pushEnabled, setPushEnabled] = useState(false);
-  // Default to public if isPublic is undefined (for existing users)
   const [isPublic, setIsPublic] = useState(userProfile?.isPublic !== false);
   const [isTogglingPublic, setIsTogglingPublic] = useState(false);
   const [isTogglingPush, setIsTogglingPush] = useState(false);
+  const following = watchlist.filter(
+    (w): w is WatchedWallet & { uid: string } =>
+      w.onPlatform === true && !!w.uid,
+  );
+  const watchlistExternal = watchlist.filter((w) => !w.onPlatform);
 
   // Get user data from Firebase or use defaults
   const xHandle =
@@ -91,12 +87,14 @@ export function Profile() {
   // Fetch stats
   useEffect(() => {
     if (user) {
-      getUnreadNotificationCount(user.uid).then((count) => {
-        setNotificationCount(count);
+      getPushNotificationStatus().then((status) => {
+        setPushEnabled(status.enabled && status.permission === "granted");
       });
 
-      getPushNotificationStatus(user.uid).then((status) => {
-        setPushEnabled(status.enabled && status.permission === "granted");
+      user.getIdToken().then((token) => {
+        getFollowersCount(token)
+          .then(setFollowersCount)
+          .catch(() => setFollowersCount(0));
       });
     }
   }, [user]);
@@ -112,6 +110,8 @@ export function Profile() {
       toast.success(
         newValue ? "Wallet is now public" : "Wallet is now private",
       );
+      // Sync webhook so private users' addresses are removed from Helius
+      syncWebhook().catch(() => {});
     } catch (error) {
       console.error("Error toggling public wallet:", error);
       toast.error("Failed to update wallet visibility");
@@ -134,7 +134,8 @@ export function Profile() {
         }
 
         // Check current permission
-        if (Notification.permission === "denied") {
+        const permBefore = Notification.permission;
+        if (permBefore === "denied") {
           toast.error(
             "Notification permission was denied. Please enable it in your browser settings.",
           );
@@ -149,13 +150,13 @@ export function Profile() {
           setPushEnabled(true);
           toast.success("Push notifications enabled");
         } else {
-          // Token is null - could be unsupported browser or permission denied
-          // Check permission state to give better error message
-          if (Notification.permission === "denied") {
+          // Token is null - re-check permission (may have changed during request)
+          const permAfter = Notification.permission;
+          if (permAfter === "denied") {
             toast.error(
               "Notification permission denied. Please enable it in your browser settings.",
             );
-          } else if (Notification.permission === "default") {
+          } else if (permAfter === "default") {
             toast.error("Please allow notifications when prompted");
           } else {
             // Likely unsupported browser
@@ -184,291 +185,388 @@ export function Profile() {
     }
   };
 
+  const container = {
+    animate: {
+      transition: {
+        staggerChildren: 0.06,
+        delayChildren: 0.1,
+      },
+    },
+  };
+
+  const item = {
+    initial: { opacity: 0, y: 12 },
+    animate: {
+      opacity: 1,
+      y: 0,
+      transition: { duration: 0.35, ease: "easeOut" as const },
+    },
+  };
+
   return (
-    <div className="p-4 sm:p-6 max-w-[720px] mx-auto">
-      <div className="mb-8">
+    <motion.div
+      className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8"
+      variants={container}
+      initial="initial"
+      animate="animate"
+    >
+      <motion.div className="mb-6" variants={item}>
         <h1 className="text-2xl font-bold">Profile</h1>
-      </div>
+      </motion.div>
 
-      {/* User Info */}
-      <Card glass className="mb-6">
-        <div className="flex items-center gap-4 mb-4">
-          {avatar ? (
-            <img
-              src={avatar}
-              alt={xHandle}
-              className="w-16 h-16 rounded-full object-cover"
-            />
-          ) : (
-            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#12d585] to-[#08b16b] flex items-center justify-center">
-              <span className="text-xl font-bold text-[#000000]">
-                {xHandle.charAt(1)?.toUpperCase() || "U"}
-              </span>
-            </div>
-          )}
-          <div>
-            <h3 className="font-bold text-lg">{xHandle}</h3>
-            <div className="flex items-center gap-2 text-sm text-white/60">
-              <Twitter className="w-4 h-4" />
-              <span>Connected</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="pt-4 border-t border-white/6">
-          {walletConnected && walletAddress ? (
-            <>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-white/60">Wallet</span>
-                <code className="font-mono">
-                  {shortenAddress(walletAddress)}
-                </code>
-              </div>
-              <div className="flex items-center justify-between text-sm mt-2">
-                <span className="text-white/60">Balance</span>
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{balance.toFixed(4)} SOL</span>
-                  <button
-                    onClick={fetchBalance}
-                    disabled={isRefreshingBalance}
-                    className="p-1 hover:bg-white/10 rounded transition-colors disabled:opacity-50"
-                    title="Refresh balance"
-                  >
-                    <RefreshCw
-                      className={`w-3 h-3 ${isRefreshingBalance ? "animate-spin" : ""}`}
+      {/* User + Stats merged card */}
+      <motion.div variants={item} className="mb-6">
+        <Card glass className="overflow-hidden">
+          <div className="relative">
+            {/* Subtle gradient header strip */}
+            <div className="h-1 bg-gradient-to-r from-[#12d585]/40 via-[#08b16b]/30 to-transparent" />
+            <div className="p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
+                <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                  {avatar ? (
+                    <img
+                      src={avatar}
+                      alt={xHandle}
+                      className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-cover ring-2 ring-white/10 flex-shrink-0"
                     />
+                  ) : (
+                    <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-[#12d585] to-[#08b16b] flex items-center justify-center ring-2 ring-white/10 flex-shrink-0">
+                      <span className="text-lg sm:text-xl font-bold text-[#000000]">
+                        {xHandle.charAt(1)?.toUpperCase() || "U"}
+                      </span>
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-bold text-base sm:text-lg truncate">
+                      {xHandle}
+                    </h3>
+                    <div className="flex items-center gap-2 text-sm text-white/60 mt-0.5">
+                      <Twitter className="w-4 h-4" />
+                      <span>Connected</span>
+                    </div>
+                    {walletConnected && walletAddress && (
+                      <div className="flex items-center gap-2 mt-2 min-w-0 overflow-hidden">
+                        <code className="text-xs font-mono text-white/50 truncate">
+                          {shortenAddress(walletAddress)}
+                        </code>
+                        {balance > 0 && (
+                          <span className="text-xs text-white/60 flex-shrink-0">
+                            · {balance.toFixed(4)} SOL
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Stats row - integrated */}
+                <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-6 pl-0 sm:pl-4 border-l-0 sm:border-l border-white/10 mt-2 sm:mt-0">
+                  <button
+                    onClick={() =>
+                      navigate("/app/watchlist", {
+                        state: { tab: "following" },
+                      })
+                    }
+                    className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial hover:opacity-80 transition-opacity py-1 active:scale-95"
+                  >
+                    <span className="text-lg sm:text-2xl font-bold">
+                      {following.length}
+                    </span>
+                    <span className="text-[10px] sm:text-xs text-white/60">
+                      Following
+                    </span>
+                  </button>
+                  <button
+                    onClick={() =>
+                      navigate("/app/watchlist", {
+                        state: { tab: "followers" },
+                      })
+                    }
+                    className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial hover:opacity-80 transition-opacity py-1 active:scale-95"
+                  >
+                    <span className="text-lg sm:text-2xl font-bold">
+                      {followersCount ?? "—"}
+                    </span>
+                    <span className="text-[10px] sm:text-xs text-white/60">
+                      Followers
+                    </span>
+                  </button>
+                  <button
+                    onClick={() =>
+                      navigate("/app/watchlist", {
+                        state: { tab: "watchlist" },
+                      })
+                    }
+                    className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial hover:opacity-80 transition-opacity py-1 active:scale-95"
+                  >
+                    <span className="text-lg sm:text-2xl font-bold">
+                      {watchlistExternal.length}
+                    </span>
+                    <span className="text-[10px] sm:text-xs text-white/60">
+                      Watchlist
+                    </span>
                   </button>
                 </div>
               </div>
-            </>
-          ) : (
-            <div className="text-center py-2">
-              <p className="text-sm text-white/60">No wallet connected</p>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => navigate("/auth/wallet-setup")}
-                className="mt-2 text-accent-primary hover:text-accent-hover"
-              >
-                Connect Wallet
-              </Button>
-            </div>
-          )}
-        </div>
-      </Card>
 
-      {/* Stats */}
-      <Card glass className="mb-6">
-        <h3 className="font-semibold text-lg mb-4">Statistics</h3>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="text-center">
-            <div className="flex items-center justify-center mb-2">
-              <Users className="w-5 h-5 text-accent-primary" />
-            </div>
-            <p className="text-2xl font-bold">{watchlist.length}</p>
-            <p className="text-xs text-white/60 mt-1">Watched Wallets</p>
-          </div>
-          <div className="text-center">
-            <div className="flex items-center justify-center mb-2">
-              <Bell className="w-5 h-5 text-accent-primary" />
-            </div>
-            <p className="text-2xl font-bold">{notificationCount}</p>
-            <p className="text-xs text-white/60 mt-1">Notifications</p>
-          </div>
-        </div>
-      </Card>
+              {/* Wallet + balance - when connected */}
+              {walletConnected && walletAddress && (
+                <div className="mt-4 pt-4 border-t border-white/6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 min-w-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm text-white/60 flex-shrink-0">
+                      Balance
+                    </span>
+                    <span className="font-medium truncate">
+                      {balance.toFixed(4)} SOL
+                    </span>
+                    <button
+                      onClick={fetchBalance}
+                      disabled={isRefreshingBalance}
+                      className="p-1 hover:bg-white/10 rounded transition-colors disabled:opacity-50"
+                      title="Refresh balance"
+                    >
+                      <RefreshCw
+                        className={`w-3.5 h-3.5 text-white/50 ${isRefreshingBalance ? "animate-spin" : ""}`}
+                      />
+                    </button>
+                  </div>
+                  <a
+                    href={`https://solscan.io/account/${walletAddress}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-accent-primary hover:text-accent-hover flex items-center gap-1"
+                  >
+                    View on Explorer
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              )}
 
-      {/* Watched Wallets */}
-      {watchlist.length > 0 && (
-        <Card glass className="mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-lg">Watched Wallets</h3>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate("/app/watchlist")}
-              className="text-accent-primary hover:text-accent-hover"
-            >
-              View All
-              <ArrowRight className="w-4 h-4 ml-1" />
-            </Button>
+              {!walletConnected && (
+                <div className="mt-4 pt-4 border-t border-white/6 text-center">
+                  <p className="text-sm text-white/60 mb-2">
+                    No wallet connected
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => navigate("/auth/wallet-setup")}
+                    className="text-accent-primary hover:text-accent-hover"
+                  >
+                    Connect Wallet
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
-          <div className="space-y-2">
-            {watchlist.slice(0, 3).map((wallet) => (
-              <div
-                key={wallet.address}
-                className="flex items-center justify-between p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
-                onClick={() => navigate(`/scanner/wallet/${wallet.address}`)}
-              >
-                <div className="flex items-center gap-2 flex-1 min-w-0">
-                  <Eye className="w-4 h-4 text-accent-primary flex-shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium text-sm truncate">
-                      {wallet.nickname || shortenAddress(wallet.address)}
+        </Card>
+      </motion.div>
+
+      {/* Settings */}
+      <motion.div variants={item} className="mb-6">
+        <Card glass className="overflow-hidden">
+          <div className="h-1 bg-gradient-to-r from-accent-purple/40 via-accent-purple/20 to-transparent" />
+          <div className="p-4 sm:p-6">
+            <div className="flex items-center gap-3 mb-4 sm:mb-5">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-accent-purple/10 flex items-center justify-center flex-shrink-0">
+                <Bell className="w-4 h-4 sm:w-5 sm:h-5 text-accent-purple" />
+              </div>
+              <h3 className="font-semibold text-base sm:text-lg">Settings</h3>
+            </div>
+            <div className="space-y-2 sm:space-y-4">
+              {/* Push Notifications Toggle */}
+              <div className="flex items-center justify-between gap-3 py-3 sm:py-2 rounded-xl hover:bg-white/5 -mx-2 px-3 transition-colors min-h-[44px]">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
+                    <Bell className="w-4 h-4 text-white/70" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm sm:text-base">
+                      Push Notifications
                     </p>
-                    <p className="text-xs text-white/50 font-mono truncate">
-                      {shortenAddress(wallet.address)}
+                    <p className="text-xs text-white/60 line-clamp-2 sm:line-clamp-none">
+                      Get notified about watched wallet trades
                     </p>
                   </div>
                 </div>
-                <ArrowRight className="w-4 h-4 text-white/40 flex-shrink-0" />
+                <button
+                  onClick={handleTogglePush}
+                  disabled={isTogglingPush}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    pushEnabled ? "bg-accent-primary" : "bg-white/20"
+                  } disabled:opacity-50`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      pushEnabled ? "translate-x-6" : "translate-x-1"
+                    }`}
+                  />
+                </button>
               </div>
-            ))}
-            {watchlist.length > 3 && (
-              <p className="text-xs text-white/60 text-center pt-2">
-                +{watchlist.length - 3} more wallet
-                {watchlist.length - 3 !== 1 ? "s" : ""}
-              </p>
-            )}
+
+              {/* Public Wallet Toggle */}
+              {walletAddress && (
+                <div className="flex items-center justify-between gap-3 py-3 sm:py-2 rounded-xl hover:bg-white/5 -mx-2 px-3 transition-colors border-t border-white/6 min-h-[44px]">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
+                      {isPublic ? (
+                        <Globe className="w-4 h-4 text-accent-primary" />
+                      ) : (
+                        <GlobeLock className="w-4 h-4 text-white/70" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm sm:text-base">
+                        Public Wallet
+                      </p>
+                      <p className="text-xs text-white/60 line-clamp-2 sm:line-clamp-none">
+                        {isPublic
+                          ? "Your wallet is visible to others"
+                          : "Your wallet is private"}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleTogglePublic}
+                    disabled={isTogglingPublic}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      isPublic ? "bg-accent-primary" : "bg-white/20"
+                    } disabled:opacity-50`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        isPublic ? "translate-x-6" : "translate-x-1"
+                      }`}
+                    />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </Card>
-      )}
+      </motion.div>
 
-      {/* Settings */}
-      <Card glass className="mb-6">
-        <h3 className="font-semibold text-lg mb-4">Settings</h3>
-        <div className="space-y-4">
-          {/* Push Notifications Toggle */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Bell className="w-5 h-5 text-white/70" />
-              <div>
-                <p className="font-medium">Push Notifications</p>
-                <p className="text-xs text-white/60">
-                  Get notified about watched wallet trades
-                </p>
+      {/* Quick Actions */}
+      <motion.div variants={item} className="mb-6">
+        <Card glass className="overflow-hidden">
+          <div className="h-1 bg-gradient-to-r from-[#12d585]/30 via-[#08b16b]/20 to-transparent" />
+          <div className="p-4 sm:p-6">
+            <div className="flex items-center gap-3 mb-3 sm:mb-4">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-accent-primary/10 flex items-center justify-center flex-shrink-0">
+                <Wallet className="w-4 h-4 sm:w-5 sm:h-5 text-accent-primary" />
               </div>
+              <h3 className="font-semibold text-base sm:text-lg">
+                Quick Actions
+              </h3>
             </div>
+            <div className="space-y-1 sm:space-y-2">
+              {walletAddress && (
+                <button
+                  onClick={() => navigate("/wallet/fund")}
+                  className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 active:bg-white/10 transition-colors text-left group min-h-[48px]"
+                >
+                  <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center group-hover:bg-accent-primary/10 transition-colors flex-shrink-0">
+                    <Wallet className="w-4 h-4 text-white/70" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm sm:text-base">
+                      Fund Wallet
+                    </p>
+                    <p className="text-xs text-white/60 truncate">
+                      Add SOL to your wallet
+                    </p>
+                  </div>
+                  <ExternalLink className="w-4 h-4 text-white/40 group-hover:text-accent-primary transition-colors" />
+                </button>
+              )}
+
+              {walletAddress && (
+                <button
+                  onClick={() =>
+                    window.open(
+                      `https://solscan.io/account/${walletAddress}`,
+                      "_blank",
+                    )
+                  }
+                  className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 active:bg-white/10 transition-colors text-left group min-h-[48px]"
+                >
+                  <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center group-hover:bg-accent-primary/10 transition-colors flex-shrink-0">
+                    <ExternalLink className="w-4 h-4 text-white/70" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm sm:text-base">
+                      View on Explorer
+                    </p>
+                    <p className="text-xs text-white/60 truncate">
+                      Open Solscan
+                    </p>
+                  </div>
+                  <ExternalLink className="w-4 h-4 text-white/40 group-hover:text-accent-primary transition-colors" />
+                </button>
+              )}
+
+              {walletAddress && (
+                <button
+                  onClick={async () => {
+                    if (
+                      !confirm(
+                        "Are you sure you want to remove your wallet? You will need to set it up again.",
+                      )
+                    ) {
+                      return;
+                    }
+                    setIsRemovingWallet(true);
+                    try {
+                      await removeWallet();
+                      navigate("/auth/wallet-setup");
+                    } catch (error) {
+                      console.error("Remove wallet error:", error);
+                    } finally {
+                      setIsRemovingWallet(false);
+                    }
+                  }}
+                  className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-[#FF4757]/10 active:bg-[#FF4757]/15 transition-colors text-left group min-h-[48px]"
+                >
+                  <div className="w-9 h-9 rounded-lg bg-[#FF4757]/10 flex items-center justify-center flex-shrink-0">
+                    <Trash2 className="w-4 h-4 text-[#FF4757]" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm sm:text-base text-[#FF4757]">
+                      {isRemovingWallet ? "Removing..." : "Remove Wallet"}
+                    </p>
+                    <p className="text-xs text-white/60 line-clamp-2 sm:line-clamp-none">
+                      Disconnect and delete wallet from account
+                    </p>
+                  </div>
+                </button>
+              )}
+            </div>
+          </div>
+        </Card>
+      </motion.div>
+
+      {/* Disconnect */}
+      <motion.div variants={item}>
+        <Card glass className="overflow-hidden border-white/10">
+          <div className="p-4 sm:p-6">
             <button
-              onClick={handleTogglePush}
-              disabled={isTogglingPush}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                pushEnabled ? "bg-accent-primary" : "bg-white/20"
-              } disabled:opacity-50`}
+              onClick={async () => {
+                try {
+                  await signOut();
+                  navigate("/");
+                } catch (error) {
+                  console.error("Sign out error:", error);
+                }
+              }}
+              disabled={loading}
+              className="w-full flex items-center justify-center gap-3 py-3 min-h-[48px] rounded-xl border border-white/10 hover:border-[#FF4757]/30 hover:bg-[#FF4757]/5 active:bg-[#FF4757]/10 text-[#FF4757] transition-all duration-200 disabled:opacity-50"
             >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  pushEnabled ? "translate-x-6" : "translate-x-1"
-                }`}
-              />
+              <LogOut className="w-5 h-5" />
+              <span className="font-medium">Disconnect</span>
             </button>
           </div>
-
-          {/* Public Wallet Toggle */}
-          {walletAddress && (
-            <div className="flex items-center justify-between pt-4 border-t border-white/6">
-              <div className="flex items-center gap-3">
-                {isPublic ? (
-                  <Globe className="w-5 h-5 text-accent-primary" />
-                ) : (
-                  <GlobeLock className="w-5 h-5 text-white/70" />
-                )}
-                <div>
-                  <p className="font-medium">Public Wallet</p>
-                  <p className="text-xs text-white/60">
-                    {isPublic
-                      ? "Your wallet is visible to others"
-                      : "Your wallet is private"}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={handleTogglePublic}
-                disabled={isTogglingPublic}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  isPublic ? "bg-accent-primary" : "bg-white/20"
-                } disabled:opacity-50`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    isPublic ? "translate-x-6" : "translate-x-1"
-                  }`}
-                />
-              </button>
-            </div>
-          )}
-        </div>
-      </Card>
-
-      {/* Actions */}
-      <div className="space-y-3">
-        {walletAddress && (
-          <Card
-            className="cursor-pointer hover:border-white/20"
-            onClick={() => navigate("/wallet/fund")}
-          >
-            <div className="flex items-center gap-3">
-              <Wallet className="w-5 h-5 text-white/70" />
-              <span className="font-medium">Fund Wallet</span>
-            </div>
-          </Card>
-        )}
-
-        {walletAddress && (
-          <Card
-            className="cursor-pointer hover:border-white/20"
-            onClick={() =>
-              window.open(
-                `https://solscan.io/account/${walletAddress}`,
-                "_blank",
-              )
-            }
-          >
-            <div className="flex items-center gap-3">
-              <ExternalLink className="w-5 h-5 text-white/70" />
-              <span className="font-medium">View on Explorer</span>
-            </div>
-          </Card>
-        )}
-
-        {walletAddress && (
-          <Card
-            className="cursor-pointer hover:border-[#FF4757]/20 border-[#FF4757]/10"
-            onClick={async () => {
-              if (
-                !confirm(
-                  "Are you sure you want to remove your wallet? You will need to set it up again.",
-                )
-              ) {
-                return;
-              }
-              setIsRemovingWallet(true);
-              try {
-                await removeWallet();
-                navigate("/auth/wallet-setup");
-              } catch (error) {
-                console.error("Remove wallet error:", error);
-              } finally {
-                setIsRemovingWallet(false);
-              }
-            }}
-          >
-            <div className="flex items-center gap-3">
-              <Trash2 className="w-5 h-5 text-[#FF4757]" />
-              <span className="font-medium text-[#FF4757]">
-                {isRemovingWallet ? "Removing..." : "Remove Wallet"}
-              </span>
-            </div>
-          </Card>
-        )}
-
-        <Button
-          variant="outline"
-          className="w-full h-10 text-[#FF4757] hover:bg-[#FF4757]/10"
-          onClick={async () => {
-            try {
-              await signOut();
-              navigate("/");
-            } catch (error) {
-              console.error("Sign out error:", error);
-            }
-          }}
-          disabled={loading}
-        >
-          <LogOut className="w-5 h-5" />
-          Disconnect
-        </Button>
-      </div>
-    </div>
+        </Card>
+      </motion.div>
+    </motion.div>
   );
 }

@@ -1,41 +1,186 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router';
-import { Card } from '@/components/Card';
-import { Button } from '@/components/Button';
-import { BackButton } from '@/components/BackButton';
-import { Star, ExternalLink, Trash2 } from 'lucide-react';
-import { shortenAddress } from '@/lib/utils';
-import { useAuth } from '@/contexts/AuthContext';
-import { WatchedWallet } from '@/lib/auth';
-import { toast } from 'sonner';
+import { useEffect, useState } from "react";
+import { useNavigate, useLocation } from "react-router";
+import { motion } from "motion/react";
+import { Card } from "@/components/Card";
+import { Button } from "@/components/Button";
+import { BackButton } from "@/components/BackButton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  ExternalLink,
+  Trash2,
+  Users,
+  Twitter,
+  Eye,
+  UserPlus,
+} from "lucide-react";
+import { shortenAddress } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
+import { getUserProfile } from "@/lib/auth";
+import { getFollowersList, getFollowersCount } from "@/lib/profile";
+import { toast } from "sonner";
+import type { WatchedWallet } from "@/lib/auth";
+
+type TabId = "following" | "watchlist" | "followers";
 
 export function Watchlist() {
   const navigate = useNavigate();
-  const { watchlist, removeFromWatchlist, isAuthenticated, loading: authLoading } = useAuth();
-  const [removingWallets, setRemovingWallets] = useState<Set<string>>(new Set());
+  const location = useLocation();
+  const initialState = (location.state as { tab?: TabId })?.tab;
+  const [activeTab, setActiveTab] = useState<TabId>(
+    initialState === "followers" || initialState === "watchlist"
+      ? initialState
+      : "following",
+  );
 
-  const getGmgnLink = (address: string) => {
-    return `https://gmgn.ai/sol/address/${address}`;
-  };
+  const {
+    user,
+    watchlist,
+    removeFromWatchlist,
+    isAuthenticated,
+    loading: authLoading,
+  } = useAuth();
+  const [removingWallets, setRemovingWallets] = useState<Set<string>>(
+    new Set(),
+  );
+  const [removingUids, setRemovingUids] = useState<Set<string>>(new Set());
+  const [followingProfiles, setFollowingProfiles] = useState<
+    Record<
+      string,
+      { xHandle?: string; avatar?: string; walletAddress?: string }
+    >
+  >({});
+  const [followersCount, setFollowersCount] = useState<number | null>(null);
+  const [followersList, setFollowersList] = useState<Array<{ uid: string }>>(
+    [],
+  );
+  const [followersProfiles, setFollowersProfiles] = useState<
+    Record<
+      string,
+      { xHandle?: string; avatar?: string; walletAddress?: string }
+    >
+  >({});
+  const [followersLoading, setFollowersLoading] = useState(false);
 
-  const handleRemove = async (e: React.MouseEvent, walletAddress: string) => {
-    e.stopPropagation();
-    
-    if (!isAuthenticated) {
-      toast.error('Please sign in');
+  const following = watchlist.filter(
+    (w): w is WatchedWallet & { uid: string } =>
+      w.onPlatform === true && !!w.uid,
+  );
+  const watchlistExternal = watchlist.filter((w) => !w.onPlatform);
+  const followingUids = following.map((w) => w.uid);
+
+  useEffect(() => {
+    if (followingUids.length === 0) {
+      setFollowingProfiles({});
       return;
     }
+    const load = async () => {
+      const profiles: typeof followingProfiles = {};
+      await Promise.all(
+        following.map(async (w) => {
+          if (!w.uid) return;
+          const profile = await getUserProfile(w.uid);
+          if (profile) {
+            profiles[w.uid] = {
+              xHandle: profile.xHandle || profile.displayName,
+              avatar: profile.avatar || profile.photoURL,
+              walletAddress: profile.walletAddress,
+            };
+          }
+        }),
+      );
+      setFollowingProfiles(profiles);
+    };
+    load();
+  }, [followingUids.join(",")]);
 
+  useEffect(() => {
+    if (!user) return;
+    user
+      .getIdToken()
+      .then((token) => getFollowersCount(token))
+      .then(setFollowersCount)
+      .catch(() => setFollowersCount(0));
+  }, [user]);
+
+  useEffect(() => {
+    if (activeTab !== "followers" || !user) return;
+    setFollowersLoading(true);
+    user
+      .getIdToken()
+      .then((token) => getFollowersList(token))
+      .then(setFollowersList)
+      .catch(() => setFollowersList([]))
+      .finally(() => setFollowersLoading(false));
+  }, [activeTab, user]);
+
+  const followersUids = followersList.map((f) => f.uid);
+  useEffect(() => {
+    if (followersUids.length === 0) {
+      setFollowersProfiles({});
+      return;
+    }
+    const load = async () => {
+      const profiles: typeof followersProfiles = {};
+      await Promise.all(
+        followersUids.map(async (uid) => {
+          const profile = await getUserProfile(uid);
+          if (profile) {
+            profiles[uid] = {
+              xHandle: profile.xHandle || profile.displayName,
+              avatar: profile.avatar || profile.photoURL,
+              walletAddress: profile.walletAddress,
+            };
+          }
+        }),
+      );
+      setFollowersProfiles(profiles);
+    };
+    load();
+  }, [followersUids.join(",")]);
+
+  const getGmgnLink = (address: string) =>
+    `https://gmgn.ai/sol/address/${address}`;
+
+  const handleRemoveWallet = async (
+    e: React.MouseEvent,
+    walletAddress: string,
+  ) => {
+    e.stopPropagation();
+    if (!isAuthenticated) {
+      toast.error("Please sign in");
+      return;
+    }
     try {
-      setRemovingWallets(prev => new Set(prev).add(walletAddress));
+      setRemovingWallets((prev) => new Set(prev).add(walletAddress));
       await removeFromWatchlist(walletAddress);
-    } catch (error) {
-      // Error already handled in removeFromWatchlist
+    } catch {
+      /* handled in removeFromWatchlist */
     } finally {
-      setRemovingWallets(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(walletAddress);
-        return newSet;
+      setRemovingWallets((prev) => {
+        const next = new Set(prev);
+        next.delete(walletAddress);
+        return next;
+      });
+    }
+  };
+
+  const handleUnfollow = async (e: React.MouseEvent, uid: string) => {
+    e.stopPropagation();
+    if (!isAuthenticated) {
+      toast.error("Please sign in");
+      return;
+    }
+    try {
+      setRemovingUids((prev) => new Set(prev).add(uid));
+      await removeFromWatchlist("", { uid });
+      toast.success("Unfollowed");
+    } catch {
+      /* handled in removeFromWatchlist */
+    } finally {
+      setRemovingUids((prev) => {
+        const next = new Set(prev);
+        next.delete(uid);
+        return next;
       });
     }
   };
@@ -52,12 +197,12 @@ export function Watchlist() {
     return (
       <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E] p-6">
         <div className="max-w-[720px] mx-auto">
-          <h1 className="text-2xl font-bold mb-6">Watchlist</h1>
+          <h1 className="text-2xl font-bold mb-6">Following & Watchlist</h1>
           <Card className="text-center py-12">
-            <p className="text-white/60 mb-4">Please sign in to view your watchlist</p>
-            <Button onClick={() => navigate('/auth/x-connect')}>
-              Sign In
-            </Button>
+            <p className="text-white/60 mb-4">
+              Please sign in to view your watchlist
+            </p>
+            <Button onClick={() => navigate("/auth/x-connect")}>Sign In</Button>
           </Card>
         </div>
       </div>
@@ -69,84 +214,363 @@ export function Watchlist() {
       <div className="p-4">
         <BackButton onClick={() => navigate(-1)} />
       </div>
-      <div className="p-4 sm:p-6 max-w-[1200px] mx-auto">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold mb-2">Watchlist</h1>
-          <p className="text-white/60">Wallets you're tracking for transaction notifications</p>
+      <div className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8">
+        <div className="mb-4 sm:mb-6">
+          <h1 className="text-2xl sm:text-3xl font-bold mb-1 sm:mb-2">
+            Social
+          </h1>
+          <p className="text-sm sm:text-base text-white/60">
+            Platform users you follow and external wallets you watch
+          </p>
         </div>
 
-        {watchlist.length === 0 ? (
-          <Card className="text-center py-12">
-            <Star className="w-12 h-12 mx-auto mb-4 text-white/30" />
-            <p className="text-white/60 mb-4">Your watchlist is empty</p>
-            <p className="text-sm text-white/50 mb-6">
-              COPE wallets from the scanner to track their transactions
-            </p>
-            <Button onClick={() => navigate('/app/home')}>
-              Go to Home
-            </Button>
-          </Card>
-        ) : (
-          <Card className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-white/10">
-                  <th className="text-left py-3 px-4 text-sm font-medium text-white/70">Nickname</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-white/70">Wallet Address</th>
-                  <th className="text-center py-3 px-4 text-sm font-medium text-white/70">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {watchlist.map((wallet) => {
-                  return (
-                    <tr
-                      key={wallet.address}
-                      className="border-b border-white/5 hover:bg-white/5 transition-colors"
+        {
+          <Tabs
+            value={activeTab}
+            onValueChange={(v) => setActiveTab(v as TabId)}
+            className="w-full"
+          >
+            <TabsList className="w-full grid grid-cols-3 mb-4 bg-white/5 border border-white/10 p-1 rounded-xl min-w-0 overflow-hidden transition-colors duration-200">
+              <TabsTrigger
+                value="following"
+                className="data-[state=active]:bg-accent-primary/20 data-[state=active]:text-accent-primary data-[state=active]:border-accent-primary/30 rounded-lg py-2.5 px-2 min-w-0 max-w-full text-xs sm:text-sm overflow-hidden justify-center gap-1 sm:gap-2 transition-all duration-200"
+              >
+                <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+                <span className="truncate">
+                  <span className="hidden sm:inline">Following </span>(
+                  {following.length})
+                </span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="watchlist"
+                className="data-[state=active]:bg-accent-primary/20 data-[state=active]:text-accent-primary data-[state=active]:border-accent-primary/30 rounded-lg py-2.5 px-2 min-w-0 max-w-full text-xs sm:text-sm overflow-hidden justify-center gap-1 sm:gap-2 transition-all duration-200"
+              >
+                <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+                <span className="truncate">
+                  <span className="hidden sm:inline">Watchlist </span>(
+                  {watchlistExternal.length})
+                </span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="followers"
+                className="data-[state=active]:bg-accent-primary/20 data-[state=active]:text-accent-primary data-[state=active]:border-accent-primary/30 rounded-lg py-2.5 px-2 min-w-0 max-w-full text-xs sm:text-sm overflow-hidden justify-center gap-1 sm:gap-2 transition-all duration-200"
+              >
+                <UserPlus className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+                <span className="truncate">
+                  <span className="hidden sm:inline">Followers </span>(
+                  {followersCount ?? followersList.length})
+                </span>
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="following" className="mt-0">
+              <Card glass className="overflow-hidden">
+                <div className="h-1 bg-gradient-to-r from-[#12d585]/40 via-[#08b16b]/30 to-transparent" />
+                {following.length === 0 ? (
+                  <div className="py-10 sm:py-12 px-4 text-center text-white/60">
+                    <Users className="w-10 h-10 sm:w-12 sm:h-12 mx-auto mb-4 opacity-50" />
+                    <p className="text-sm sm:text-base">
+                      You're not following anyone yet
+                    </p>
+                    <Button
+                      variant="ghost"
+                      className="mt-4 text-accent-primary min-h-[44px]"
+                      onClick={() => navigate("/app/home")}
                     >
-                      <td className="py-4 px-4">
-                        <span className="text-white font-semibold">
-                          {wallet.nickname || '—'}
-                        </span>
-                      </td>
-                      <td className="py-4 px-4">
-                        <div className="flex items-center gap-2">
-                          <code className="text-sm font-mono text-white">
-                            {shortenAddress(wallet.address)}
-                          </code>
+                      Discover traders
+                    </Button>
+                  </div>
+                ) : (
+                  <motion.div
+                    className="divide-y divide-white/5"
+                    initial="initial"
+                    animate="animate"
+                    variants={{
+                      animate: {
+                        transition: {
+                          staggerChildren: 0.04,
+                          delayChildren: 0.05,
+                        },
+                      },
+                    }}
+                  >
+                    {following.map((entry) => {
+                      const profile = followingProfiles[entry.uid];
+                      const xHandle = profile?.xHandle || entry.nickname || "—";
+                      const displayAddress =
+                        profile?.walletAddress || entry.address;
+                      const xUsername = xHandle.replace(/^@/, "");
+                      const xUrl =
+                        xUsername && xUsername !== "—"
+                          ? `https://x.com/${xUsername}`
+                          : null;
+
+                      return (
+                        <motion.div
+                          key={entry.uid}
+                          variants={{
+                            initial: { opacity: 0, y: 10 },
+                            animate: {
+                              opacity: 1,
+                              y: 0,
+                              transition: { duration: 0.3, ease: "easeOut" },
+                            },
+                          }}
+                          className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 sm:p-4 hover:bg-white/5 transition-colors min-h-[56px]"
+                        >
+                          <div
+                            className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+                            onClick={() =>
+                              displayAddress &&
+                              navigate(`/scanner/wallet/${displayAddress}`)
+                            }
+                          >
+                            {profile?.avatar ? (
+                              <img
+                                src={profile.avatar}
+                                alt=""
+                                className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl object-cover flex-shrink-0"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-br from-[#12d585]/30 to-[#08b16b]/30 flex items-center justify-center flex-shrink-0">
+                                <Users className="w-4 h-4 sm:w-5 sm:h-5 text-accent-primary" />
+                              </div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-medium text-white truncate">
+                                  {entry.nickname || xHandle}
+                                </span>
+                                {xUrl && (
+                                  <a
+                                    href={xUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="text-accent-primary hover:text-accent-hover"
+                                    title="View on X"
+                                  >
+                                    <Twitter className="w-4 h-4" />
+                                  </a>
+                                )}
+                              </div>
+                              <code className="text-xs text-white/50 font-mono">
+                                {shortenAddress(displayAddress)}
+                              </code>
+                            </div>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => handleUnfollow(e, entry.uid)}
+                            disabled={removingUids.has(entry.uid)}
+                            className="text-[#FF4757] hover:text-[#FF4757] hover:bg-[#FF4757]/10 flex-shrink-0 min-h-[40px] w-full sm:w-auto"
+                          >
+                            {removingUids.has(entry.uid)
+                              ? "Removing..."
+                              : "Unfollow"}
+                          </Button>
+                        </motion.div>
+                      );
+                    })}
+                  </motion.div>
+                )}
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="watchlist" className="mt-0">
+              <Card glass className="overflow-hidden">
+                <div className="h-1 bg-gradient-to-r from-[#12d585]/40 via-[#08b16b]/30 to-transparent" />
+                {watchlistExternal.length === 0 ? (
+                  <div className="py-10 sm:py-12 px-4 text-center text-white/60">
+                    <Eye className="w-10 h-10 sm:w-12 sm:h-12 mx-auto mb-4 opacity-50" />
+                    <p className="text-sm sm:text-base">
+                      No external wallets in your watchlist
+                    </p>
+                    <Button
+                      variant="ghost"
+                      className="mt-4 text-accent-primary min-h-[44px]"
+                      onClick={() => navigate("/app/home")}
+                    >
+                      Add from scanner
+                    </Button>
+                  </div>
+                ) : (
+                  <motion.div
+                    className="divide-y divide-white/5"
+                    initial="initial"
+                    animate="animate"
+                    variants={{
+                      animate: {
+                        transition: {
+                          staggerChildren: 0.04,
+                          delayChildren: 0.05,
+                        },
+                      },
+                    }}
+                  >
+                    {watchlistExternal.map((wallet) => (
+                      <motion.div
+                        key={wallet.address}
+                        variants={{
+                          initial: { opacity: 0, y: 10 },
+                          animate: {
+                            opacity: 1,
+                            y: 0,
+                            transition: { duration: 0.3, ease: "easeOut" },
+                          },
+                        }}
+                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 sm:p-4 hover:bg-white/5 transition-colors cursor-pointer min-h-[56px]"
+                        onClick={() =>
+                          navigate(`/scanner/wallet/${wallet.address}`)
+                        }
+                      >
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-white/5 flex items-center justify-center flex-shrink-0">
+                            <Eye className="w-4 h-4 sm:w-5 sm:h-5 text-accent-primary" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <span className="font-medium text-white block truncate">
+                              {wallet.nickname || "—"}
+                            </span>
+                            <code className="text-xs text-white/50 font-mono">
+                              {shortenAddress(wallet.address)}
+                            </code>
+                          </div>
                           <a
                             href={getGmgnLink(wallet.address)}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-[#12d585] hover:text-[#08b16b] transition-colors"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-accent-primary hover:text-accent-hover p-2 rounded-lg hover:bg-white/5"
                           >
                             <ExternalLink className="w-4 h-4" />
                           </a>
                         </div>
-                      </td>
-                      <td className="py-4 px-4 text-center">
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={(e) => handleRemove(e, wallet.address)}
+                          onClick={(e) => handleRemoveWallet(e, wallet.address)}
                           disabled={removingWallets.has(wallet.address)}
-                          className="text-[#FF4757] hover:text-[#FF4757] hover:bg-[#FF4757]/10"
+                          className="text-[#FF4757] hover:text-[#FF4757] hover:bg-[#FF4757]/10 flex-shrink-0 min-h-[40px] w-full sm:w-auto"
                         >
                           {removingWallets.has(wallet.address) ? (
-                            <>Removing...</>
+                            "Removing..."
                           ) : (
-                            <>
-                              <Trash2 className="w-4 h-4" />
-                            </>
+                            <Trash2 className="w-4 h-4" />
                           )}
                         </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </Card>
-        )}
+                      </motion.div>
+                    ))}
+                  </motion.div>
+                )}
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="followers" className="mt-0">
+              <Card glass className="overflow-hidden">
+                <div className="h-1 bg-gradient-to-r from-[#12d585]/40 via-[#08b16b]/30 to-transparent" />
+                {followersLoading ? (
+                  <div className="py-10 sm:py-12 px-4 text-center text-white/60">
+                    <div className="animate-pulse">Loading followers...</div>
+                  </div>
+                ) : followersList.length === 0 ? (
+                  <div className="py-10 sm:py-12 px-4 text-center text-white/60">
+                    <UserPlus className="w-10 h-10 sm:w-12 sm:h-12 mx-auto mb-4 opacity-50" />
+                    <p className="text-sm sm:text-base">No followers yet</p>
+                    <p className="text-xs sm:text-sm text-white/50 mt-2">
+                      Share your profile when your wallet is public
+                    </p>
+                  </div>
+                ) : (
+                  <motion.div
+                    className="divide-y divide-white/5"
+                    initial="initial"
+                    animate="animate"
+                    variants={{
+                      animate: {
+                        transition: {
+                          staggerChildren: 0.04,
+                          delayChildren: 0.05,
+                        },
+                      },
+                    }}
+                  >
+                    {followersList.map(({ uid }) => {
+                      const profile = followersProfiles[uid];
+                      const xHandle = profile?.xHandle || "—";
+                      const displayAddress = profile?.walletAddress;
+                      const xUsername = xHandle.replace(/^@/, "");
+                      const xUrl =
+                        xUsername && xUsername !== "—"
+                          ? `https://x.com/${xUsername}`
+                          : null;
+
+                      return (
+                        <motion.div
+                          key={uid}
+                          variants={{
+                            initial: { opacity: 0, y: 10 },
+                            animate: {
+                              opacity: 1,
+                              y: 0,
+                              transition: { duration: 0.3, ease: "easeOut" },
+                            },
+                          }}
+                          className="flex items-center justify-between p-3 sm:p-4 hover:bg-white/5 transition-colors min-h-[56px]"
+                        >
+                          <div
+                            className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+                            onClick={() =>
+                              displayAddress &&
+                              navigate(`/scanner/wallet/${displayAddress}`)
+                            }
+                          >
+                            {profile?.avatar ? (
+                              <img
+                                src={profile.avatar}
+                                alt=""
+                                className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl object-cover flex-shrink-0"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-br from-[#12d585]/30 to-[#08b16b]/30 flex items-center justify-center flex-shrink-0">
+                                <UserPlus className="w-4 h-4 sm:w-5 sm:h-5 text-accent-primary" />
+                              </div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-white">
+                                  {xHandle}
+                                </span>
+                                {xUrl && (
+                                  <a
+                                    href={xUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="text-accent-primary hover:text-accent-hover"
+                                    title="View on X"
+                                  >
+                                    <Twitter className="w-4 h-4" />
+                                  </a>
+                                )}
+                              </div>
+                              {displayAddress && (
+                                <code className="text-xs text-white/50 font-mono">
+                                  {shortenAddress(displayAddress)}
+                                </code>
+                              )}
+                            </div>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </motion.div>
+                )}
+              </Card>
+            </TabsContent>
+          </Tabs>
+        }
       </div>
     </div>
   );

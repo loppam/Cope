@@ -2,7 +2,7 @@
 // This should be called when a wallet is added/removed from watchlist
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, type DocumentReference } from "firebase-admin/firestore";
 
 // Initialize Firebase Admin (only once)
 if (getApps().length === 0) {
@@ -46,9 +46,14 @@ const WEBHOOK_ID = process.env.HELIUS_WEBHOOK_ID; // Store this in .env after cr
 /** Transaction types we subscribe to: BUY, SELL, SWAP only. */
 const WEBHOOK_TRANSACTION_TYPES = ["BUY", "SELL", "SWAP"] as const;
 
+function isUserPublic(data: { isPublic?: boolean }): boolean {
+  return data.isPublic !== false;
+}
+
 /**
- * Sync all watched wallets across all users to Helius webhook
- * This aggregates all unique wallet addresses from all user watchlists
+ * Sync all watched wallets across all users to Helius webhook.
+ * - onPlatform entries: resolve uid → current walletAddress; skip if user is private.
+ * - Rebuilds watchedWallets reverse index from watchlists.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -69,7 +74,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: "HELIUS_API_KEY not configured" });
     }
 
-    // Get all users with watchlists
     let usersSnapshot;
     try {
       usersSnapshot = await db.collection("users").get();
@@ -83,27 +87,102 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         message: dbError?.message || "Failed to read users",
       });
     }
-    const allWatchedWallets = new Set<string>();
 
+    // Build user lookup: uid -> { walletAddress, isPublic }
+    const userByUid = new Map<
+      string,
+      { walletAddress: string | null; isPublic: boolean }
+    >();
     usersSnapshot.docs.forEach((doc) => {
-      const userData = doc.data();
-      const watchlist = userData.watchlist || [];
-      watchlist.forEach((w: any) => {
-        if (w.address) {
-          allWatchedWallets.add(w.address);
-        }
+      const d = doc.data();
+      userByUid.set(doc.id, {
+        walletAddress: d.walletAddress || null,
+        isPublic: isUserPublic(d),
       });
     });
 
-    const accountAddresses = Array.from(allWatchedWallets);
+    // address -> { [watcherUid]: { nickname?, addedAt? } }
+    const addressToWatchers = new Map<
+      string,
+      Record<string, { nickname?: string; addedAt?: string }>
+    >();
 
-    if (accountAddresses.length === 0) {
-      return res.status(200).json({
-        success: true,
-        message: "No wallets to monitor",
-        webhookId: WEBHOOK_ID,
-      });
+    for (const doc of usersSnapshot.docs) {
+      const watcherUid = doc.id;
+      const userData = doc.data();
+      const watchlist: Array<{
+        address: string;
+        uid?: string;
+        onPlatform?: boolean;
+        nickname?: string;
+        addedAt?: unknown;
+      }> = userData.watchlist || [];
+
+      for (const w of watchlist) {
+        if (!w.address) continue;
+
+        let effectiveAddress: string | null = null;
+
+        if (w.onPlatform && w.uid) {
+          const target = userByUid.get(w.uid);
+          if (!target || !target.isPublic || !target.walletAddress) {
+            // Private or no wallet: exclude from webhook (no notifications)
+            continue;
+          }
+          effectiveAddress = target.walletAddress;
+        } else {
+          effectiveAddress = w.address;
+        }
+
+        if (!effectiveAddress) continue;
+
+        const existing = addressToWatchers.get(effectiveAddress) || {};
+        const addedAt =
+          w.addedAt instanceof Date
+            ? w.addedAt.toISOString()
+            : typeof w.addedAt === "string"
+              ? w.addedAt
+              : new Date().toISOString();
+        existing[watcherUid] = {
+          nickname: w.nickname,
+          addedAt,
+        };
+        addressToWatchers.set(effectiveAddress, existing);
+      }
     }
+
+    const accountAddresses = Array.from(addressToWatchers.keys());
+
+    // Rebuild watchedWallets reverse index
+    const batch = db.batch();
+    const allWatchedRefs = await db.collection("watchedWallets").get();
+    const toDelete: DocumentReference[] = [];
+    const toWrite = new Set<string>();
+
+    for (const addr of accountAddresses) {
+      toWrite.add(addr);
+      const watchers = addressToWatchers.get(addr)!;
+      const ref = db.collection("watchedWallets").doc(addr);
+      batch.set(ref, { watchers }, { merge: true });
+    }
+
+    for (const doc of allWatchedRefs.docs) {
+      if (!toWrite.has(doc.id)) {
+        toDelete.push(doc.ref);
+      }
+    }
+    for (const ref of toDelete) {
+      batch.delete(ref);
+    }
+
+    await batch.commit();
+
+    // Update lastSyncAt for lazy sync timer (transaction handler checks every 5h)
+    const configRef = db.collection("config").doc("webhookSync");
+    await configRef.set(
+      { lastSyncAt: Date.now(), updatedAt: new Date() },
+      { merge: true },
+    );
 
     // Get webhook URL
     const webhookURL =

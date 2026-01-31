@@ -122,43 +122,53 @@ export function ScannerWalletDetail() {
         </Button>
       </div>
 
-      <div className="p-6 max-w-[720px] mx-auto">
-        <div className="mb-6">
-          <h1 className="text-xl font-bold mb-2">Wallet Details</h1>
-          <code className="text-sm font-mono text-white/70">
+      <div className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8">
+        <div className="mb-4 sm:mb-6">
+          <h1 className="text-xl sm:text-2xl font-bold mb-1 sm:mb-2">
+            Wallet Details
+          </h1>
+          <code className="text-xs sm:text-sm font-mono text-white/70 truncate block">
             {address && shortenAddress(address)}
           </code>
         </div>
 
         {loading ? (
-          <Card glass className="mb-6 text-center py-8">
-            <Loader2 className="w-8 h-8 mx-auto mb-4 animate-spin text-[#12d585]" />
-            <p className="text-white/60">Loading wallet analytics...</p>
+          <Card glass className="mb-6 overflow-hidden">
+            <div className="h-1 bg-gradient-to-r from-[#12d585]/40 via-[#08b16b]/30 to-transparent" />
+            <div className="text-center py-8 px-4">
+              <Loader2 className="w-8 h-8 mx-auto mb-4 animate-spin text-[#12d585]" />
+              <p className="text-white/60 text-sm sm:text-base">
+                Loading wallet analytics...
+              </p>
+            </div>
           </Card>
         ) : (
           <>
             {/* Stats */}
-            <Card glass className="mb-6">
-              <div className="grid grid-cols-2 gap-6">
-                <div>
-                  <div className="flex items-center gap-2 mb-2 text-white/60">
-                    <TrendingUp className="w-4 h-4" />
-                    <span className="text-sm">Win Rate</span>
+            <Card glass className="mb-6 overflow-hidden">
+              <div className="h-1 bg-gradient-to-r from-[#12d585]/40 via-[#08b16b]/30 to-transparent" />
+              <div className="p-4 sm:p-6">
+                <div className="grid grid-cols-2 gap-4 sm:gap-6">
+                  <div>
+                    <div className="flex items-center gap-2 mb-2 text-white/60">
+                      <TrendingUp className="w-4 h-4" />
+                      <span className="text-sm">Win Rate</span>
+                    </div>
+                    <p className="text-2xl font-bold text-[#12d585]">
+                      {wallet?.winRate || 0}%
+                    </p>
+                    <p className="text-xs text-white/50 mt-1">
+                      {wallet?.wins || 0}W / {wallet?.losses || 0}L
+                    </p>
                   </div>
-                  <p className="text-2xl font-bold text-[#12d585]">
-                    {wallet?.winRate || 0}%
-                  </p>
-                  <p className="text-xs text-white/50 mt-1">
-                    {wallet?.wins || 0}W / {wallet?.losses || 0}L
-                  </p>
-                </div>
-                <div>
-                  <div className="flex items-center gap-2 mb-2 text-white/60">
-                    <Activity className="w-4 h-4" />
-                    <span className="text-sm">Total Trades</span>
+                  <div>
+                    <div className="flex items-center gap-2 mb-2 text-white/60">
+                      <Activity className="w-4 h-4" />
+                      <span className="text-sm">Total Trades</span>
+                    </div>
+                    <p className="text-2xl font-bold">{wallet?.trades || 0}</p>
+                    <p className="text-xs text-white/50 mt-1">Last 30 days</p>
                   </div>
-                  <p className="text-2xl font-bold">{wallet?.trades || 0}</p>
-                  <p className="text-xs text-white/50 mt-1">Last 30 days</p>
                 </div>
               </div>
             </Card>
@@ -268,7 +278,7 @@ export function ScannerWalletDetail() {
           </Button>
           <Button
             variant="outline"
-            className="w-full h-10"
+            className="w-full h-10 min-h-[44px]"
             onClick={() =>
               window.open(
                 `https://solscan.io/account/${walletAddress}`,

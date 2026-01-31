@@ -18,7 +18,6 @@ import {
   getDocs,
   limit,
   orderBy,
-  type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { auth, db } from "./firebase";
 
@@ -71,6 +70,7 @@ async function saveUserProfile(user: User, credential: any): Promise<void> {
     email: user.email,
     photoURL: user.photoURL,
     xHandle: xHandle,
+    xHandleLower: xHandle.toLowerCase(),
     avatar: user.photoURL,
     providerId: credential.providerId,
     isPublic:
@@ -423,14 +423,11 @@ export async function updateUserProfile(
 ) {
   try {
     const userRef = doc(db, "users", uid);
-    await setDoc(
-      userRef,
-      {
-        ...updates,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
+    const merged = { ...updates, updatedAt: serverTimestamp() };
+    if (typeof merged.xHandle === "string") {
+      merged.xHandleLower = merged.xHandle.toLowerCase();
+    }
+    await setDoc(userRef, merged, { merge: true });
     return true;
   } catch (error) {
     console.error("Error updating user profile:", error);
@@ -463,10 +460,14 @@ export async function removeUserWallet(uid: string) {
 }
 
 // Watchlist interfaces
+// onPlatform: true = following (platform user); false/omit = watchlist (external wallet)
+// uid: when onPlatform, the followed user's uid (enables UID-based following, wallet changes)
 export interface WatchedWallet {
   address: string;
   addedAt: any; // Date object (can't use serverTimestamp() in arrays)
   nickname?: string;
+  onPlatform?: boolean;
+  uid?: string; // When onPlatform: the followed user's uid
   matched?: number; // Number of tokens matched (from scanner)
   totalInvested?: number;
   totalRemoved?: number;
@@ -665,50 +666,50 @@ export async function findUserByWalletAddress(
   }
 }
 
-// Find user by X handle (Twitter username); case-insensitive so existing users are found
+// Find user by X handle (Twitter username); case-insensitive via xHandleLower
 // Only returns public users: absence of isPublic → public; if exists, use the boolean
+// Fallback: if xHandleLower query returns null (migration not run), try xHandle exact match
 export async function findUserByXHandle(xHandle: string) {
+  const withAt = xHandle.trim().startsWith("@")
+    ? xHandle.trim()
+    : `@${xHandle.trim()}`;
+  const normalizedHandle = withAt.toLowerCase();
+
+  const usersRef = collection(db, "users");
+
+  // Primary: query xHandleLower (case-insensitive; requires migration)
   try {
-    const withAt = xHandle.trim().startsWith("@")
-      ? xHandle.trim()
-      : `@${xHandle.trim()}`;
-    const normalizedHandle = withAt.toLowerCase();
-
-    const usersRef = collection(db, "users");
-    // Query two case variants so we match stored "@LopamEth" when user types "@lopameth"
-    const capitalized =
-      normalizedHandle.length > 1
-        ? "@" +
-          normalizedHandle.slice(1).charAt(0).toUpperCase() +
-          normalizedHandle.slice(2)
-        : normalizedHandle;
-    const prefixes = [normalizedHandle, capitalized].filter(
-      (p, i, arr) => arr.indexOf(p) === i,
+    const q = query(
+      usersRef,
+      where("xHandleLower", "==", normalizedHandle),
+      limit(1),
     );
-
-    const seenIds = new Set<string>();
-    const allDocs: QueryDocumentSnapshot[] = [];
-    for (const prefix of prefixes) {
-      const q = query(
-        usersRef,
-        where("xHandle", ">=", prefix),
-        where("xHandle", "<=", prefix + "\uf8ff"),
-        orderBy("xHandle"),
-        limit(20),
-      );
-      const snapshot = await getDocs(q);
-      snapshot.docs.forEach((d) => {
-        if (!seenIds.has(d.id)) {
-          seenIds.add(d.id);
-          allDocs.push(d);
-        }
-      });
+    const snapshot = await getDocs(q);
+    if (!snapshot.empty) {
+      const exactMatch = snapshot.docs[0];
+      const userData = exactMatch.data();
+      if (userData.walletAddress && isUserPublic(userData)) {
+        return {
+          uid: exactMatch.id,
+          displayName: userData.displayName || userData.xHandle || null,
+          xHandle: userData.xHandle || null,
+          avatar: userData.avatar || userData.photoURL || null,
+          walletAddress: userData.walletAddress,
+          isPublic: isUserPublic(userData),
+        };
+      }
     }
-    const exactMatch = allDocs.find(
-      (d) => (d.data().xHandle || "").toLowerCase() === normalizedHandle,
-    );
-    if (!exactMatch) return null;
+  } catch (err) {
+    console.warn("[auth] xHandleLower query failed, trying fallback:", err);
+  }
 
+  // Fallback: xHandle exact match (when migration not run or index missing)
+  try {
+    const q = query(usersRef, where("xHandle", "==", withAt), limit(1));
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) return null;
+
+    const exactMatch = snapshot.docs[0];
     const userData = exactMatch.data();
     if (!userData.walletAddress || !isUserPublic(userData)) return null;
 
@@ -736,57 +737,37 @@ export interface UserSearchResult {
   isPublic?: boolean;
 }
 
-// Search users by X handle prefix (for dropdown suggestions); case-insensitive
+// Search users by X handle prefix (for dropdown suggestions); case-insensitive via xHandleLower
 // Only returns public users: absence of isPublic → public; if exists, use the boolean
+// Fallback: when xHandleLower index missing or migration not run, try xHandle range + client-side filter
 export async function searchUsersByHandle(
   handleQuery: string,
   limitCount: number = 20,
 ): Promise<UserSearchResult[]> {
+  const trimmed = handleQuery.trim();
+  if (!trimmed.length) return [];
+
+  const normalizedPrefix = trimmed.startsWith("@")
+    ? trimmed.toLowerCase()
+    : `@${trimmed.toLowerCase()}`;
+  const usersRef = collection(db, "users");
+
+  // Primary: xHandleLower range query (requires Firestore composite index + migration)
   try {
-    const trimmed = handleQuery.trim();
-    if (!trimmed.length) return [];
-
-    const normalizedPrefix = trimmed.startsWith("@")
-      ? trimmed.toLowerCase()
-      : `@${trimmed.toLowerCase()}`;
-
-    // Query two case variants so we match stored "@LopamEth" when user types "lopam"
-    const capitalized =
-      normalizedPrefix.length > 1
-        ? "@" +
-          normalizedPrefix.slice(1).charAt(0).toUpperCase() +
-          normalizedPrefix.slice(2)
-        : normalizedPrefix;
-    const prefixes = [normalizedPrefix, capitalized].filter(
-      (p, i, arr) => arr.indexOf(p) === i,
+    const q = query(
+      usersRef,
+      where("xHandleLower", ">=", normalizedPrefix),
+      where("xHandleLower", "<=", normalizedPrefix + "\uf8ff"),
+      orderBy("xHandleLower"),
+      limit(limitCount),
     );
+    const snapshot = await getDocs(q);
 
-    const usersRef = collection(db, "users");
-    const seenIds = new Set<string>();
-    const mergedDocs: QueryDocumentSnapshot[] = [];
-    for (const prefix of prefixes) {
-      const q = query(
-        usersRef,
-        where("xHandle", ">=", prefix),
-        where("xHandle", "<=", prefix + "\uf8ff"),
-        orderBy("xHandle"),
-        limit(limitCount * 2),
-      );
-      const snapshot = await getDocs(q);
-      snapshot.docs.forEach((d) => {
-        if (!seenIds.has(d.id)) {
-          seenIds.add(d.id);
-          mergedDocs.push(d);
-        }
-      });
-    }
-
-    const prefixLower = normalizedPrefix.toLowerCase();
-    const publicUsers = mergedDocs.filter((docSnap) => {
+    const publicUsers = snapshot.docs.filter((docSnap) => {
       const data = docSnap.data();
       if (!data.walletAddress) return false;
       if (!isUserPublic(data)) return false;
-      return (data.xHandle || "").toLowerCase().startsWith(prefixLower);
+      return true;
     });
 
     return publicUsers.slice(0, limitCount).map((docSnap) => {
@@ -800,11 +781,44 @@ export async function searchUsersByHandle(
         isPublic: isUserPublic(userData),
       };
     });
+  } catch (err: unknown) {
+    console.warn(
+      "[auth] xHandleLower prefix search failed, trying fallback:",
+      err,
+    );
+    const firestoreErr = err as { message?: string; code?: number };
+    if (firestoreErr?.message?.includes("index")) {
+      console.warn(
+        "[auth] Firestore index may be missing. Run: firebase deploy --only firestore:indexes",
+      );
+    }
+  }
+
+  // Fallback: fetch users, filter by xHandle prefix client-side (when index missing or migration not run)
+  try {
+    const q = query(usersRef, limit(500));
+    const snapshot = await getDocs(q);
+
+    const filtered = snapshot.docs.filter((docSnap) => {
+      const data = docSnap.data();
+      if (!data.walletAddress || !isUserPublic(data)) return false;
+      const h = ((data.xHandle as string) || "").toLowerCase();
+      return h.startsWith(normalizedPrefix);
+    });
+
+    return filtered.slice(0, limitCount).map((docSnap) => {
+      const userData = docSnap.data();
+      return {
+        uid: docSnap.id,
+        displayName: userData.displayName || userData.xHandle || null,
+        xHandle: userData.xHandle || null,
+        avatar: userData.avatar || userData.photoURL || null,
+        walletAddress: userData.walletAddress,
+        isPublic: isUserPublic(userData),
+      };
+    });
   } catch (error) {
     console.error("Error searching users by handle:", error);
-    if (error && typeof (error as { code?: number }).code !== "undefined") {
-      console.error("Search error details:", error);
-    }
     return [];
   }
 }

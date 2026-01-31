@@ -1,8 +1,13 @@
 // Vercel Serverless Function: Webhook endpoint for Helius transaction notifications
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { waitUntil } from "@vercel/functions";
 import { createHash } from "crypto";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+import {
+  getFirestore,
+  type DocumentSnapshot,
+  type DocumentData,
+} from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import webpush from "web-push";
 
@@ -149,6 +154,9 @@ async function getTokenPrice(mint: string): Promise<number> {
 
 const PRICES_COLLECTION = "prices";
 const SOL_PRICE_DOC_ID = "SOL";
+const SYNC_INTERVAL_MS = 5 * 60 * 60 * 1000; // 5 hours
+const CONFIG_COLLECTION = "config";
+const WEBHOOK_SYNC_DOC_ID = "webhookSync";
 
 /**
  * Fetch SOL price: Firestore cache (5 min) shared across invocations, then Jupiter /price/v3.
@@ -367,15 +375,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const payload = req.body as HeliusWebhookPayload[] | HeliusWebhookPayload;
 
-    // Log raw payload as received (before any parsing)
-    console.log(
-      "[Webhook] Raw payload (as received):",
-      JSON.stringify(req.body, null, 2),
-    );
+    // Lazy sync timer: trigger webhook sync if last sync was >5 hours ago (Vercel Cron on Hobby is daily)
+    try {
+      const syncRef = db.collection(CONFIG_COLLECTION).doc(WEBHOOK_SYNC_DOC_ID);
+      const syncSnap = await syncRef.get();
+      const lastSyncAt = syncSnap.exists
+        ? (syncSnap.data()?.lastSyncAt as number | undefined)
+        : 0;
+      const now = Date.now();
+      if (!lastSyncAt || now - lastSyncAt > SYNC_INTERVAL_MS) {
+        const baseUrl = process.env.VERCEL_URL
+          ? `https://${process.env.VERCEL_URL}`
+          : req.headers.origin || "https://your-domain.vercel.app";
+        const syncUrl = `${baseUrl}/api/webhook/sync`;
+        const auth = process.env.WEBHOOK_SYNC_SECRET
+          ? { Authorization: `Bearer ${process.env.WEBHOOK_SYNC_SECRET}` }
+          : {};
+        waitUntil(
+          fetch(syncUrl, { method: "POST", headers: auth }).catch((e) =>
+            console.warn("[Webhook] Lazy sync failed:", e),
+          ),
+        );
+      }
+    } catch (syncErr) {
+      // Non-fatal: continue processing
+    }
 
     // Helius sends an array of transactions
     const transactions = Array.isArray(payload) ? payload : [payload];
-    console.log("[Webhook] Received", transactions.length, "transaction(s)");
 
     // Filter to BUY/SELL/SWAP and collect unique primary token mints for symbol resolution (one /tokens/:mint per mint per request)
     const processableTx = transactions.filter(
@@ -396,28 +423,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }),
     );
 
+    // Collect all unique wallet addresses across transactions for batch read
+    const allWalletAddresses = new Set<string>();
+    const txToWallets = new Map<HeliusWebhookPayload, Set<string>>();
     for (const tx of processableTx) {
-      const isBuy = tx.type === "BUY";
-      const isSell = tx.type === "SELL";
-      const isSwap = tx.type === "SWAP";
-
-      // Extract wallet addresses from the transaction
       const walletAddresses = new Set<string>();
-
       if (tx.feePayer) walletAddresses.add(tx.feePayer);
-
       tx.nativeTransfers?.forEach((t) => {
         walletAddresses.add(t.fromUserAccount);
         walletAddresses.add(t.toUserAccount);
       });
-
       tx.tokenTransfers?.forEach((t) => {
         if (t.fromUserAccount) walletAddresses.add(t.fromUserAccount);
         if (t.toUserAccount) walletAddresses.add(t.toUserAccount);
       });
-
-      // Enhanced BUY/SELL/SWAP: accountData contains wallet accounts involved
-      if (isBuy || isSell || isSwap) {
+      if (tx.type === "BUY" || tx.type === "SELL" || tx.type === "SWAP") {
         tx.accountData?.forEach((acc) => {
           walletAddresses.add(acc.account);
           acc.tokenBalanceChanges?.forEach((tc) => {
@@ -426,6 +446,74 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           });
         });
       }
+      txToWallets.set(tx, walletAddresses);
+      walletAddresses.forEach((a) => allWalletAddresses.add(a));
+    }
+
+    // Batch read watchedWallets for all addresses
+    const watchedWalletsRef = db.collection("watchedWallets");
+    const watchedSnaps =
+      allWalletAddresses.size > 0
+        ? await Promise.all(
+            [...allWalletAddresses].map((addr) =>
+              watchedWalletsRef.doc(addr).get(),
+            ),
+          )
+        : [];
+    const watchedByAddr = new Map<
+      string,
+      Record<string, { nickname?: string }>
+    >();
+    const addressesNeedingFallback: string[] = [];
+    let idx = 0;
+    for (const addr of allWalletAddresses) {
+      const snap = watchedSnaps[idx++];
+      if (snap?.exists) {
+        const watchers =
+          (snap.data()?.watchers as Record<string, { nickname?: string }>) ||
+          {};
+        if (Object.keys(watchers).length > 0) {
+          watchedByAddr.set(addr, watchers);
+        } else {
+          addressesNeedingFallback.push(addr);
+        }
+      } else {
+        addressesNeedingFallback.push(addr);
+      }
+    }
+
+    // Batch read user docs for watchers; fetch all users once if fallback needed
+    const allUserIds = new Set<string>();
+    watchedByAddr.forEach((watchers) => {
+      Object.keys(watchers).forEach((uid) => allUserIds.add(uid));
+    });
+    const userDocsById = new Map<string, DocumentSnapshot>();
+    if (allUserIds.size > 0) {
+      const userSnaps = await Promise.all(
+        [...allUserIds].map((uid) => db.collection("users").doc(uid).get()),
+      );
+      [...allUserIds].forEach((uid, i) => {
+        const s = userSnaps[i];
+        if (s?.exists) userDocsById.set(uid, s);
+      });
+    }
+    let allUsersForFallback: Array<{
+      id: string;
+      data: () => DocumentData;
+    }> | null = null;
+    if (addressesNeedingFallback.length > 0) {
+      const allUsersSnap = await db.collection("users").get();
+      allUsersForFallback = allUsersSnap.docs.map((d) => ({
+        id: d.id,
+        data: () => d.data(),
+      }));
+    }
+
+    for (const tx of processableTx) {
+      const isBuy = tx.type === "BUY";
+      const isSell = tx.type === "SELL";
+      const isSwap = tx.type === "SWAP";
+      const walletAddresses = txToWallets.get(tx)!;
 
       // Compute price/symbol once per tx (Jupiter /price/v3, cached in-memory and Firestore for SOL).
       const tokenTransfers = tx.tokenTransfers || [];
@@ -504,45 +592,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Collect unique users to notify (one notification per user per tx)
       const notifiedUserIds = new Set<string>();
 
-      // For each wallet address, find users watching it (per-user, not platform-wide)
+      // For each wallet address, find users watching it (use pre-fetched batch data)
       for (const walletAddress of walletAddresses) {
-        // Prefer reverse index: watchedWallets/{walletAddress} -> { watchers: { [uid]: { nickname? } } }
-        const watchedDoc = await db
-          .collection("watchedWallets")
-          .doc(walletAddress)
-          .get();
-        const watchersMap = watchedDoc.exists
-          ? (watchedDoc.data()?.watchers as Record<
-              string,
-              { nickname?: string }
-            >) || {}
-          : null;
+        const watchersMap = watchedByAddr.get(walletAddress) || null;
 
         let usersWithWallet: Array<{ id: string; data: () => any }>;
         if (watchersMap && Object.keys(watchersMap).length > 0) {
-          // Use reverse index: only fetch user docs for watchers
-          const userIds = Object.keys(watchersMap);
-          usersWithWallet = await Promise.all(
-            userIds.map(async (uid) => {
-              const userSnap = await db.collection("users").doc(uid).get();
-              return userSnap.exists
+          usersWithWallet = Object.keys(watchersMap)
+            .map((uid) => {
+              const userSnap = userDocsById.get(uid);
+              return userSnap?.exists
                 ? { id: userSnap.id, data: () => userSnap.data() }
                 : null;
-            }),
-          ).then(
-            (arr) =>
-              arr.filter(Boolean) as Array<{ id: string; data: () => any }>,
-          );
-        } else {
-          // Fallback: no index yet (legacy), scan all users
-          const allUsersSnapshot = await db.collection("users").get();
-          usersWithWallet = allUsersSnapshot.docs
-            .filter((doc) => {
-              const userData = doc.data();
-              const watchlist = userData.watchlist || [];
-              return watchlist.some((w: any) => w.address === walletAddress);
             })
-            .map((doc) => ({ id: doc.id, data: () => doc.data() }));
+            .filter(Boolean) as Array<{ id: string; data: () => any }>;
+        } else if (allUsersForFallback) {
+          usersWithWallet = allUsersForFallback.filter((doc) => {
+            const userData = doc.data();
+            const watchlist = userData?.watchlist || [];
+            return watchlist.some((w: any) => w.address === walletAddress);
+          });
+        } else {
+          usersWithWallet = [];
         }
 
         // Create notifications for each user watching this wallet (per-user, not platform-wide)
@@ -612,25 +683,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               createdAt: new Date(),
             };
 
-            // Log parsed notification payload (visible in Vercel function logs)
             const deepLink =
               hasTokenTransfer && tokenAddress
                 ? `/token/${tokenAddress}`
                 : `/scanner/wallet/${walletAddress}`;
-            console.log(
-              "[Webhook] Notification payload:",
-              JSON.stringify({
-                type: notificationData.type,
-                title: notificationData.title,
-                message: notificationData.message,
-                walletAddress: notificationData.walletAddress,
-                txHash: notificationData.txHash,
-                tokenAddress: notificationData.tokenAddress,
-                amountUsd: notificationData.amountUsd,
-                tokenSymbol,
-                deepLink,
-              }),
-            );
 
             await notificationRef.set(notificationData, { merge: true });
 
@@ -646,10 +702,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   txHash: notificationData.txHash || "",
                 },
               };
-              console.log(
-                "[Webhook] Push payload:",
-                JSON.stringify(pushPayload),
-              );
               const invalidTokens = await sendToTokens(tokens, pushPayload);
               // Remove invalid tokens (doc ID is hash of token)
               for (const token of invalidTokens) {
@@ -684,9 +736,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const response = { success: true, processed: transactions.length };
-    console.log("[Webhook] Response:", JSON.stringify(response));
-    return res.status(200).json(response);
+    return res.status(200).json({
+      success: true,
+      processed: transactions.length,
+    });
   } catch (error: any) {
     console.error("Webhook processing error:", error);
     const errorResponse = {

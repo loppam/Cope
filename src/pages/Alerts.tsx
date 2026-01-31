@@ -265,11 +265,13 @@ export function Alerts() {
   const readNotifications = filteredNotifications.filter((n) => n.read);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E] p-4 sm:p-6">
+    <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E] p-4 sm:p-6 pb-8">
       <div className="max-w-[720px] mx-auto">
-        <div className="mb-6 flex items-center justify-between flex-wrap gap-4">
+        <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold mb-2">Alerts</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold mb-1 sm:mb-2">
+              Alerts
+            </h1>
             {unreadCount > 0 && (
               <p className="text-white/60 text-sm">
                 {unreadCount} unread notification{unreadCount !== 1 ? "s" : ""}
@@ -278,7 +280,12 @@ export function Alerts() {
           </div>
           <div className="flex items-center gap-2">
             {unreadCount > 0 && (
-              <Button variant="outline" size="sm" onClick={handleMarkAllAsRead}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleMarkAllAsRead}
+                className="min-h-[44px]"
+              >
                 <Check className="w-4 h-4" />
                 Mark all read
               </Button>
@@ -288,7 +295,7 @@ export function Alerts() {
 
         {/* Filter Tabs */}
         {notifications.length > 0 && (
-          <div className="mb-4 flex gap-2 overflow-x-auto pb-2">
+          <div className="mb-4 flex gap-2 overflow-x-auto pb-2 -mx-1 scrollbar-hide">
             {[
               { value: "all", label: "All" },
               { value: "unread", label: "Unread" },
@@ -299,7 +306,7 @@ export function Alerts() {
               <button
                 key={filterOption.value}
                 onClick={() => setFilter(filterOption.value as any)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+                className={`px-3 sm:px-4 py-2 min-h-[40px] rounded-xl text-sm font-medium whitespace-nowrap transition-all flex-shrink-0 ${
                   filter === filterOption.value
                     ? "bg-accent-primary text-[#000000]"
                     : "bg-white/5 text-white/60 hover:bg-white/10"
@@ -312,19 +319,29 @@ export function Alerts() {
         )}
 
         {filteredNotifications.length === 0 ? (
-          <Card className="text-center py-12">
-            <Bell className="w-12 h-12 mx-auto mb-4 text-white/30" />
-            <h3 className="text-lg font-semibold mb-2">No Alerts Yet</h3>
-            <p className="text-white/60 text-center max-w-sm mx-auto mb-6">
-              {filter === "all"
-                ? "You'll get notified when wallets you're COPEing make new trades"
-                : `No ${filter === "unread" ? "unread" : filter === "buy" ? "buy" : filter === "sell" ? "sell" : "swap"} notifications`}
-            </p>
-            {filter === "all" && (
-              <Button onClick={() => (window.location.href = "/scanner")}>
-                Find Wallets to COPE
-              </Button>
-            )}
+          <Card glass className="overflow-hidden">
+            <div className="h-1 bg-gradient-to-r from-accent-purple/40 via-accent-purple/20 to-transparent" />
+            <div className="text-center py-10 sm:py-12 px-4">
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-white/5 flex items-center justify-center mx-auto mb-4">
+                <Bell className="w-8 h-8 sm:w-10 sm:h-10 text-white/30" />
+              </div>
+              <h3 className="text-lg sm:text-xl font-semibold mb-2">
+                No Alerts Yet
+              </h3>
+              <p className="text-white/60 text-center max-w-sm mx-auto mb-6 text-sm sm:text-base">
+                {filter === "all"
+                  ? "You'll get notified when wallets you're COPEing make new trades"
+                  : `No ${filter === "unread" ? "unread" : filter === "buy" ? "buy" : filter === "sell" ? "sell" : "swap"} notifications`}
+              </p>
+              {filter === "all" && (
+                <Button
+                  onClick={() => (window.location.href = "/scanner")}
+                  className="min-h-[48px]"
+                >
+                  Find Wallets to COPE
+                </Button>
+              )}
+            </div>
           </Card>
         ) : (
           <div className="space-y-4">
@@ -336,7 +353,8 @@ export function Alerts() {
                   {unreadNotifications.map((notification) => (
                     <Card
                       key={notification.id}
-                      className={`border-l-4 ${
+                      glass
+                      className={`overflow-hidden border-l-4 ${
                         notification.type === "buy"
                           ? "border-[#12d585]"
                           : notification.type === "sell"
@@ -344,78 +362,80 @@ export function Alerts() {
                             : "border-[#54A0FF]"
                       }`}
                     >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <h3 className="font-semibold text-white">
-                              {notification.title}
-                            </h3>
-                            {!notification.read && (
-                              <span className="w-2 h-2 rounded-full bg-[#12d585]"></span>
-                            )}
+                      <div className="p-4 sm:p-5">
+                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <h3 className="font-semibold text-white truncate">
+                                {notification.title}
+                              </h3>
+                              {!notification.read && (
+                                <span className="w-2 h-2 rounded-full bg-[#12d585]"></span>
+                              )}
+                            </div>
+                            <p className="text-sm text-white mb-2 line-clamp-2">
+                              {notification.message}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-white/90">
+                              <code className="font-mono">
+                                {shortenAddress(notification.walletAddress)}
+                              </code>
+                              {notification.amountUsd && (
+                                <span>
+                                  {formatCurrency(notification.amountUsd)}
+                                </span>
+                              )}
+                              <span>{formatTime(notification.createdAt)}</span>
+                            </div>
                           </div>
-                          <p className="text-sm text-white mb-2">
-                            {notification.message}
-                          </p>
-                          <div className="flex items-center gap-4 text-xs text-white/90">
-                            <code className="font-mono">
-                              {shortenAddress(notification.walletAddress)}
-                            </code>
-                            {notification.amountUsd && (
-                              <span>
-                                {formatCurrency(notification.amountUsd)}
-                              </span>
+                          <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+                            {notification.tokenAddress && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  navigate("/app/trade", {
+                                    state: {
+                                      mint: notification.tokenAddress,
+                                      fromFeed: true,
+                                    },
+                                  });
+                                }}
+                                className="text-accent-primary hover:text-accent-hover"
+                                title="Copy Trade"
+                              >
+                                <Copy className="w-4 h-4" />
+                              </Button>
                             )}
-                            <span>{formatTime(notification.createdAt)}</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-                          {notification.tokenAddress && (
+                            {notification.txHash && (
+                              <a
+                                href={`https://solscan.io/tx/${notification.txHash}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[#12d585] hover:text-[#08b16b] p-1 hover:bg-white/10 rounded transition-colors"
+                                title="View on Solscan"
+                              >
+                                <ExternalLink className="w-4 h-4" />
+                              </a>
+                            )}
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => {
-                                navigate("/app/trade", {
-                                  state: {
-                                    mint: notification.tokenAddress,
-                                    fromFeed: true,
-                                  },
-                                });
-                              }}
-                              className="text-accent-primary hover:text-accent-hover"
-                              title="Copy Trade"
+                              onClick={() => handleMarkAsRead(notification.id)}
+                              title="Mark as read"
                             >
-                              <Copy className="w-4 h-4" />
+                              <Check className="w-4 h-4" />
                             </Button>
-                          )}
-                          {notification.txHash && (
-                            <a
-                              href={`https://solscan.io/tx/${notification.txHash}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-[#12d585] hover:text-[#08b16b] p-1 hover:bg-white/10 rounded transition-colors"
-                              title="View on Solscan"
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDelete(notification.id)}
+                              className="text-[#FF4757] hover:text-[#FF4757] hover:bg-[#FF4757]/10"
+                              title="Delete"
                             >
-                              <ExternalLink className="w-4 h-4" />
-                            </a>
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleMarkAsRead(notification.id)}
-                            title="Mark as read"
-                          >
-                            <Check className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDelete(notification.id)}
-                            className="text-[#FF4757] hover:text-[#FF4757] hover:bg-[#FF4757]/10"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
                         </div>
                       </div>
                     </Card>
@@ -432,7 +452,8 @@ export function Alerts() {
                   {readNotifications.map((notification) => (
                     <Card
                       key={notification.id}
-                      className={`opacity-60 border-l-4 ${
+                      glass
+                      className={`opacity-60 overflow-hidden border-l-4 ${
                         notification.type === "buy"
                           ? "border-[#12d585]"
                           : notification.type === "sell"
@@ -440,65 +461,67 @@ export function Alerts() {
                             : "border-[#54A0FF]"
                       }`}
                     >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <h3 className="font-semibold mb-1 text-white">
-                            {notification.title}
-                          </h3>
-                          <p className="text-sm text-white mb-2">
-                            {notification.message}
-                          </p>
-                          <div className="flex items-center gap-4 text-xs text-white/90">
-                            <code className="font-mono">
-                              {shortenAddress(notification.walletAddress)}
-                            </code>
-                            {notification.amountUsd && (
-                              <span>
-                                {formatCurrency(notification.amountUsd)}
-                              </span>
-                            )}
-                            <span>{formatTime(notification.createdAt)}</span>
+                      <div className="p-4 sm:p-5">
+                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-semibold mb-1 text-white truncate">
+                              {notification.title}
+                            </h3>
+                            <p className="text-sm text-white mb-2 line-clamp-2">
+                              {notification.message}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-white/90">
+                              <code className="font-mono">
+                                {shortenAddress(notification.walletAddress)}
+                              </code>
+                              {notification.amountUsd && (
+                                <span>
+                                  {formatCurrency(notification.amountUsd)}
+                                </span>
+                              )}
+                              <span>{formatTime(notification.createdAt)}</span>
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-                          {notification.tokenAddress && (
+                          <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+                            {notification.tokenAddress && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  navigate("/app/trade", {
+                                    state: {
+                                      mint: notification.tokenAddress,
+                                      fromFeed: true,
+                                    },
+                                  });
+                                }}
+                                className="text-accent-primary hover:text-accent-hover"
+                                title="Copy Trade"
+                              >
+                                <Copy className="w-4 h-4" />
+                              </Button>
+                            )}
+                            {notification.txHash && (
+                              <a
+                                href={`https://solscan.io/tx/${notification.txHash}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[#12d585] hover:text-[#08b16b] p-1 hover:bg-white/10 rounded transition-colors"
+                                title="View on Solscan"
+                              >
+                                <ExternalLink className="w-4 h-4" />
+                              </a>
+                            )}
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => {
-                                navigate("/app/trade", {
-                                  state: {
-                                    mint: notification.tokenAddress,
-                                    fromFeed: true,
-                                  },
-                                });
-                              }}
-                              className="text-accent-primary hover:text-accent-hover"
-                              title="Copy Trade"
+                              onClick={() => handleDelete(notification.id)}
+                              className="text-[#FF4757] hover:text-[#FF4757] hover:bg-[#FF4757]/10"
+                              title="Delete"
                             >
-                              <Copy className="w-4 h-4" />
+                              <Trash2 className="w-4 h-4" />
                             </Button>
-                          )}
-                          {notification.txHash && (
-                            <a
-                              href={`https://solscan.io/tx/${notification.txHash}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-[#12d585] hover:text-[#08b16b] p-1 hover:bg-white/10 rounded transition-colors"
-                              title="View on Solscan"
-                            >
-                              <ExternalLink className="w-4 h-4" />
-                            </a>
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDelete(notification.id)}
-                            className="text-[#FF4757] hover:text-[#FF4757] hover:bg-[#FF4757]/10"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
+                          </div>
                         </div>
                       </div>
                     </Card>

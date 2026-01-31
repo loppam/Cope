@@ -240,13 +240,12 @@ export function Positions() {
   }
 
   return (
-    <div className="p-4 sm:p-6 max-w-[720px] mx-auto">
-      <div className="mb-8">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold">Positions</h1>
+    <div className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8">
+      <div className="mb-6 sm:mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <h1 className="text-2xl sm:text-3xl font-bold">Positions</h1>
           <button
             onClick={() => {
-              // Clear cache and force refresh
               if (walletAddress) {
                 apiCache.clear(`wallet_positions_${walletAddress}`);
                 apiCache.clear(`wallet_pnl_${walletAddress}`);
@@ -254,20 +253,21 @@ export function Positions() {
               fetchPositions(true);
             }}
             disabled={refreshing}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-sm transition-colors disabled:opacity-50"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl bg-white/10 hover:bg-white/15 text-sm transition-colors disabled:opacity-50 active:scale-[0.98] w-full sm:w-auto"
           >
             <RefreshCw
-              className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
+              className={`w-4 h-4 flex-shrink-0 ${refreshing ? "animate-spin" : ""}`}
             />
             Refresh
           </button>
         </div>
 
         {/* Portfolio Summary */}
-        <Card glass className="mb-6">
-          <div className="text-center">
+        <Card glass className="mb-6 overflow-hidden">
+          <div className="h-1 bg-gradient-to-r from-[#12d585]/40 via-[#08b16b]/30 to-transparent" />
+          <div className="p-4 sm:p-6 text-center">
             <p className="text-sm text-white/60 mb-1">Total Value</p>
-            <h2 className="text-3xl font-bold mb-1">
+            <h2 className="text-2xl sm:text-3xl font-bold mb-1">
               {formatCurrency(totalValue)}
             </h2>
             <p
@@ -278,7 +278,7 @@ export function Positions() {
               {formatCurrency(totalPnl)} ({formatPercentage(totalPnlPercent)})
             </p>
             {summary && (
-              <div className="mt-4 pt-4 border-t border-white/10 grid grid-cols-2 gap-4 text-xs">
+              <div className="mt-4 pt-4 border-t border-white/10 grid grid-cols-2 gap-3 sm:gap-4 text-xs">
                 <div>
                   <p className="text-white/60">Realized</p>
                   <p
@@ -316,7 +316,7 @@ export function Positions() {
       {/* Positions List */}
       {/* Note: Token values from API are already in USD - displayed directly */}
       {/* SOL is shown but without detailed P&L info (to avoid double-counting with summary) */}
-      <div className="space-y-3">
+      <div className="space-y-2 sm:space-y-3">
         {positions.length > 0 ? (
           positions.map((position) => {
             const isSOL =
@@ -327,7 +327,8 @@ export function Positions() {
             return (
               <Card
                 key={position.mint}
-                className="cursor-pointer hover:border-white/20 transition-colors"
+                glass
+                className="cursor-pointer hover:border-white/20 transition-colors overflow-hidden active:scale-[0.99]"
                 onClick={() => {
                   // Only pass the mint address - Trade screen will fetch full data
                   navigate("/app/trade", {
@@ -337,120 +338,133 @@ export function Positions() {
                   });
                 }}
               >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    {position.image ? (
-                      <img
-                        src={position.image}
-                        alt={position.symbol}
-                        className="w-10 h-10 rounded-full"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = "none";
-                          (
-                            e.target as HTMLImageElement
-                          ).nextElementSibling?.classList.remove("hidden");
-                        }}
+                <div className="h-0.5 bg-gradient-to-r from-[#12d585]/20 via-transparent to-transparent" />
+                <div className="p-4 sm:p-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      {position.image ? (
+                        <img
+                          src={position.image}
+                          alt={position.symbol}
+                          className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex-shrink-0"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display =
+                              "none";
+                            (
+                              e.target as HTMLImageElement
+                            ).nextElementSibling?.classList.remove("hidden");
+                          }}
+                        />
+                      ) : null}
+                      <div
+                        className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-[#12d585] to-[#08b16b] flex-shrink-0 ${position.image ? "hidden" : ""}`}
                       />
-                    ) : null}
-                    <div
-                      className={`w-10 h-10 rounded-full bg-gradient-to-br from-[#12d585] to-[#08b16b] ${position.image ? "hidden" : ""}`}
-                    />
-                    <div>
-                      <h3 className="font-semibold">{position.name}</h3>
-                      <p className="text-sm text-white/50">
-                        {position.symbol} • {position.amount.toLocaleString()}
+                      <div className="min-w-0">
+                        <h3 className="font-semibold text-sm sm:text-base truncate">
+                          {position.name}
+                        </h3>
+                        <p className="text-xs sm:text-sm text-white/50 truncate">
+                          {position.symbol} • {position.amount.toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      {/* Token value is already in USD from API - display directly */}
+                      {/* SOL value is calculated separately */}
+                      <p className="font-semibold">
+                        {formatCurrency(position.value)}
                       </p>
+                      {!isSOL && !isUSDC && (
+                        <p
+                          className={`text-sm flex items-center gap-1 justify-end ${
+                            position.pnl >= 0
+                              ? "text-[#12d585]"
+                              : "text-[#FF4757]"
+                          }`}
+                        >
+                          {position.pnl >= 0 ? (
+                            <TrendingUp className="w-3 h-3" />
+                          ) : (
+                            <TrendingDown className="w-3 h-3" />
+                          )}
+                          {formatPercentage(position.pnlPercent)}
+                        </p>
+                      )}
                     </div>
                   </div>
-                  <div className="text-right">
-                    {/* Token value is already in USD from API - display directly */}
-                    {/* SOL value is calculated separately */}
-                    <p className="font-semibold">
-                      {formatCurrency(position.value)}
-                    </p>
-                    {!isSOL && !isUSDC && (
-                      <p
-                        className={`text-sm flex items-center gap-1 justify-end ${
-                          position.pnl >= 0
-                            ? "text-[#12d585]"
-                            : "text-[#FF4757]"
-                        }`}
-                      >
-                        {position.pnl >= 0 ? (
-                          <TrendingUp className="w-3 h-3" />
-                        ) : (
-                          <TrendingDown className="w-3 h-3" />
-                        )}
-                        {formatPercentage(position.pnlPercent)}
-                      </p>
-                    )}
-                  </div>
-                </div>
 
-                {/* Token details - hide for SOL and USDC (native/stablecoin) */}
-                {!isSOL && !isUSDC && (
-                  <div className="pt-3 border-t border-white/6 space-y-2">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-white/60">Total P&L</span>
-                      <span
-                        className={`font-medium ${
-                          position.pnl >= 0
-                            ? "text-[#12d585]"
-                            : "text-[#FF4757]"
-                        }`}
-                      >
-                        {formatCurrency(position.pnl)} (
-                        {formatPercentage(position.pnlPercent)})
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div>
-                        <span className="text-white/60">Realized: </span>
+                  {/* Token details - hide for SOL and USDC (native/stablecoin) */}
+                  {!isSOL && !isUSDC && (
+                    <div className="pt-3 border-t border-white/6 space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-white/60">Total P&L</span>
                         <span
-                          className={
-                            position.realized >= 0
+                          className={`font-medium ${
+                            position.pnl >= 0
                               ? "text-[#12d585]"
                               : "text-[#FF4757]"
-                          }
+                          }`}
                         >
-                          {formatCurrency(position.realized)}
+                          {formatCurrency(position.pnl)} (
+                          {formatPercentage(position.pnlPercent)})
                         </span>
                       </div>
-                      <div>
-                        <span className="text-white/60">Unrealized: </span>
-                        <span
-                          className={
-                            position.unrealized >= 0
-                              ? "text-[#12d585]"
-                              : "text-[#FF4757]"
-                          }
-                        >
-                          {formatCurrency(position.unrealized)}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-white/60">Cost Basis: </span>
-                        <span>{formatCurrency(position.costBasis)}</span>
-                      </div>
-                      <div>
-                        <span className="text-white/60">Trades: </span>
-                        <span>
-                          {position.tokenData?.total_transactions ||
-                            position.txns ||
-                            0}
-                        </span>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <span className="text-white/60">Realized: </span>
+                          <span
+                            className={
+                              position.realized >= 0
+                                ? "text-[#12d585]"
+                                : "text-[#FF4757]"
+                            }
+                          >
+                            {formatCurrency(position.realized)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-white/60">Unrealized: </span>
+                          <span
+                            className={
+                              position.unrealized >= 0
+                                ? "text-[#12d585]"
+                                : "text-[#FF4757]"
+                            }
+                          >
+                            {formatCurrency(position.unrealized)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-white/60">Cost Basis: </span>
+                          <span>{formatCurrency(position.costBasis)}</span>
+                        </div>
+                        <div>
+                          <span className="text-white/60">Trades: </span>
+                          <span>
+                            {position.tokenData?.total_transactions ||
+                              position.txns ||
+                              0}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </Card>
             );
           })
         ) : (
-          <div className="text-center py-16">
-            <DollarSign className="w-12 h-12 mx-auto mb-4 text-white/30" />
-            <p className="text-white/60">No positions yet</p>
-          </div>
+          <Card glass className="overflow-hidden">
+            <div className="h-1 bg-gradient-to-r from-[#12d585]/20 via-transparent to-transparent" />
+            <div className="py-12 sm:py-16 text-center px-4">
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-white/5 flex items-center justify-center mx-auto mb-4">
+                <DollarSign className="w-8 h-8 sm:w-10 sm:h-10 text-white/30" />
+              </div>
+              <p className="text-white/60 text-sm sm:text-base">
+                No positions yet
+              </p>
+            </div>
+          </Card>
         )}
       </div>
     </div>

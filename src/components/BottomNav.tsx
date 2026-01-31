@@ -34,7 +34,7 @@ export function BottomNav() {
               key={tab.path}
               onClick={() => navigate(tab.path)}
               className={cn(
-                "relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200",
+                "relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 active:scale-95",
                 isActive
                   ? "bg-accent-primary text-[#000000]"
                   : "text-text-secondary hover:text-white hover:bg-white/5",
@@ -42,8 +42,8 @@ export function BottomNav() {
             >
               <Icon
                 className={cn(
-                  "w-5 h-5 z-10",
-                  isActive && "scale-105 transition-transform",
+                  "w-5 h-5 z-10 transition-transform duration-200",
+                  isActive && "scale-110",
                 )}
               />
               <span className="sr-only">{tab.label}</span>

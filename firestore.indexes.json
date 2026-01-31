@@ -1,0 +1,10 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [{ "fieldPath": "xHandleLower", "order": "ASCENDING" }]
+    }
+  ],
+  "fieldOverrides": []
+}

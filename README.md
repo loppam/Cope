@@ -83,6 +83,20 @@ For X/Twitter sign-in with redirect on mobile (and to fix init.json 404 / iframe
 
 Security rules (RLS) and how notifications reach the Alerts page: see [docs/WEBHOOKS_AND_ALERTS.md](./docs/WEBHOOKS_AND_ALERTS.md). Deploy Firestore rules with `firebase deploy --only firestore:rules`.
 
+### Migrations
+
+**Watchlist onPlatform migration** – Adds `onPlatform` and `uid` to existing watchlist entries (SocialFi following vs external watchlist):
+
+```bash
+# Dry run first (no writes)
+node scripts/migrate-watchlist-onplatform.mjs --dry-run
+
+# Apply migration (requires FIREBASE_SERVICE_ACCOUNT or FIREBASE_ADMIN_* env vars)
+npm run migrate-watchlist-onplatform
+```
+
+After migration, trigger webhook sync so Helius and watchedWallets stay in sync.
+
 ### Environment Variables
 
 Create a `.env` file in the root directory for environment-specific configuration:

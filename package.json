@@ -7,7 +7,7 @@
     "build": "vite build",
     "dev": "vite",
     "preview": "vite preview",
-    "generate-icons": "node scripts/generate-icons.js",
+    "generate-icons": "node scripts/generate-icons.js assets/cope-logo-source.png",
     "claim-jupiter-fees": "node scripts/claim-jupiter-referral-fees.mjs",
     "migrate-watchlist-onplatform": "node scripts/migrate-watchlist-onplatform.mjs",
     "migrate-xhandle-lower": "node scripts/migrate-xhandle-lower.mjs"
@@ -86,6 +86,7 @@
     "@vercel/node": "^5.5.27",
     "@vitejs/plugin-react": "4.7.0",
     "firebase-admin": "^13.6.0",
+    "sharp": "^0.34.5",
     "tailwindcss": "4.1.12",
     "vite": "6.3.5",
     "vite-plugin-pwa": "^0.21.1",

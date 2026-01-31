@@ -13,7 +13,7 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["favicon.ico", "icons/*.png"],
+      includeAssets: ["favicon.ico", "icons/*.png", "icons/favicon.svg"],
       manifest: {
         name: "COPE - Social Trading App",
         short_name: "COPE",

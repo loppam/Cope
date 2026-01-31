@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { Card } from '@/components/Card';
 import { CheckCircle2, Loader2 } from 'lucide-react';
-import { scanWalletsForTokens, ScannerWallet } from '@/lib/solanatracker';
+import { scanWalletsForTokens, ScannerWallet } from '@/lib/birdeye';
 import { toast } from 'sonner';
 
 interface LocationState {
@@ -37,7 +37,7 @@ export function ScannerLoading() {
         setPhase('finding');
         setProgress(66);
         
-        // Scan wallets using SolanaTracker
+        // Scan wallets using Birdeye
         const results = await scanWalletsForTokens(
           state.mints,
           state.minMatches,
@@ -66,7 +66,7 @@ export function ScannerLoading() {
       } catch (err: any) {
         console.error('Error scanning wallets:', err);
         setError(err.message || 'Failed to scan wallets');
-        toast.error(err.message || 'Failed to scan wallets. Please check your SolanaTracker API key.');
+        toast.error(err.message || 'Failed to scan wallets. Please check your Birdeye API key.');
         
         // Navigate back to input after error
         setTimeout(() => {
@@ -79,7 +79,7 @@ export function ScannerLoading() {
   }, [navigate, state]);
 
   const phaseText = {
-    fetching: 'Fetching transactions from SolanaTracker...',
+    fetching: 'Fetching transactions from the blockchain...',
     finding: 'Finding recurring wallets...',
     ranking: 'Calculating investments...',
   };

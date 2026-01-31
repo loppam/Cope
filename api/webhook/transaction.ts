@@ -136,22 +136,6 @@ async function getJupiterPrices(
   }
 }
 
-/**
- * Fetch token price from Jupiter Price API v3
- */
-async function getTokenPrice(mint: string): Promise<number> {
-  const cached = priceCache.get(mint);
-  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-    return cached.price;
-  }
-  const prices = await getJupiterPrices([mint]);
-  const price = prices[mint] ?? 0;
-  if (price > 0) {
-    priceCache.set(mint, { price, timestamp: Date.now() });
-  }
-  return price;
-}
-
 const PRICES_COLLECTION = "prices";
 const SOL_PRICE_DOC_ID = "SOL";
 const SYNC_INTERVAL_MS = 5 * 60 * 60 * 1000; // 5 hours
@@ -388,13 +372,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ? `https://${process.env.VERCEL_URL}`
           : req.headers.origin || "https://your-domain.vercel.app";
         const syncUrl = `${baseUrl}/api/webhook/sync`;
-        const auth = process.env.WEBHOOK_SYNC_SECRET
-          ? { Authorization: `Bearer ${process.env.WEBHOOK_SYNC_SECRET}` }
-          : {};
         waitUntil(
-          fetch(syncUrl, { method: "POST", headers: auth }).catch((e) =>
-            console.warn("[Webhook] Lazy sync failed:", e),
-          ),
+          fetch(syncUrl, {
+            method: "POST",
+            ...(process.env.WEBHOOK_SYNC_SECRET && {
+              headers: {
+                Authorization: `Bearer ${process.env.WEBHOOK_SYNC_SECRET}`,
+              },
+            }),
+          }).catch((e) => console.warn("[Webhook] Lazy sync failed:", e)),
         );
       }
     } catch (syncErr) {

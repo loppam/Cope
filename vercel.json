@@ -6,7 +6,43 @@
     },
     {
       "source": "/__/firebase/init.json",
-      "destination": "/api/firebase-init"
+      "destination": "/api/firebase-handler?init=1"
+    },
+    {
+      "source": "/api/firebase-config",
+      "destination": "/api/firebase-handler?config=1"
+    },
+    {
+      "source": "/api/profile/followers-count",
+      "destination": "/api/profile-handler?action=followers-count"
+    },
+    {
+      "source": "/api/profile/followers-list",
+      "destination": "/api/profile-handler?action=followers-list"
+    },
+    {
+      "source": "/api/watchlist/add",
+      "destination": "/api/watchlist-handler?action=add"
+    },
+    {
+      "source": "/api/watchlist/remove",
+      "destination": "/api/watchlist-handler?action=remove"
+    },
+    {
+      "source": "/api/watchlist/sync-index",
+      "destination": "/api/watchlist-handler?action=sync-index"
+    },
+    {
+      "source": "/api/push/register",
+      "destination": "/api/push-handler?action=register"
+    },
+    {
+      "source": "/api/push/send",
+      "destination": "/api/push-handler?action=send"
+    },
+    {
+      "source": "/api/push/status",
+      "destination": "/api/push-handler?action=status"
     },
     {
       "source": "/((?!api/|__/).*)",

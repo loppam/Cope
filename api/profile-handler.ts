@@ -35,31 +35,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const usersSnapshot = await adminDb.collection("users").get();
+    // Use followers reverse index: one doc read instead of full users scan
+    const followersRef = adminDb.collection("followers").doc(uid);
+    const followersSnap = await followersRef.get();
 
     if (action === "followers-count") {
-      let count = 0;
-      usersSnapshot.docs.forEach((doc) => {
-        const data = doc.data();
-        const watchlist = data.watchlist || [];
-        const hasFollow = watchlist.some(
-          (w: any) => w.onPlatform === true && w.uid === uid,
-        );
-        if (hasFollow) count++;
-      });
-      return res.status(200).json({ count });
+      const followerUids: string[] = followersSnap.exists
+        ? (followersSnap.data()?.followerUids as string[]) || []
+        : [];
+      return res.status(200).json({ count: followerUids.length });
     }
 
     // followers-list
-    const followers: Array<{ uid: string }> = [];
-    usersSnapshot.docs.forEach((doc) => {
-      const data = doc.data();
-      const watchlist = data.watchlist || [];
-      const hasFollow = watchlist.some(
-        (w: any) => w.onPlatform === true && w.uid === uid,
-      );
-      if (hasFollow) followers.push({ uid: doc.id });
-    });
+    const followerUids: string[] = followersSnap.exists
+      ? (followersSnap.data()?.followerUids as string[]) || []
+      : [];
+    const followers = followerUids.map((followerUid) => ({ uid: followerUid }));
     return res.status(200).json({ followers });
   } catch (error: any) {
     console.error("[profile-handler] Error:", error);

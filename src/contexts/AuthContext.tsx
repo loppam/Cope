@@ -16,7 +16,6 @@ import {
   updateUserWallet,
   updateUserBalance,
   updateUserProfile,
-  getWatchlist,
   WatchedWallet,
   removeUserWallet,
   getFirebaseCallbackUrl,
@@ -99,10 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             );
             setUserProfile(profile);
             setUser(redirectUser);
-
-            // Load watchlist
-            const userWatchlist = await getWatchlist(redirectUser.uid);
-            setWatchlist(userWatchlist);
+            setWatchlist(profile?.watchlist ?? []);
 
             setLoading(false);
             toast.success("Successfully signed in with Twitter");
@@ -164,9 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
 
           setUserProfile(profile);
-          // Load watchlist
-          const userWatchlist = await getWatchlist(currentUser.uid);
-          setWatchlist(userWatchlist);
+          setWatchlist(profile?.watchlist ?? []);
         } else {
           setUserProfile(null);
           setWatchlist([]);
@@ -338,9 +332,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const profile = await getUserProfile(user.uid);
       setUserProfile(profile);
-      // Refresh watchlist
-      const userWatchlist = await getWatchlist(user.uid);
-      setWatchlist(userWatchlist);
+      setWatchlist(profile?.watchlist ?? []);
     } catch (error) {
       console.error("Error refreshing profile:", error);
     }
@@ -379,11 +371,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       await refreshProfile();
 
-      // Sync webhook in background (don't wait for it)
-      import("@/lib/webhook")
-        .then(({ syncWebhook }) => syncWebhook())
-        .catch(() => {});
-
       toast.success("Wallet added to watchlist");
     } catch (error: any) {
       console.error("Add to watchlist error:", error);
@@ -413,11 +400,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error((err as { error?: string }).error || res.statusText);
       }
       await refreshProfile();
-
-      // Sync webhook in background (don't wait for it)
-      import("@/lib/webhook")
-        .then(({ syncWebhook }) => syncWebhook())
-        .catch(() => {});
 
       toast.success("Wallet removed from watchlist");
     } catch (error: any) {

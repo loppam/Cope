@@ -9,6 +9,50 @@ import { getAdminAuth, getAdminDb } from "../lib/firebase-admin";
 const adminAuth = getAdminAuth();
 const adminDb = getAdminDb();
 
+const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
+const HELIUS_WEBHOOK_ID = process.env.HELIUS_WEBHOOK_ID;
+const HELIUS_WEBHOOK_URL = "https://api-mainnet.helius-rpc.com/v0/webhooks";
+
+async function getHeliusWebhookAddresses(): Promise<string[]> {
+  if (!HELIUS_API_KEY || !HELIUS_WEBHOOK_ID) return [];
+  const res = await fetch(
+    `${HELIUS_WEBHOOK_URL}/${HELIUS_WEBHOOK_ID}?api-key=${HELIUS_API_KEY}`,
+  );
+  if (!res.ok) return [];
+  const data = (await res.json()) as { accountAddresses?: string[] };
+  return data.accountAddresses || [];
+}
+
+async function updateHeliusWebhookAddresses(
+  accountAddresses: string[],
+): Promise<boolean> {
+  if (!HELIUS_API_KEY || !HELIUS_WEBHOOK_ID) return false;
+  const base = process.env.VERCEL_URL?.startsWith("http")
+    ? process.env.VERCEL_URL
+    : process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : "";
+  const webhookURL =
+    process.env.WEBHOOK_URL || `${base}/api/webhook/transaction`;
+  const res = await fetch(
+    `${HELIUS_WEBHOOK_URL}/${HELIUS_WEBHOOK_ID}?api-key=${HELIUS_API_KEY}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        webhookURL,
+        transactionTypes: ["BUY", "SELL", "SWAP"],
+        accountAddresses,
+        webhookType: "enhanced",
+        ...(process.env.HELIUS_WEBHOOK_SECRET && {
+          authHeader: process.env.HELIUS_WEBHOOK_SECRET,
+        }),
+      }),
+    },
+  );
+  return res.ok;
+}
+
 async function getUidFromHeader(req: VercelRequest): Promise<string | null> {
   const authorization = req.headers.authorization;
   if (!authorization) return null;
@@ -92,20 +136,61 @@ async function handleAdd(req: VercelRequest, res: VercelResponse) {
     { merge: true },
   );
 
-  const syncSecret = process.env.WEBHOOK_SYNC_SECRET;
-  const base = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : req.headers.origin || "";
-  if (syncSecret && base) {
-    fetch(`${base}/api/webhook/sync`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${syncSecret}`,
-        "Content-Type": "application/json",
-      },
-    }).catch((err) =>
-      console.error("[watchlist/add] webhook sync failed:", err),
+  // Followers reverse index: when following a platform user, add self to their followers
+  if (onPlatformFinal && uidFinal) {
+    const followersRef = adminDb.collection("followers").doc(uidFinal);
+    await followersRef.set(
+      { followerUids: FieldValue.arrayUnion(uid) },
+      { merge: true },
     );
+  }
+
+  // Incremental watchedWallets + Helius (no full sync)
+  let effectiveAddress: string | null = null;
+  if (onPlatformFinal && uidFinal) {
+    const targetSnap = await adminDb.collection("users").doc(uidFinal).get();
+    const targetData = targetSnap.data();
+    if (targetData?.walletAddress && targetData?.isPublic !== false) {
+      effectiveAddress = targetData.walletAddress as string;
+    }
+  } else {
+    effectiveAddress = walletAddress;
+  }
+
+  if (effectiveAddress) {
+    const watchedRef = adminDb
+      .collection("watchedWallets")
+      .doc(effectiveAddress);
+    const watchedSnap = await watchedRef.get();
+    const existing =
+      (watchedSnap.data()?.watchers as Record<
+        string,
+        { nickname?: string; addedAt?: string }
+      >) || {};
+    const addedAt =
+      existing[uid]?.addedAt ||
+      (typeof entry.addedAt === "string"
+        ? entry.addedAt
+        : entry.addedAt instanceof Date
+          ? entry.addedAt.toISOString()
+          : new Date().toISOString());
+    await watchedRef.set(
+      {
+        watchers: {
+          ...existing,
+          [uid]: { nickname: entry.nickname, addedAt },
+        },
+      },
+      { merge: true },
+    );
+
+    const currentAddresses = await getHeliusWebhookAddresses();
+    if (!currentAddresses.includes(effectiveAddress)) {
+      await updateHeliusWebhookAddresses([
+        ...currentAddresses,
+        effectiveAddress,
+      ]);
+    }
   }
 
   return res.status(200).json({ success: true, watchlist });
@@ -131,6 +216,9 @@ async function handleRemove(req: VercelRequest, res: VercelResponse) {
 
   const userData = userSnap.data();
   const watchlist: Array<any> = userData?.watchlist || [];
+  const removedEntry = watchlist.find((w: any) =>
+    removeByUid ? w.uid === removeByUid : w.address === walletAddress,
+  );
   const filteredWatchlist = watchlist.filter((w: any) => {
     if (removeByUid) return w.uid !== removeByUid;
     return w.address !== walletAddress;
@@ -141,20 +229,54 @@ async function handleRemove(req: VercelRequest, res: VercelResponse) {
     { merge: true },
   );
 
-  const syncSecret = process.env.WEBHOOK_SYNC_SECRET;
-  const base = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : req.headers.origin || "";
-  if (syncSecret && base) {
-    fetch(`${base}/api/webhook/sync`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${syncSecret}`,
-        "Content-Type": "application/json",
-      },
-    }).catch((err) =>
-      console.error("[watchlist/remove] webhook sync failed:", err),
+  // Followers reverse index: when unfollowing, remove self from their followers
+  if (removedEntry?.uid) {
+    const followersRef = adminDb
+      .collection("followers")
+      .doc(removedEntry.uid as string);
+    await followersRef.set(
+      { followerUids: FieldValue.arrayRemove(uid) },
+      { merge: true },
     );
+  }
+
+  // Incremental watchedWallets + Helius: resolve effectiveAddress and remove
+  if (removedEntry) {
+    let effectiveAddress: string | null = null;
+    if (removedEntry.onPlatform && removedEntry.uid) {
+      const targetSnap = await adminDb
+        .collection("users")
+        .doc(removedEntry.uid)
+        .get();
+      effectiveAddress = (targetSnap.data()?.walletAddress as string) || null;
+    } else {
+      effectiveAddress = removedEntry.address || null;
+    }
+
+    if (effectiveAddress) {
+      const watchedRef = adminDb
+        .collection("watchedWallets")
+        .doc(effectiveAddress);
+      const watchedSnap = await watchedRef.get();
+      const watchers =
+        (watchedSnap.data()?.watchers as Record<
+          string,
+          { nickname?: string; addedAt?: string }
+        >) || {};
+      const next = { ...watchers };
+      delete next[uid];
+      if (Object.keys(next).length === 0) {
+        await watchedRef.delete();
+      } else {
+        await watchedRef.set({ watchers: next }, { merge: true });
+      }
+
+      const currentAddresses = await getHeliusWebhookAddresses();
+      const updated = currentAddresses.filter((a) => a !== effectiveAddress);
+      if (updated.length !== currentAddresses.length) {
+        await updateHeliusWebhookAddresses(updated);
+      }
+    }
   }
 
   return res.status(200).json({ success: true, watchlist: filteredWatchlist });

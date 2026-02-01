@@ -153,8 +153,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const accountAddresses = Array.from(addressToWatchers.keys());
 
-    // Rebuild watchedWallets reverse index
     const batch = db.batch();
+
+    // Build followers reverse index: targetUid -> followerUids[] (who has this user in watchlist with onPlatform)
+    const followersMap = new Map<string, string[]>();
+    const allTargetUids = new Set<string>();
+    for (const doc of usersSnapshot.docs) {
+      const watcherUid = doc.id;
+      const userData = doc.data();
+      const watchlist: Array<{ uid?: string; onPlatform?: boolean }> =
+        userData.watchlist || [];
+      for (const w of watchlist) {
+        if (w.onPlatform && w.uid) {
+          allTargetUids.add(w.uid);
+          const target = userByUid.get(w.uid);
+          if (target?.isPublic && target?.walletAddress) {
+            const list = followersMap.get(w.uid) || [];
+            if (!list.includes(watcherUid)) list.push(watcherUid);
+            followersMap.set(w.uid, list);
+          }
+        }
+      }
+    }
+    for (const targetUid of allTargetUids) {
+      const ref = db.collection("followers").doc(targetUid);
+      const followerUids = followersMap.get(targetUid) || [];
+      batch.set(ref, { followerUids }, { merge: true });
+    }
+
+    // Rebuild watchedWallets reverse index
     const allWatchedRefs = await db.collection("watchedWallets").get();
     const toDelete: DocumentReference[] = [];
     const toWrite = new Set<string>();

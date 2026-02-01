@@ -20,8 +20,7 @@ import {
   where,
   orderBy,
   limit,
-  onSnapshot,
-  Timestamp,
+  getDocs,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { WalletNotification } from "@/lib/notifications";
@@ -34,98 +33,81 @@ export function Home() {
   const [notifications, setNotifications] = useState<WalletNotification[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Real-time listener for notifications
+  // One-time fetch + refetch on focus/interval (cuts Firestore reads vs onSnapshot)
+  const REFETCH_INTERVAL_MS = 60 * 1000;
+  const NOTIFICATIONS_LIMIT = 50;
+
   useEffect(() => {
     if (!user) {
       setLoading(false);
       return;
     }
 
-    // Get watched wallet addresses
     const watchedAddresses = watchlist.map((w) => w.address);
-
     if (watchedAddresses.length === 0) {
+      setNotifications([]);
       setLoading(false);
       return;
     }
 
-    // Set up real-time listener
     const notificationsRef = collection(db, "notifications");
-    const q = query(
-      notificationsRef,
-      where("userId", "==", user.uid),
-      orderBy("createdAt", "desc"),
-      limit(50),
-    );
 
-    // Try with orderBy first, fallback if index doesn't exist
-    let unsubscribe: (() => void) | null = null;
-
-    try {
-      unsubscribe = onSnapshot(
-        q,
-        (snapshot) => {
-          const fetchedNotifications = snapshot.docs
-            .map((doc) => ({
-              id: doc.id,
-              ...doc.data(),
-            }))
-            .filter(
-              (n: any) =>
-                !n.deleted && watchedAddresses.includes(n.walletAddress),
-            )
-            .sort((a: any, b: any) => {
-              const aTime = a.createdAt?.toDate?.()?.getTime() || 0;
-              const bTime = b.createdAt?.toDate?.()?.getTime() || 0;
-              return bTime - aTime;
-            }) as WalletNotification[];
-
-          setNotifications(fetchedNotifications);
-          setLoading(false);
-        },
-        (error: any) => {
-          // If index doesn't exist, try without orderBy
-          if (error.code === "failed-precondition") {
+    async function fetchNotifications() {
+      try {
+        const q = query(
+          notificationsRef,
+          where("userId", "==", user!.uid),
+          orderBy("createdAt", "desc"),
+          limit(NOTIFICATIONS_LIMIT),
+        );
+        let snapshot;
+        try {
+          snapshot = await getDocs(q);
+        } catch (err: any) {
+          if (err?.code === "failed-precondition") {
             const fallbackQ = query(
               notificationsRef,
-              where("userId", "==", user.uid),
-              limit(50),
+              where("userId", "==", user!.uid),
+              limit(NOTIFICATIONS_LIMIT),
             );
-
-            unsubscribe = onSnapshot(fallbackQ, (snapshot) => {
-              const fetchedNotifications = snapshot.docs
-                .map((doc) => ({
-                  id: doc.id,
-                  ...doc.data(),
-                }))
-                .filter(
-                  (n: any) =>
-                    !n.deleted && watchedAddresses.includes(n.walletAddress),
-                )
-                .sort((a: any, b: any) => {
-                  const aTime = a.createdAt?.toDate?.()?.getTime() || 0;
-                  const bTime = b.createdAt?.toDate?.()?.getTime() || 0;
-                  return bTime - aTime;
-                }) as WalletNotification[];
-
-              setNotifications(fetchedNotifications);
-              setLoading(false);
-            });
+            snapshot = await getDocs(fallbackQ);
           } else {
-            console.error("Error fetching notifications:", error);
-            setLoading(false);
+            throw err;
           }
-        },
-      );
-    } catch (error) {
-      console.error("Error setting up notification listener:", error);
-      setLoading(false);
+        }
+        const fetched = snapshot.docs
+          .map((doc) => ({ id: doc.id, ...doc.data() }))
+          .filter(
+            (n: any) =>
+              !n.deleted && watchedAddresses.includes(n.walletAddress),
+          )
+          .sort((a: any, b: any) => {
+            const aTime = a.createdAt?.toDate?.()?.getTime() || 0;
+            const bTime = b.createdAt?.toDate?.()?.getTime() || 0;
+            return bTime - aTime;
+          }) as WalletNotification[];
+        setNotifications(fetched);
+      } catch (error) {
+        console.error("Error fetching notifications:", error);
+      } finally {
+        setLoading(false);
+      }
     }
 
+    fetchNotifications();
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") fetchNotifications();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === "visible") fetchNotifications();
+    }, REFETCH_INTERVAL_MS);
+
     return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearInterval(intervalId);
     };
   }, [user, watchlist]);
 

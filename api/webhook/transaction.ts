@@ -3,11 +3,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { waitUntil } from "@vercel/functions";
 import { createHash } from "crypto";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
-import {
-  getFirestore,
-  type DocumentSnapshot,
-  type DocumentData,
-} from "firebase-admin/firestore";
+import { getFirestore, type DocumentSnapshot } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import webpush from "web-push";
 
@@ -141,6 +137,8 @@ const SOL_PRICE_DOC_ID = "SOL";
 const SYNC_INTERVAL_MS = 5 * 60 * 60 * 1000; // 5 hours
 const CONFIG_COLLECTION = "config";
 const WEBHOOK_SYNC_DOC_ID = "webhookSync";
+const SYNC_CHECK_CACHE_MS = 5 * 60 * 1000; // 5 min – avoid reading config on every webhook
+let syncCheckCache: { lastSyncAt: number; checkedAt: number } | null = null;
 
 /**
  * Fetch SOL price: Firestore cache (5 min) shared across invocations, then Jupiter /price/v3.
@@ -359,14 +357,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const payload = req.body as HeliusWebhookPayload[] | HeliusWebhookPayload;
 
-    // Lazy sync timer: trigger webhook sync if last sync was >5 hours ago (Vercel Cron on Hobby is daily)
+    // Lazy sync timer: trigger webhook sync if last sync was >5 hours ago (cache config read to cut Firestore reads)
     try {
-      const syncRef = db.collection(CONFIG_COLLECTION).doc(WEBHOOK_SYNC_DOC_ID);
-      const syncSnap = await syncRef.get();
-      const lastSyncAt = syncSnap.exists
-        ? (syncSnap.data()?.lastSyncAt as number | undefined)
-        : 0;
       const now = Date.now();
+      let lastSyncAt: number | undefined;
+      if (
+        syncCheckCache &&
+        now - syncCheckCache.checkedAt < SYNC_CHECK_CACHE_MS
+      ) {
+        lastSyncAt = syncCheckCache.lastSyncAt;
+      } else {
+        const syncRef = db
+          .collection(CONFIG_COLLECTION)
+          .doc(WEBHOOK_SYNC_DOC_ID);
+        const syncSnap = await syncRef.get();
+        lastSyncAt = syncSnap.exists
+          ? (syncSnap.data()?.lastSyncAt as number | undefined)
+          : 0;
+        syncCheckCache = { lastSyncAt: lastSyncAt ?? 0, checkedAt: now };
+      }
       if (!lastSyncAt || now - lastSyncAt > SYNC_INTERVAL_MS) {
         const baseUrl = process.env.VERCEL_URL
           ? `https://${process.env.VERCEL_URL}`
@@ -450,7 +459,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       string,
       Record<string, { nickname?: string }>
     >();
-    const addressesNeedingFallback: string[] = [];
     let idx = 0;
     for (const addr of allWalletAddresses) {
       const snap = watchedSnaps[idx++];
@@ -460,15 +468,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           {};
         if (Object.keys(watchers).length > 0) {
           watchedByAddr.set(addr, watchers);
-        } else {
-          addressesNeedingFallback.push(addr);
         }
-      } else {
-        addressesNeedingFallback.push(addr);
       }
     }
 
-    // Batch read user docs for watchers; fetch all users once if fallback needed
+    // Batch read user docs for watchers only (no full collection scan – watchedWallets is source of truth)
     const allUserIds = new Set<string>();
     watchedByAddr.forEach((watchers) => {
       Object.keys(watchers).forEach((uid) => allUserIds.add(uid));
@@ -483,17 +487,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (s?.exists) userDocsById.set(uid, s);
       });
     }
-    let allUsersForFallback: Array<{
-      id: string;
-      data: () => DocumentData;
-    }> | null = null;
-    if (addressesNeedingFallback.length > 0) {
-      const allUsersSnap = await db.collection("users").get();
-      allUsersForFallback = allUsersSnap.docs.map((d) => ({
-        id: d.id,
-        data: () => d.data(),
-      }));
+
+    // Pre-compute (tx, userId) pairs and batch-get notification docs for idempotency (one batch read instead of N)
+    const notificationIdsToCheck: string[] = [];
+    for (const tx of processableTx) {
+      const notifiedUserIds = new Set<string>();
+      const walletAddresses = txToWallets.get(tx)!;
+      for (const walletAddress of walletAddresses) {
+        const watchersMap = watchedByAddr.get(walletAddress) || null;
+        if (!watchersMap || Object.keys(watchersMap).length === 0) continue;
+        for (const uid of Object.keys(watchersMap)) {
+          if (notifiedUserIds.has(uid)) continue;
+          if (!userDocsById.get(uid)?.exists) continue;
+          notifiedUserIds.add(uid);
+          const notificationId = createHash("sha256")
+            .update(`${tx.signature}:${uid}`)
+            .digest("hex");
+          notificationIdsToCheck.push(notificationId);
+        }
+      }
     }
+    const existingNotificationIds = new Set<string>();
+    if (notificationIdsToCheck.length > 0) {
+      const BATCH_SIZE = 30; // Firestore getAll limit
+      for (let i = 0; i < notificationIdsToCheck.length; i += BATCH_SIZE) {
+        const chunk = notificationIdsToCheck.slice(i, i + BATCH_SIZE);
+        const refs = chunk.map((id) => db.collection("notifications").doc(id));
+        const snaps = await db.getAll(...refs);
+        snaps.forEach((s) => {
+          if (s.exists) existingNotificationIds.add(s.id);
+        });
+      }
+    }
+
+    // Batch-read push tokens for all users we might notify (one read per user, reused in loop)
+    const userIdsToNotify = new Set<string>();
+    for (const tx of processableTx) {
+      const walletAddresses = txToWallets.get(tx)!;
+      for (const walletAddress of walletAddresses) {
+        const watchersMap = watchedByAddr.get(walletAddress) || null;
+        if (!watchersMap) continue;
+        for (const uid of Object.keys(watchersMap)) {
+          if (userDocsById.get(uid)?.exists) userIdsToNotify.add(uid);
+        }
+      }
+    }
+    const pushTokensByUid = new Map<string, PushToken[]>();
+    await Promise.all(
+      [...userIdsToNotify].map(async (uid) => {
+        const tokens = await getUserTokens(uid);
+        pushTokensByUid.set(uid, tokens);
+      }),
+    );
 
     for (const tx of processableTx) {
       const isBuy = tx.type === "BUY";
@@ -582,25 +627,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       for (const walletAddress of walletAddresses) {
         const watchersMap = watchedByAddr.get(walletAddress) || null;
 
-        let usersWithWallet: Array<{ id: string; data: () => any }>;
-        if (watchersMap && Object.keys(watchersMap).length > 0) {
-          usersWithWallet = Object.keys(watchersMap)
-            .map((uid) => {
-              const userSnap = userDocsById.get(uid);
-              return userSnap?.exists
-                ? { id: userSnap.id, data: () => userSnap.data() }
-                : null;
-            })
-            .filter(Boolean) as Array<{ id: string; data: () => any }>;
-        } else if (allUsersForFallback) {
-          usersWithWallet = allUsersForFallback.filter((doc) => {
-            const userData = doc.data();
-            const watchlist = userData?.watchlist || [];
-            return watchlist.some((w: any) => w.address === walletAddress);
-          });
-        } else {
-          usersWithWallet = [];
-        }
+        const usersWithWallet: Array<{ id: string; data: () => any }> =
+          watchersMap && Object.keys(watchersMap).length > 0
+            ? (Object.keys(watchersMap)
+                .map((uid) => {
+                  const userSnap = userDocsById.get(uid);
+                  return userSnap?.exists
+                    ? { id: userSnap.id, data: () => userSnap.data() }
+                    : null;
+                })
+                .filter(Boolean) as Array<{ id: string; data: () => any }>)
+            : [];
 
         // Create notifications for each user watching this wallet (per-user, not platform-wide)
         for (const userDoc of usersWithWallet) {
@@ -647,12 +684,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               .collection("notifications")
               .doc(notificationId);
 
-            // Idempotency: if this notification already exists (duplicate webhook delivery), skip write and push
-            const existingSnap = await notificationRef.get();
-            if (existingSnap.exists) {
-              // Helius sent the same tx again – avoid duplicate in-app notification and duplicate push
-              continue;
-            }
+            // Idempotency: skip if already exists (batch-checked above; avoids N reads per webhook)
+            if (existingNotificationIds.has(notificationId)) continue;
+            existingNotificationIds.add(notificationId);
 
             const notificationData = {
               userId,
@@ -676,9 +710,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
             await notificationRef.set(notificationData, { merge: true });
 
-            // Push notification
+            // Push notification (tokens pre-fetched in pushTokensByUid)
             try {
-              const tokens = await getUserTokens(userId);
+              const tokens = pushTokensByUid.get(userId) ?? [];
               const pushPayload = {
                 title: notificationData.title,
                 body: notificationData.message,

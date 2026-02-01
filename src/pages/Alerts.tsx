@@ -1,16 +1,14 @@
 import { useEffect, useState } from "react";
 import { Card } from "@/components/Card";
 import { Button } from "@/components/Button";
-import { Bell, ExternalLink, Check, Trash2, Filter, Copy } from "lucide-react";
+import { Bell, ExternalLink, Check, Trash2, Copy } from "lucide-react";
 import { useNavigate } from "react-router";
 import { shortenAddress } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  getUserNotifications,
   markNotificationAsRead,
   markAllNotificationsAsRead,
   deleteNotification,
-  getUnreadNotificationCount,
   WalletNotification,
   requestPermissionAndGetFcmToken,
   savePushToken,
@@ -22,7 +20,7 @@ import {
   where,
   orderBy,
   limit,
-  onSnapshot,
+  getDocs,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { toast } from "sonner";
@@ -38,103 +36,77 @@ export function Alerts() {
     "all" | "unread" | "buy" | "sell" | "swap"
   >("all");
 
-  // Real-time listener for notifications
+  // One-time fetch + refetch on focus/interval (cuts Firestore reads vs onSnapshot)
+  const REFETCH_INTERVAL_MS = 60 * 1000;
+  const NOTIFICATIONS_LIMIT = 50;
+
   useEffect(() => {
     if (!isAuthenticated || !user) {
       setLoading(false);
       return;
     }
 
-    // Set up real-time listener
     const notificationsRef = collection(db, "notifications");
-    const q = query(
-      notificationsRef,
-      where("userId", "==", user.uid),
-      orderBy("createdAt", "desc"),
-      limit(100),
-    );
 
-    let unsubscribe: (() => void) | null = null;
-
-    try {
-      unsubscribe = onSnapshot(
-        q,
-        (snapshot) => {
-          const fetchedNotifications = snapshot.docs
-            .map((doc) => {
-              const data = doc.data();
-              return {
-                id: doc.id,
-                ...data,
-              } as WalletNotification;
-            })
-            .filter((n: any) => !n.deleted)
-            .sort((a: any, b: any) => {
-              const aTime = a.createdAt?.toDate?.()?.getTime() || 0;
-              const bTime = b.createdAt?.toDate?.()?.getTime() || 0;
-              return bTime - aTime;
-            });
-
-          setNotifications(fetchedNotifications);
-
-          // Update unread count
-          const unread = fetchedNotifications.filter((n: any) => !n.read);
-          setUnreadCount(unread.length);
-
-          setLoading(false);
-        },
-        (error: any) => {
-          // If index doesn't exist, try without orderBy
-          if (error.code === "failed-precondition") {
+    async function fetchNotifications() {
+      try {
+        const q = query(
+          notificationsRef,
+          where("userId", "==", user!.uid),
+          orderBy("createdAt", "desc"),
+          limit(NOTIFICATIONS_LIMIT),
+        );
+        let snapshot;
+        try {
+          snapshot = await getDocs(q);
+        } catch (err: any) {
+          if (err?.code === "failed-precondition") {
             const fallbackQ = query(
               notificationsRef,
-              where("userId", "==", user.uid),
-              limit(100),
+              where("userId", "==", user!.uid),
+              limit(NOTIFICATIONS_LIMIT),
             );
-
-            unsubscribe = onSnapshot(fallbackQ, (snapshot) => {
-              const fetchedNotifications = snapshot.docs
-                .map((doc) => {
-                  const data = doc.data();
-                  return {
-                    id: doc.id,
-                    ...data,
-                  } as WalletNotification;
-                })
-                .filter((n: any) => !n.deleted)
-                .sort((a: any, b: any) => {
-                  const aTime = a.createdAt?.toDate?.()?.getTime() || 0;
-                  const bTime = b.createdAt?.toDate?.()?.getTime() || 0;
-                  return bTime - aTime;
-                });
-
-              setNotifications(fetchedNotifications);
-
-              const unread = fetchedNotifications.filter((n: any) => !n.read);
-              setUnreadCount(unread.length);
-
-              setLoading(false);
-            });
+            snapshot = await getDocs(fallbackQ);
           } else {
-            console.error("Error fetching notifications:", error);
-            setLoading(false);
+            throw err;
           }
-        },
-      );
-    } catch (error) {
-      console.error("Error setting up notification listener:", error);
-      setLoading(false);
+        }
+        const fetched = snapshot.docs
+          .map((doc) => ({ id: doc.id, ...doc.data() }) as WalletNotification)
+          .filter((n: any) => !n.deleted)
+          .sort((a: any, b: any) => {
+            const aTime = a.createdAt?.toDate?.()?.getTime() || 0;
+            const bTime = b.createdAt?.toDate?.()?.getTime() || 0;
+            return bTime - aTime;
+          });
+        setNotifications(fetched);
+        const unread = fetched.filter((n: any) => !n.read);
+        setUnreadCount(unread.length);
+      } catch (error) {
+        console.error("Error fetching notifications:", error);
+      } finally {
+        setLoading(false);
+      }
     }
 
-    // Check push notification status
-    getPushNotificationStatus(user.uid).then((status) => {
+    fetchNotifications();
+
+    getPushNotificationStatus().then((status) => {
       setPushEnabled(status.enabled && status.permission === "granted");
     });
 
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") fetchNotifications();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === "visible") fetchNotifications();
+    }, REFETCH_INTERVAL_MS);
+
     return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearInterval(intervalId);
     };
   }, [user, isAuthenticated]);
 

@@ -3,11 +3,45 @@
 //           /api/watchlist/remove → /api/watchlist-handler?action=remove
 //           /api/watchlist/sync-index → /api/watchlist-handler?action=sync-index
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { FieldValue } from "firebase-admin/firestore";
-import { getAdminAuth, getAdminDb } from "../lib/firebase-admin";
+import { initializeApp, getApps, cert } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
-const adminAuth = getAdminAuth();
-const adminDb = getAdminDb();
+// Initialize Firebase Admin (only once, same pattern as api/webhook/transaction.ts)
+if (getApps().length === 0) {
+  const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
+  let projectId: string | undefined;
+  let clientEmail: string | undefined;
+  let privateKey: string | undefined;
+
+  if (rawServiceAccount) {
+    const serviceAccount = JSON.parse(rawServiceAccount);
+    projectId = serviceAccount.project_id;
+    clientEmail = serviceAccount.client_email;
+    privateKey = serviceAccount.private_key?.replace(/\\n/g, "\n");
+  }
+
+  projectId = projectId || process.env.FIREBASE_ADMIN_PROJECT_ID;
+  clientEmail = clientEmail || process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
+  if (!privateKey && process.env.FIREBASE_ADMIN_PRIVATE_KEY) {
+    privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY.replace(/\\n/g, "\n");
+  }
+
+  if (!projectId || !clientEmail || !privateKey) {
+    throw new Error("Firebase admin credentials are not fully configured");
+  }
+
+  initializeApp({
+    credential: cert({
+      projectId,
+      clientEmail,
+      privateKey,
+    }),
+  });
+}
+
+const adminAuth = getAuth();
+const adminDb = getFirestore();
 
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const HELIUS_WEBHOOK_ID = process.env.HELIUS_WEBHOOK_ID;

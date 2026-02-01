@@ -11,6 +11,7 @@ import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 
+// Initialize Firebase Admin (only once, same pattern as api/webhook/transaction.ts)
 if (getApps().length === 0) {
   const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
   let projectId: string | undefined;
@@ -18,14 +19,10 @@ if (getApps().length === 0) {
   let privateKey: string | undefined;
 
   if (rawServiceAccount) {
-    try {
-      const serviceAccount = JSON.parse(rawServiceAccount);
-      projectId = serviceAccount.project_id;
-      clientEmail = serviceAccount.client_email;
-      privateKey = serviceAccount.private_key?.replace(/\\n/g, "\n");
-    } catch {
-      // ignore
-    }
+    const serviceAccount = JSON.parse(rawServiceAccount);
+    projectId = serviceAccount.project_id;
+    clientEmail = serviceAccount.client_email;
+    privateKey = serviceAccount.private_key?.replace(/\\n/g, "\n");
   }
 
   projectId = projectId || process.env.FIREBASE_ADMIN_PROJECT_ID;
@@ -35,16 +32,16 @@ if (getApps().length === 0) {
   }
 
   if (!projectId || !clientEmail || !privateKey) {
-    console.error("[Jupiter claim] Firebase admin credentials not configured");
-  } else {
-    initializeApp({
-      credential: cert({
-        projectId,
-        clientEmail,
-        privateKey,
-      }),
-    });
+    throw new Error("Firebase admin credentials are not fully configured");
   }
+
+  initializeApp({
+    credential: cert({
+      projectId,
+      clientEmail,
+      privateKey,
+    }),
+  });
 }
 
 const adminAuth = getAuth();

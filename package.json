@@ -11,7 +11,8 @@
     "claim-jupiter-fees": "node scripts/claim-jupiter-referral-fees.mjs",
     "migrate-watchlist-onplatform": "node scripts/migrate-watchlist-onplatform.mjs",
     "migrate-xhandle-lower": "node scripts/migrate-xhandle-lower.mjs",
-    "sync-collections": "node scripts/sync-collections.mjs"
+    "sync-collections": "node scripts/sync-collections.mjs",
+    "reset-all": "node scripts/reset-all.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

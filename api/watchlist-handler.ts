@@ -174,11 +174,16 @@ async function handleAdd(req: VercelRequest, res: VercelResponse) {
         : entry.addedAt instanceof Date
           ? entry.addedAt.toISOString()
           : new Date().toISOString());
+    // Firestore does not allow undefined; omit nickname when missing
+    const watcherEntry: { addedAt: string; nickname?: string } = { addedAt };
+    if (entry.nickname != null && entry.nickname !== "") {
+      watcherEntry.nickname = entry.nickname;
+    }
     await watchedRef.set(
       {
         watchers: {
           ...existing,
-          [uid]: { nickname: entry.nickname, addedAt },
+          [uid]: watcherEntry,
         },
       },
       { merge: true },

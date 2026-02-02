@@ -43,8 +43,8 @@ const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const HELIUS_API_URL = "https://api-mainnet.helius-rpc.com/v0/webhooks";
 const WEBHOOK_ID = process.env.HELIUS_WEBHOOK_ID; // Store this in .env after creating first webhook
 
-/** Transaction types we subscribe to: BUY, SELL, SWAP only. */
-const WEBHOOK_TRANSACTION_TYPES = ["BUY", "SELL", "SWAP"] as const;
+/** Transaction types we subscribe to: SWAP only (buy/sell inferred from SOL↔token direction in handler). */
+const WEBHOOK_TRANSACTION_TYPES = ["SWAP"] as const;
 
 function isUserPublic(data: { isPublic?: boolean }): boolean {
   return data.isPublic !== false;

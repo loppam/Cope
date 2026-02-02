@@ -12,6 +12,7 @@
     "migrate-watchlist-onplatform": "node scripts/migrate-watchlist-onplatform.mjs",
     "migrate-xhandle-lower": "node scripts/migrate-xhandle-lower.mjs",
     "sync-collections": "node scripts/sync-collections.mjs",
+    "migrate-push-token-index": "node scripts/migrate-push-token-index.mjs",
     "reset-all": "node scripts/reset-all.mjs"
   },
   "dependencies": {

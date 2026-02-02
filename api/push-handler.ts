@@ -47,6 +47,8 @@ const adminAuth = getAuth();
 const adminDb = getFirestore();
 const adminMessaging = getMessaging();
 
+const PUSH_TOKEN_INDEX = "pushTokenIndex";
+
 function pushTokenDocId(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
@@ -119,27 +121,20 @@ function initWebPush() {
   }
 }
 
+/** Read all push tokens from reverse index (one collection read instead of users + subcollections). */
 async function getAllUserTokens(): Promise<PushTokenWithUid[]> {
-  const usersSnap = await adminDb.collection("users").get();
+  const snap = await adminDb.collection(PUSH_TOKEN_INDEX).get();
   const result: PushTokenWithUid[] = [];
-  for (const userDoc of usersSnap.docs) {
-    const uid = userDoc.id;
-    const tokensSnap = await adminDb
-      .collection("users")
-      .doc(uid)
-      .collection("pushTokens")
-      .get();
-    tokensSnap.forEach((doc) => {
-      const data = doc.data();
-      if (data.token) {
-        result.push({
-          token: data.token,
-          platform: data.platform || "web",
-          uid,
-        });
-      }
-    });
-  }
+  snap.forEach((doc) => {
+    const data = doc.data();
+    if (data.token && data.uid) {
+      result.push({
+        token: data.token as string,
+        platform: (data.platform as string) || "web",
+        uid: data.uid as string,
+      });
+    }
+  });
   return result;
 }
 
@@ -236,18 +231,24 @@ async function handleRegister(req: VercelRequest, res: VercelResponse) {
     .doc(uid)
     .collection("pushTokens")
     .doc(pushTokenDocId(token));
+  const indexRef = adminDb
+    .collection(PUSH_TOKEN_INDEX)
+    .doc(pushTokenDocId(token));
   if (req.method === "POST") {
+    const platformVal = platform || "web";
     await tokenRef.set(
       {
         token,
-        platform: platform || "web",
+        platform: platformVal,
         createdAt: FieldValue.serverTimestamp(),
         lastSeenAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
     );
+    await indexRef.set({ uid, token, platform: platformVal }, { merge: true });
   } else {
     await tokenRef.delete();
+    await indexRef.delete();
   }
   return res.status(200).json({ success: true });
 }
@@ -291,16 +292,20 @@ async function handleSend(req: VercelRequest, res: VercelResponse) {
     const invalidTokens = await sendToTokens(tokens, { title, body, deepLink });
 
     if (invalidTokens.length > 0) {
+      const indexRef = adminDb.collection(PUSH_TOKEN_INDEX);
       await Promise.all(
-        invalidTokens.map((token) => {
+        invalidTokens.map(async (token) => {
           const uid = tokenToUid.get(token);
-          if (!uid) return Promise.resolve();
-          return adminDb
-            .collection("users")
-            .doc(uid)
-            .collection("pushTokens")
-            .doc(pushTokenDocId(token))
-            .delete();
+          const docId = pushTokenDocId(token);
+          if (uid) {
+            await adminDb
+              .collection("users")
+              .doc(uid)
+              .collection("pushTokens")
+              .doc(docId)
+              .delete();
+          }
+          await indexRef.doc(docId).delete();
         }),
       );
     }

@@ -75,7 +75,7 @@ async function updateHeliusWebhookAddresses(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         webhookURL,
-        transactionTypes: ["BUY", "SELL", "SWAP"],
+        transactionTypes: ["SWAP"],
         accountAddresses,
         webhookType: "enhanced",
         ...(process.env.HELIUS_WEBHOOK_SECRET && {

@@ -282,6 +282,27 @@ interface HeliusWebhookPayload {
 }
 
 /**
+ * For SWAP txs: infer buy (SOL → token) vs sell (token → SOL) from events.swap.
+ * Buy = non-wSOL in tokenOutputs; Sell = non-wSOL in tokenInputs.
+ */
+function getEffectiveSwapDirection(
+  tx: HeliusWebhookPayload,
+): "BUY" | "SELL" | "SWAP" {
+  if (tx.type !== "SWAP") return tx.type as "BUY" | "SELL" | "SWAP";
+  const swap = tx.events?.swap;
+  if (!swap) return "SWAP";
+  const outputsHaveToken = (swap.tokenOutputs || []).some(
+    (t) => t.mint !== WRAPPED_SOL_MINT,
+  );
+  const inputsHaveToken = (swap.tokenInputs || []).some(
+    (t) => t.mint !== WRAPPED_SOL_MINT,
+  );
+  if (outputsHaveToken) return "BUY"; // received token (spent SOL)
+  if (inputsHaveToken) return "SELL"; // sent token (received SOL)
+  return "SWAP";
+}
+
+/**
  * Primary token from enhanced payload:
  * BUY = token received (tokenOutputs, non-wSOL); SELL = token sold (tokenInputs, non-wSOL);
  * SWAP = first non-wSOL from tokenOutputs or tokenInputs.
@@ -399,10 +420,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Helius sends an array of transactions
     const transactions = Array.isArray(payload) ? payload : [payload];
 
-    // Filter to BUY/SELL/SWAP and collect unique primary token mints for symbol resolution (one /tokens/:mint per mint per request)
-    const processableTx = transactions.filter(
-      (tx) => tx.type === "BUY" || tx.type === "SELL" || tx.type === "SWAP",
-    );
+    // Filter to SWAP only (Helius webhook subscribes to SWAP; buy/sell inferred from SOL↔token direction)
+    const processableTx = transactions.filter((tx) => tx.type === "SWAP");
     const uniqueMints = [
       ...new Set(
         processableTx
@@ -432,7 +451,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (t.fromUserAccount) walletAddresses.add(t.fromUserAccount);
         if (t.toUserAccount) walletAddresses.add(t.toUserAccount);
       });
-      if (tx.type === "BUY" || tx.type === "SELL" || tx.type === "SWAP") {
+      if (tx.type === "SWAP") {
         tx.accountData?.forEach((acc) => {
           walletAddresses.add(acc.account);
           acc.tokenBalanceChanges?.forEach((tc) => {
@@ -541,9 +560,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
 
     for (const tx of processableTx) {
-      const isBuy = tx.type === "BUY";
-      const isSell = tx.type === "SELL";
-      const isSwap = tx.type === "SWAP";
+      const effectiveType = getEffectiveSwapDirection(tx);
+      const isBuy = effectiveType === "BUY";
+      const isSell = effectiveType === "SELL";
+      const isSwap = effectiveType === "SWAP";
       const walletAddresses = txToWallets.get(tx)!;
 
       // Compute price/symbol once per tx (Jupiter /price/v3, cached in-memory and Firestore for SOL).
@@ -588,13 +608,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      const notificationType = isBuy
-        ? "buy"
-        : isSell
-          ? "sell"
-          : isSwap
-            ? "swap"
-            : "transaction";
+      const notificationType =
+        effectiveType === "BUY"
+          ? "buy"
+          : effectiveType === "SELL"
+            ? "sell"
+            : effectiveType === "SWAP"
+              ? "swap"
+              : "transaction";
 
       const tokenAddress = getPrimaryTokenMint(tx) ?? undefined;
       const primaryTransfer = hasTokenTransfer
@@ -723,14 +744,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 },
               };
               const invalidTokens = await sendToTokens(tokens, pushPayload);
-              // Remove invalid tokens (doc ID is hash of token)
+              // Remove invalid tokens (user subcollection + pushTokenIndex)
               for (const token of invalidTokens) {
-                await db
-                  .collection("users")
-                  .doc(userId)
-                  .collection("pushTokens")
-                  .doc(pushTokenDocId(token))
-                  .delete();
+                const docId = pushTokenDocId(token);
+                await Promise.all([
+                  db
+                    .collection("users")
+                    .doc(userId)
+                    .collection("pushTokens")
+                    .doc(docId)
+                    .delete(),
+                  db.collection("pushTokenIndex").doc(docId).delete(),
+                ]);
               }
             } catch (pushError) {
               console.error("Error sending push notification:", pushError);

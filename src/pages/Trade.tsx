@@ -373,8 +373,8 @@ export function Trade() {
           </Card>
         )}
 
-        {/* Token Input */}
-        <div className="min-w-0 overflow-hidden">
+        {/* Token Input - no overflow-hidden so dropdown can show below */}
+        <div className="min-w-0">
           <label className="block text-sm font-medium mb-2">Token</label>
           <TokenSearch
             onSelect={(selectedToken) => {

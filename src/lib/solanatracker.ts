@@ -246,6 +246,7 @@ export interface TokenInfoResponse {
     decimals: number;
     lastUpdated: number;
     deployer?: string;
+    lpBurn?: number;
     txns?: {
       buys: number;
       sells: number;
@@ -539,7 +540,7 @@ export async function getWalletPnL(
  */
 export async function getWalletPnLSummary(
   walletAddress: string,
-  duration: "all" | "90d" | "30d" | "7d" | "24h" = "all",
+  _duration: "all" | "90d" | "30d" | "7d" | "24h" = "all",
 ): Promise<WalletPnLSummaryResponse> {
   try {
     const response = await getWalletPnL(walletAddress);
@@ -646,6 +647,39 @@ export async function getWalletTokenPnL(
 }
 
 /**
+ * SolanaTracker Top Traders API – response row for one token.
+ * GET /top-traders/{tokenMint} returns an array of these.
+ * held/sold/holding = token amounts; realized/unrealized/total/total_invested = USD.
+ */
+export interface TopTraderRow {
+  wallet: string;
+  held: number;
+  sold: number;
+  holding: number;
+  realized: number;
+  unrealized: number;
+  total: number; // PnL USD (realized + unrealized)
+  total_invested: number; // USD cost basis
+  tx_counts: { buys: number; sells: number };
+}
+
+/**
+ * Fetch top traders for a single token (top 100 by PnL).
+ * GET https://data.solanatracker.io/top-traders/{tokenMint}
+ */
+export async function getTopTradersForToken(
+  tokenMint: string,
+): Promise<TopTraderRow[]> {
+  const data = await solanatrackerRequest<TopTraderRow[]>(
+    `/top-traders/${tokenMint}`,
+    { method: "GET" },
+  );
+  return Array.isArray(data) ? data : [];
+}
+
+const TOP_TRADERS_DELAY_MS = 2000;
+
+/**
  * Per-token stats for a wallet (for accordion breakdown and average ROI).
  */
 export interface ScannerTokenStat {
@@ -672,144 +706,118 @@ export interface ScannerWallet {
 }
 
 /**
- * Scan for wallets that traded multiple tokens using transaction data
+ * Scan for wallets that traded multiple tokens using SolanaTracker Top Traders API.
  *
  * Flow:
- * 1. For each token, fetch transactions from Birdeye
- * 2. Extract unique wallet addresses from transaction 'owner' field
- * 3. Cross-check wallets across tokens to find those that traded 2+ tokens
- * 4. Calculate total invested from transaction volumes
- * 5. Sort by highest investment to lowest
+ * 1. For each token, GET /top-traders/{mint} with 2s delay between tokens
+ * 2. Find wallets that appear in 2+ token results (recurring)
+ * 3. Build per-token stats and average ROI from API data
+ * 4. Sort by total PnL (desc)
  */
 export async function scanWalletsForTokens(
   tokenMints: string[],
   minMatches: number = 2,
-  minTrades: number = 2,
+  _minTrades: number = 2,
 ): Promise<ScannerWallet[]> {
   try {
-    // Step 1: Get transactions for each token from Birdeye
-    const allTransactionsByToken: TokenTransaction[][] = [];
+    // Step 1: Get top traders for each token, 2s delay between tokens
+    const topTradersByToken: TopTraderRow[][] = [];
     for (let i = 0; i < tokenMints.length; i++) {
       const mint = tokenMints[i];
       try {
-        // Get trades for each token
-        const transactions = await getTokenTransactionsPaginated(
-          mint,
-          10,
-          "all",
-        );
-        allTransactionsByToken.push(transactions);
-
-        // Add delay between tokens (600ms) to respect rate limits
-        if (i < tokenMints.length - 1) {
-          await delay(600);
-        }
+        const rows = await getTopTradersForToken(mint);
+        topTradersByToken.push(rows);
       } catch (error) {
-        console.error(`Error getting transactions for token ${mint}:`, error);
-        // Push empty array to maintain array alignment
-        allTransactionsByToken.push([]);
+        console.error(`Error getting top traders for token ${mint}:`, error);
+        topTradersByToken.push([]);
+      }
+      if (i < tokenMints.length - 1) {
+        await delay(TOP_TRADERS_DELAY_MS);
       }
     }
 
-    // Step 2: Extract unique wallet addresses and track per-wallet and per-wallet-per-token invested/removed
-    const walletTokenMap = new Map<string, Set<string>>();
-    const walletTransactionCount = new Map<string, number>();
-    const walletInvestmentMap = new Map<string, number>();
-    const walletRemovedMap = new Map<string, number>();
-    const walletTokenInvestedMap = new Map<string, Map<string, number>>();
-    const walletTokenRemovedMap = new Map<string, Map<string, number>>();
+    // Step 2: Build wallet -> { tokens, tokenStats[], totalInvested, totalPnl }
+    const walletData = new Map<
+      string,
+      {
+        tokens: Set<string>;
+        tokenStats: ScannerTokenStat[];
+        totalInvested: number;
+        totalPnl: number;
+      }
+    >();
 
-    allTransactionsByToken.forEach((transactions, index) => {
+    topTradersByToken.forEach((rows, index) => {
       const tokenMint = tokenMints[index];
-      const seenWallets = new Set<string>();
+      rows.forEach((row) => {
+        const w = row.wallet;
+        if (!w) return;
+        const inv = row.total_invested ?? 0;
+        const pnl = row.total ?? 0;
+        const totalPnl = pnl;
+        const roiPct = inv > 0 ? (totalPnl / inv) * 100 : null;
+        const stat: ScannerTokenStat = {
+          mint: tokenMint,
+          totalInvested: inv,
+          totalPnl,
+          roiPct,
+        };
 
-      transactions.forEach((tx) => {
-        const wallet = tx.owner;
-        if (!wallet) return;
-
-        if (!walletTokenMap.has(wallet)) {
-          walletTokenMap.set(wallet, new Set());
-          walletTransactionCount.set(wallet, 0);
-          walletInvestmentMap.set(wallet, 0);
-          walletRemovedMap.set(wallet, 0);
-          walletTokenInvestedMap.set(wallet, new Map());
-          walletTokenRemovedMap.set(wallet, new Map());
+        if (!walletData.has(w)) {
+          walletData.set(w, {
+            tokens: new Set(),
+            tokenStats: [],
+            totalInvested: 0,
+            totalPnl: 0,
+          });
         }
-
-        if (!seenWallets.has(wallet)) {
-          walletTokenMap.get(wallet)!.add(tokenMint);
-          seenWallets.add(wallet);
-        }
-
-        walletTransactionCount.set(
-          wallet,
-          walletTransactionCount.get(wallet)! + 1,
-        );
-
-        if (tx.side === "buy" || tx.tx_type === "buy") {
-          const investedUsd = tx.volume_usd || 0;
-          walletInvestmentMap.set(wallet, (walletInvestmentMap.get(wallet) || 0) + investedUsd);
-          const tokenInvested = walletTokenInvestedMap.get(wallet)!;
-          tokenInvested.set(tokenMint, (tokenInvested.get(tokenMint) || 0) + investedUsd);
-        } else if (tx.side === "sell" || tx.tx_type === "sell") {
-          const removedUsd = tx.volume_usd || 0;
-          walletRemovedMap.set(wallet, (walletRemovedMap.get(wallet) || 0) + removedUsd);
-          const tokenRemoved = walletTokenRemovedMap.get(wallet)!;
-          tokenRemoved.set(tokenMint, (tokenRemoved.get(tokenMint) || 0) + removedUsd);
+        const data = walletData.get(w)!;
+        if (!data.tokens.has(tokenMint)) {
+          data.tokens.add(tokenMint);
+          data.tokenStats.push(stat);
+          data.totalInvested += inv;
+          data.totalPnl += pnl;
         }
       });
     });
 
-    // Step 3: Filter wallets that match criteria (traded 2+ tokens, with min trades)
-    const candidateWallets = Array.from(walletTokenMap.entries())
-      .filter(([wallet, tokens]) => {
-        const matches = tokens.size;
-        const trades = walletTransactionCount.get(wallet) || 0;
-        return matches >= minMatches && trades >= minTrades;
-      })
-      .map(([wallet]) => wallet);
+    // Step 3: Keep only wallets that appear in >= minMatches tokens
+    const candidateWallets = Array.from(walletData.entries()).filter(
+      ([_, data]) => data.tokens.size >= minMatches,
+    );
 
     if (candidateWallets.length === 0) {
       return [];
     }
 
-    // Step 4: Map to scanner wallet format with per-token stats and average ROI
-    const wallets: ScannerWallet[] = candidateWallets.map((wallet) => {
-      const walletTokens = Array.from(walletTokenMap.get(wallet) || []);
-      const matched = walletTokens.length;
-      const totalInvested = walletInvestmentMap.get(wallet) || 0;
-      const totalRemoved = walletRemovedMap.get(wallet) || 0;
-      const tokenInvested = walletTokenInvestedMap.get(wallet)!;
-      const tokenRemoved = walletTokenRemovedMap.get(wallet)!;
-
-      const tokenStats: ScannerTokenStat[] = walletTokens.map((mint) => {
-        const inv = tokenInvested.get(mint) || 0;
-        const rem = tokenRemoved.get(mint) || 0;
-        const totalPnl = rem - inv;
-        const roiPct = inv > 0 ? (totalPnl / inv) * 100 : null;
-        return { mint, totalInvested: inv, totalPnl, roiPct };
-      });
-
-      const roiValues = tokenStats.map((t) => t.roiPct).filter((r): r is number => r !== null);
+    // Step 4: Map to ScannerWallet; totalRemoved = totalInvested + totalPnl
+    const wallets: ScannerWallet[] = candidateWallets.map(([address, data]) => {
+      const roiValues = data.tokenStats
+        .map((t) => t.roiPct)
+        .filter((r): r is number => r !== null);
       const averageRoiPct =
         roiValues.length > 0
           ? roiValues.reduce((a, b) => a + b, 0) / roiValues.length
           : null;
 
       return {
-        address: wallet,
-        matched,
+        address,
+        matched: data.tokens.size,
         total: tokenMints.length,
-        tokens: walletTokens,
-        totalInvested,
-        totalRemoved,
-        tokenStats,
+        tokens: Array.from(data.tokens),
+        totalInvested: data.totalInvested,
+        totalRemoved: data.totalInvested + data.totalPnl,
+        tokenStats: data.tokenStats,
         averageRoiPct,
       };
     });
 
-    // Step 5: Sort by highest investment to lowest
-    return wallets.sort((a, b) => b.totalInvested - a.totalInvested);
+    // Step 5: Sort by total PnL (desc)
+    return wallets.sort((a, b) => {
+      const pnlA = a.totalRemoved - a.totalInvested;
+      const pnlB = b.totalRemoved - b.totalInvested;
+      return pnlB - pnlA;
+    });
   } catch (error) {
     console.error("Error scanning wallets:", error);
     throw error;

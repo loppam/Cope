@@ -88,84 +88,82 @@ export function TokenSearch({ onSelect, placeholder = "Search token by name or s
   };
 
   return (
-    <div ref={containerRef} className={`relative ${className}`}>
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-white/40" />
+    <div ref={containerRef} className={`relative w-full min-w-0 ${className}`}>
+      <div className="relative w-full min-w-0">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 shrink-0 pointer-events-none" />
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => query.length >= 1 && results.length > 0 && setShowResults(true)}
           placeholder={placeholder}
-          className="w-full h-12 pl-10 pr-10 rounded-[12px] bg-white/5 border border-white/10 text-white placeholder:text-white/40 focus:outline-none focus:border-[#12d585] transition-colors font-mono text-sm"
+          className="w-full min-w-0 h-12 pl-10 pr-11 rounded-[12px] bg-white/5 border border-white/10 text-white placeholder:text-white/40 focus:outline-none focus:border-[#12d585] transition-colors font-mono text-sm truncate"
         />
-        {query && (
-          <button
-            onClick={() => {
-              setQuery('');
-              setResults([]);
-              setShowResults(false);
-            }}
-            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-white/40 hover:text-white transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        )}
-        {loading && (
-          <div className="absolute right-10 top-1/2 transform -translate-y-1/2">
-            <Loader2 className="w-4 h-4 text-white/40 animate-spin" />
-          </div>
-        )}
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 shrink-0">
+          {loading && <Loader2 className="w-5 h-5 text-white/40 animate-spin" />}
+          {query && !loading && (
+            <button
+              type="button"
+              onClick={() => {
+                setQuery('');
+                setResults([]);
+                setShowResults(false);
+              }}
+              className="p-1.5 -m-1.5 text-white/40 hover:text-white transition-colors touch-manipulation"
+              aria-label="Clear search"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Search Results Dropdown */}
       {showResults && results.length > 0 && (
-        <div className="absolute z-50 w-full mt-2 max-h-[500px] overflow-y-auto bg-[#0a0a0a] border border-white/10 rounded-[12px] shadow-xl">
+        <div className="absolute z-50 left-0 right-0 w-full mt-2 max-h-[min(70vh,500px)] overflow-y-auto bg-[#0a0a0a] border border-white/10 rounded-[12px] shadow-xl">
           <div className="p-2">
             {results.map((token) => (
               <button
                 key={token.id}
+                type="button"
                 onClick={() => handleSelect(token)}
-                className="w-full p-3 rounded-lg hover:bg-white/5 transition-colors text-left group"
+                className="w-full p-3 rounded-lg hover:bg-white/5 active:bg-white/5 transition-colors text-left group touch-manipulation"
               >
-                <div className="flex items-center gap-3">
-                  {/* Token Image */}
-                  {token.image && (
-                    <img
-                      src={token.image}
-                      alt={token.symbol}
-                      className="w-10 h-10 rounded-full flex-shrink-0"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = 'none';
-                      }}
-                    />
-                  )}
-                  
-                  {/* Token Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-semibold text-white group-hover:text-[#12d585] transition-colors">
-                        {token.name}
-                      </span>
-                      <span className="text-white/60 text-sm">{token.symbol}</span>
-                    </div>
-                    <div className="flex items-center gap-4 text-xs text-white/50">
-                      <span className="font-mono">{shortenAddress(token.mint)}</span>
-                      {token.priceUsd && (
-                        <span>{formatPrice(token.priceUsd)}</span>
-                      )}
-                      {token.marketCapUsd && (
-                        <span>MCap: {formatCurrency(token.marketCapUsd)}</span>
-                      )}
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 min-w-0">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    {token.image && (
+                      <img
+                        src={token.image}
+                        alt={token.symbol}
+                        className="w-10 h-10 rounded-full flex-shrink-0"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    )}
+                    <div className="flex-1 min-w-0 overflow-hidden">
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 mb-0.5">
+                        <span className="font-semibold text-white group-hover:text-[#12d585] transition-colors truncate block">
+                          {token.name}
+                        </span>
+                        <span className="text-white/60 text-sm shrink-0">{token.symbol}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-x-3 gap-y-0 text-xs text-white/50 overflow-hidden">
+                        <span className="font-mono truncate">{shortenAddress(token.mint)}</span>
+                        {token.priceUsd != null && (
+                          <span className="truncate">{formatPrice(token.priceUsd)}</span>
+                        )}
+                        {token.marketCapUsd != null && (
+                          <span className="truncate">MCap: {formatCurrency(token.marketCapUsd)}</span>
+                        )}
+                      </div>
                     </div>
                   </div>
-
-                  {/* Market Info */}
-                  <div className="flex flex-col items-end gap-1 text-xs text-white/60">
-                    {token.liquidityUsd && (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/60 sm:shrink-0 sm:flex-col sm:items-end">
+                    {token.liquidityUsd != null && (
                       <span>Liq: {formatCurrency(token.liquidityUsd)}</span>
                     )}
-                    {token.volume_24h !== undefined && token.volume_24h > 0 && (
+                    {token.volume_24h != null && token.volume_24h > 0 && (
                       <span>Vol 24h: {formatCurrency(token.volume_24h)}</span>
                     )}
                     {token.status && (
@@ -187,7 +185,7 @@ export function TokenSearch({ onSelect, placeholder = "Search token by name or s
 
       {/* No Results */}
       {showResults && !loading && query.length >= 1 && results.length === 0 && (
-        <div className="absolute z-50 w-full mt-2 p-4 bg-[#0a0a0a] border border-white/10 rounded-[12px] shadow-xl text-center text-white/60 text-sm">
+        <div className="absolute z-50 left-0 right-0 w-full mt-2 p-4 bg-[#0a0a0a] border border-white/10 rounded-[12px] shadow-xl text-center text-white/60 text-sm">
           No tokens found
         </div>
       )}

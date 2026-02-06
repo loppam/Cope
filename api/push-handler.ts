@@ -197,7 +197,7 @@ async function sendToTokens(
       icon: "/icons/icon-192x192.png",
       badge: "/icons/icon-96x96.png",
     });
-    const results = await Promise.allSettled(
+    await Promise.allSettled(
       webPushSubscriptions.map(async ({ token, subscription }) => {
         try {
           await webpush.sendNotification(subscription, webPushPayload);

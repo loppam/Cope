@@ -374,14 +374,14 @@ export function Trade() {
         )}
 
         {/* Token Input */}
-        <div>
+        <div className="min-w-0 overflow-hidden">
           <label className="block text-sm font-medium mb-2">Token</label>
           <TokenSearch
             onSelect={(selectedToken) => {
               setToken(selectedToken);
               setMint(selectedToken.mint);
             }}
-            placeholder="Search by name, symbol, or paste mint address..."
+            placeholder="Search or paste token address..."
           />
         </div>
 

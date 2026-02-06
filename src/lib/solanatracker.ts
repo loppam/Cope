@@ -646,6 +646,16 @@ export async function getWalletTokenPnL(
 }
 
 /**
+ * Per-token stats for a wallet (for accordion breakdown and average ROI).
+ */
+export interface ScannerTokenStat {
+  mint: string;
+  totalInvested: number;
+  totalPnl: number; // totalRemoved - totalInvested for this token
+  roiPct: number | null; // (totalPnl / totalInvested) * 100, or null if totalInvested <= 0
+}
+
+/**
  * Scanner functionality - Find wallets that traded multiple tokens
  */
 export interface ScannerWallet {
@@ -653,8 +663,12 @@ export interface ScannerWallet {
   matched: number;
   total: number;
   tokens: string[];
-  totalInvested: number; // Total USD invested (buy transactions)
-  totalRemoved: number; // Total USD removed (sell transactions)
+  totalInvested: number; // Sum across tokens
+  totalRemoved: number; // Sum across tokens
+  /** Per-token invested, PnL, and ROI for accordion breakdown */
+  tokenStats: ScannerTokenStat[];
+  /** Average of each token's ROI % (only tokens with valid ROI); null if none */
+  averageRoiPct: number | null;
 }
 
 /**
@@ -697,52 +711,51 @@ export async function scanWalletsForTokens(
       }
     }
 
-    // Step 2: Extract unique wallet addresses from trades and build intersection map
-    // Also track total investment and total removed per wallet
+    // Step 2: Extract unique wallet addresses and track per-wallet and per-wallet-per-token invested/removed
     const walletTokenMap = new Map<string, Set<string>>();
     const walletTransactionCount = new Map<string, number>();
-    const walletInvestmentMap = new Map<string, number>(); // Track total USD invested (buy transactions)
-    const walletRemovedMap = new Map<string, number>(); // Track total USD removed (sell transactions)
+    const walletInvestmentMap = new Map<string, number>();
+    const walletRemovedMap = new Map<string, number>();
+    const walletTokenInvestedMap = new Map<string, Map<string, number>>();
+    const walletTokenRemovedMap = new Map<string, Map<string, number>>();
 
     allTransactionsByToken.forEach((transactions, index) => {
       const tokenMint = tokenMints[index];
-      const seenWallets = new Set<string>(); // Track unique wallets per token
+      const seenWallets = new Set<string>();
 
       transactions.forEach((tx) => {
         const wallet = tx.owner;
-        if (!wallet) return; // Skip if no owner
+        if (!wallet) return;
 
-        // Initialize wallet tracking if not seen before
         if (!walletTokenMap.has(wallet)) {
           walletTokenMap.set(wallet, new Set());
           walletTransactionCount.set(wallet, 0);
           walletInvestmentMap.set(wallet, 0);
           walletRemovedMap.set(wallet, 0);
+          walletTokenInvestedMap.set(wallet, new Map());
+          walletTokenRemovedMap.set(wallet, new Map());
         }
 
-        // Add this token to the wallet's set (only once per token)
         if (!seenWallets.has(wallet)) {
           walletTokenMap.get(wallet)!.add(tokenMint);
           seenWallets.add(wallet);
         }
 
-        // Increment transaction count for this wallet
         walletTransactionCount.set(
           wallet,
           walletTransactionCount.get(wallet)! + 1,
         );
 
-        // Track investment (buy) and removed (sell) separately
-        // For buy: volume_usd represents what the wallet spent (investment)
-        // For sell: volume_usd represents what the wallet received (removed)
         if (tx.side === "buy" || tx.tx_type === "buy") {
           const investedUsd = tx.volume_usd || 0;
-          const currentInvestment = walletInvestmentMap.get(wallet) || 0;
-          walletInvestmentMap.set(wallet, currentInvestment + investedUsd);
+          walletInvestmentMap.set(wallet, (walletInvestmentMap.get(wallet) || 0) + investedUsd);
+          const tokenInvested = walletTokenInvestedMap.get(wallet)!;
+          tokenInvested.set(tokenMint, (tokenInvested.get(tokenMint) || 0) + investedUsd);
         } else if (tx.side === "sell" || tx.tx_type === "sell") {
           const removedUsd = tx.volume_usd || 0;
-          const currentRemoved = walletRemovedMap.get(wallet) || 0;
-          walletRemovedMap.set(wallet, currentRemoved + removedUsd);
+          walletRemovedMap.set(wallet, (walletRemovedMap.get(wallet) || 0) + removedUsd);
+          const tokenRemoved = walletTokenRemovedMap.get(wallet)!;
+          tokenRemoved.set(tokenMint, (tokenRemoved.get(tokenMint) || 0) + removedUsd);
         }
       });
     });
@@ -760,12 +773,28 @@ export async function scanWalletsForTokens(
       return [];
     }
 
-    // Step 4: Map to scanner wallet format and sort by total invested
+    // Step 4: Map to scanner wallet format with per-token stats and average ROI
     const wallets: ScannerWallet[] = candidateWallets.map((wallet) => {
       const walletTokens = Array.from(walletTokenMap.get(wallet) || []);
       const matched = walletTokens.length;
       const totalInvested = walletInvestmentMap.get(wallet) || 0;
       const totalRemoved = walletRemovedMap.get(wallet) || 0;
+      const tokenInvested = walletTokenInvestedMap.get(wallet)!;
+      const tokenRemoved = walletTokenRemovedMap.get(wallet)!;
+
+      const tokenStats: ScannerTokenStat[] = walletTokens.map((mint) => {
+        const inv = tokenInvested.get(mint) || 0;
+        const rem = tokenRemoved.get(mint) || 0;
+        const totalPnl = rem - inv;
+        const roiPct = inv > 0 ? (totalPnl / inv) * 100 : null;
+        return { mint, totalInvested: inv, totalPnl, roiPct };
+      });
+
+      const roiValues = tokenStats.map((t) => t.roiPct).filter((r): r is number => r !== null);
+      const averageRoiPct =
+        roiValues.length > 0
+          ? roiValues.reduce((a, b) => a + b, 0) / roiValues.length
+          : null;
 
       return {
         address: wallet,
@@ -774,6 +803,8 @@ export async function scanWalletsForTokens(
         tokens: walletTokens,
         totalInvested,
         totalRemoved,
+        tokenStats,
+        averageRoiPct,
       };
     });
 

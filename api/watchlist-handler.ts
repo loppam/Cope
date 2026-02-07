@@ -107,7 +107,14 @@ async function handleAdd(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: "walletAddress is required" });
   }
 
-  const nickname = body.nickname ? String(body.nickname).trim() : undefined;
+  const rawNickname =
+    body.nickname !== undefined ? String(body.nickname).trim() : undefined;
+  if (rawNickname !== undefined && rawNickname === "") {
+    return res.status(400).json({
+      error: "nickname cannot be empty when provided",
+    });
+  }
+  const nickname = rawNickname;
   const onPlatform = body.onPlatform === true;
   const followedUid =
     typeof body.uid === "string" && body.uid.trim()

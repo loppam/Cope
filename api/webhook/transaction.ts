@@ -1,9 +1,8 @@
 // Vercel Serverless Function: Webhook endpoint for Helius transaction notifications
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { waitUntil } from "@vercel/functions";
 import { createHash } from "crypto";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
-import { getFirestore, type DocumentSnapshot } from "firebase-admin/firestore";
+import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import webpush from "web-push";
 
@@ -134,11 +133,6 @@ async function getJupiterPrices(
 
 const PRICES_COLLECTION = "prices";
 const SOL_PRICE_DOC_ID = "SOL";
-const SYNC_INTERVAL_MS = 5 * 60 * 60 * 1000; // 5 hours
-const CONFIG_COLLECTION = "config";
-const WEBHOOK_SYNC_DOC_ID = "webhookSync";
-const SYNC_CHECK_CACHE_MS = 5 * 60 * 1000; // 5 min – avoid reading config on every webhook
-let syncCheckCache: { lastSyncAt: number; checkedAt: number } | null = null;
 
 /**
  * Fetch SOL price: Firestore cache (5 min) shared across invocations, then Jupiter /price/v3.
@@ -378,45 +372,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const payload = req.body as HeliusWebhookPayload[] | HeliusWebhookPayload;
 
-    // Lazy sync timer: trigger webhook sync if last sync was >5 hours ago (cache config read to cut Firestore reads)
-    try {
-      const now = Date.now();
-      let lastSyncAt: number | undefined;
-      if (
-        syncCheckCache &&
-        now - syncCheckCache.checkedAt < SYNC_CHECK_CACHE_MS
-      ) {
-        lastSyncAt = syncCheckCache.lastSyncAt;
-      } else {
-        const syncRef = db
-          .collection(CONFIG_COLLECTION)
-          .doc(WEBHOOK_SYNC_DOC_ID);
-        const syncSnap = await syncRef.get();
-        lastSyncAt = syncSnap.exists
-          ? (syncSnap.data()?.lastSyncAt as number | undefined)
-          : 0;
-        syncCheckCache = { lastSyncAt: lastSyncAt ?? 0, checkedAt: now };
-      }
-      if (!lastSyncAt || now - lastSyncAt > SYNC_INTERVAL_MS) {
-        const baseUrl = process.env.VERCEL_URL
-          ? `https://${process.env.VERCEL_URL}`
-          : req.headers.origin || "https://your-domain.vercel.app";
-        const syncUrl = `${baseUrl}/api/webhook/sync`;
-        waitUntil(
-          fetch(syncUrl, {
-            method: "POST",
-            ...(process.env.WEBHOOK_SYNC_SECRET && {
-              headers: {
-                Authorization: `Bearer ${process.env.WEBHOOK_SYNC_SECRET}`,
-              },
-            }),
-          }).catch((e) => console.warn("[Webhook] Lazy sync failed:", e)),
-        );
-      }
-    } catch (syncErr) {
-      // Non-fatal: continue processing
-    }
-
     // Helius sends an array of transactions
     const transactions = Array.isArray(payload) ? payload : [payload];
 
@@ -437,39 +392,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }),
     );
 
-    // Collect all unique wallet addresses across transactions for batch read
-    const allWalletAddresses = new Set<string>();
-    const txToWallets = new Map<HeliusWebhookPayload, Set<string>>();
-    for (const tx of processableTx) {
-      const walletAddresses = new Set<string>();
-      if (tx.feePayer) walletAddresses.add(tx.feePayer);
-      tx.nativeTransfers?.forEach((t) => {
-        walletAddresses.add(t.fromUserAccount);
-        walletAddresses.add(t.toUserAccount);
-      });
-      tx.tokenTransfers?.forEach((t) => {
-        if (t.fromUserAccount) walletAddresses.add(t.fromUserAccount);
-        if (t.toUserAccount) walletAddresses.add(t.toUserAccount);
-      });
-      if (tx.type === "SWAP") {
-        tx.accountData?.forEach((acc) => {
-          walletAddresses.add(acc.account);
-          acc.tokenBalanceChanges?.forEach((tc) => {
-            if ((tc as any).userAccount)
-              walletAddresses.add((tc as any).userAccount);
-          });
-        });
-      }
-      txToWallets.set(tx, walletAddresses);
-      walletAddresses.forEach((a) => allWalletAddresses.add(a));
-    }
+    // Actor-only: only the fee payer (transaction signer) is the wallet we notify for
+    const actorAddresses = new Set(
+      processableTx.map((tx) => tx.feePayer).filter((a): a is string => !!a),
+    );
 
-    // Batch read watchedWallets for all addresses
+    // Batch read watchedWallets for actor addresses only (1 per tx, deduped)
     const watchedWalletsRef = db.collection("watchedWallets");
     const watchedSnaps =
-      allWalletAddresses.size > 0
+      actorAddresses.size > 0
         ? await Promise.all(
-            [...allWalletAddresses].map((addr) =>
+            [...actorAddresses].map((addr) =>
               watchedWalletsRef.doc(addr).get(),
             ),
           )
@@ -479,7 +412,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       Record<string, { nickname?: string }>
     >();
     let idx = 0;
-    for (const addr of allWalletAddresses) {
+    for (const addr of actorAddresses) {
       const snap = watchedSnaps[idx++];
       if (snap?.exists) {
         const watchers =
@@ -491,80 +424,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Batch read user docs for watchers only (no full collection scan – watchedWallets is source of truth)
-    const allUserIds = new Set<string>();
-    watchedByAddr.forEach((watchers) => {
-      Object.keys(watchers).forEach((uid) => allUserIds.add(uid));
-    });
-    const userDocsById = new Map<string, DocumentSnapshot>();
-    if (allUserIds.size > 0) {
-      const userSnaps = await Promise.all(
-        [...allUserIds].map((uid) => db.collection("users").doc(uid).get()),
-      );
-      [...allUserIds].forEach((uid, i) => {
-        const s = userSnaps[i];
-        if (s?.exists) userDocsById.set(uid, s);
-      });
+    // Created notifications (idempotency via create(); push tokens fetched only for these)
+    interface CreatedNotification {
+      userId: string;
+      title: string;
+      message: string;
+      type: string;
+      txHash: string;
+      deepLink: string;
     }
-
-    // Pre-compute (tx, userId) pairs and batch-get notification docs for idempotency (one batch read instead of N)
-    const notificationIdsToCheck: string[] = [];
-    for (const tx of processableTx) {
-      const notifiedUserIds = new Set<string>();
-      const walletAddresses = txToWallets.get(tx)!;
-      for (const walletAddress of walletAddresses) {
-        const watchersMap = watchedByAddr.get(walletAddress) || null;
-        if (!watchersMap || Object.keys(watchersMap).length === 0) continue;
-        for (const uid of Object.keys(watchersMap)) {
-          if (notifiedUserIds.has(uid)) continue;
-          if (!userDocsById.get(uid)?.exists) continue;
-          notifiedUserIds.add(uid);
-          const notificationId = createHash("sha256")
-            .update(`${tx.signature}:${uid}`)
-            .digest("hex");
-          notificationIdsToCheck.push(notificationId);
-        }
-      }
-    }
-    const existingNotificationIds = new Set<string>();
-    if (notificationIdsToCheck.length > 0) {
-      const BATCH_SIZE = 30; // Firestore getAll limit
-      for (let i = 0; i < notificationIdsToCheck.length; i += BATCH_SIZE) {
-        const chunk = notificationIdsToCheck.slice(i, i + BATCH_SIZE);
-        const refs = chunk.map((id) => db.collection("notifications").doc(id));
-        const snaps = await db.getAll(...refs);
-        snaps.forEach((s) => {
-          if (s.exists) existingNotificationIds.add(s.id);
-        });
-      }
-    }
-
-    // Batch-read push tokens for all users we might notify (one read per user, reused in loop)
-    const userIdsToNotify = new Set<string>();
-    for (const tx of processableTx) {
-      const walletAddresses = txToWallets.get(tx)!;
-      for (const walletAddress of walletAddresses) {
-        const watchersMap = watchedByAddr.get(walletAddress) || null;
-        if (!watchersMap) continue;
-        for (const uid of Object.keys(watchersMap)) {
-          if (userDocsById.get(uid)?.exists) userIdsToNotify.add(uid);
-        }
-      }
-    }
-    const pushTokensByUid = new Map<string, PushToken[]>();
-    await Promise.all(
-      [...userIdsToNotify].map(async (uid) => {
-        const tokens = await getUserTokens(uid);
-        pushTokensByUid.set(uid, tokens);
-      }),
-    );
+    const createdNotifications: CreatedNotification[] = [];
 
     for (const tx of processableTx) {
+      const actorWallet = tx.feePayer;
+      if (!actorWallet) continue;
+
       const effectiveType = getEffectiveSwapDirection(tx);
       const isBuy = effectiveType === "BUY";
       const isSell = effectiveType === "SELL";
       const isSwap = effectiveType === "SWAP";
-      const walletAddresses = txToWallets.get(tx)!;
 
       // Compute price/symbol once per tx (Jupiter /price/v3, cached in-memory and Firestore for SOL).
       const tokenTransfers = tx.tokenTransfers || [];
@@ -641,143 +519,119 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               maximumFractionDigits: 2,
             });
 
-      // Collect unique users to notify (one notification per user per tx)
+      // Actor-only: notify users watching this tx's fee payer
+      const watchersMap = watchedByAddr.get(actorWallet) || null;
+      if (!watchersMap || Object.keys(watchersMap).length === 0) continue;
+
       const notifiedUserIds = new Set<string>();
+      for (const uid of Object.keys(watchersMap)) {
+        if (notifiedUserIds.has(uid)) continue;
+        notifiedUserIds.add(uid);
 
-      // For each wallet address, find users watching it (use pre-fetched batch data)
-      for (const walletAddress of walletAddresses) {
-        const watchersMap = watchedByAddr.get(walletAddress) || null;
+        const nickname = watchersMap[uid]?.nickname;
+        const displayName =
+          nickname ||
+          `Wallet ${actorWallet.slice(0, 4)}...${actorWallet.slice(-4)}`;
 
-        const usersWithWallet: Array<{ id: string; data: () => any }> =
-          watchersMap && Object.keys(watchersMap).length > 0
-            ? (Object.keys(watchersMap)
-                .map((uid) => {
-                  const userSnap = userDocsById.get(uid);
-                  return userSnap?.exists
-                    ? { id: userSnap.id, data: () => userSnap.data() }
-                    : null;
-                })
-                .filter(Boolean) as Array<{ id: string; data: () => any }>)
-            : [];
-
-        // Create notifications for each user watching this wallet (per-user, not platform-wide)
-        for (const userDoc of usersWithWallet) {
-          const userId = userDoc.id;
-          const userData = userDoc.data();
-          const watchlist = userData?.watchlist || [];
-          const watchedWallet = watchlist.find(
-            (w: any) => w.address === walletAddress,
-          );
-          const nickname =
-            (watchersMap && watchersMap[userId]?.nickname) ||
-            watchedWallet?.nickname;
-
-          const alreadyNotified = notifiedUserIds.has(userId);
-          if (!alreadyNotified) notifiedUserIds.add(userId);
-
-          if (!alreadyNotified) {
-            // BUY/SELL from enhanced webhook; title/message from tx.type
-            const displayName =
-              nickname ||
-              `Wallet ${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`;
-
-            let notificationTitle: string;
-            let notificationMessage: string;
-            if (isBuy) {
-              notificationTitle = "Buy Transaction";
-              notificationMessage = `${displayName} bought ${amountUsdFormatted} of ${tokenSymbol}`;
-            } else if (isSell) {
-              notificationTitle = "Sell Transaction";
-              notificationMessage = `${displayName} sold ${amountUsdFormatted} of ${tokenSymbol}`;
-            } else if (isSwap) {
-              notificationTitle = "Swap Transaction";
-              notificationMessage = `${displayName} swapped ${amountUsdFormatted} (${tokenSymbol})`;
-            } else {
-              notificationTitle = "Transaction";
-              notificationMessage = `${displayName} had a transaction (${amountUsdFormatted})`;
-            }
-
-            // Create/update notification with deterministic id (tx + user) so retries/duplicate delivery don't create duplicates
-            const notificationId = createHash("sha256")
-              .update(`${tx.signature}:${userId}`)
-              .digest("hex");
-            const notificationRef = db
-              .collection("notifications")
-              .doc(notificationId);
-
-            // Idempotency: skip if already exists (batch-checked above; avoids N reads per webhook)
-            if (existingNotificationIds.has(notificationId)) continue;
-            existingNotificationIds.add(notificationId);
-
-            const notificationData = {
-              userId,
-              walletAddress,
-              type: notificationType,
-              title: notificationTitle,
-              message: notificationMessage,
-              txHash: tx.signature,
-              tokenAddress: tokenAddress ?? null,
-              amount:
-                primaryTransfer?.tokenAmount ?? nativeTransfers[0]?.amount,
-              amountUsd,
-              read: false,
-              createdAt: new Date(),
-            };
-
-            const deepLink =
-              hasTokenTransfer && tokenAddress
-                ? `/token/${tokenAddress}`
-                : `/scanner/wallet/${walletAddress}`;
-
-            await notificationRef.set(notificationData, { merge: true });
-
-            // Push notification (tokens pre-fetched in pushTokensByUid)
-            try {
-              const tokens = pushTokensByUid.get(userId) ?? [];
-              const pushPayload = {
-                title: notificationData.title,
-                body: notificationData.message,
-                deepLink,
-                data: {
-                  type: notificationData.type,
-                  txHash: notificationData.txHash || "",
-                },
-              };
-              const invalidTokens = await sendToTokens(tokens, pushPayload);
-              // Remove invalid tokens (user subcollection + pushTokenIndex)
-              for (const token of invalidTokens) {
-                const docId = pushTokenDocId(token);
-                await Promise.all([
-                  db
-                    .collection("users")
-                    .doc(userId)
-                    .collection("pushTokens")
-                    .doc(docId)
-                    .delete(),
-                  db.collection("pushTokenIndex").doc(docId).delete(),
-                ]);
-              }
-            } catch (pushError) {
-              console.error("Error sending push notification:", pushError);
-            }
-          }
-
-          // Update last checked timestamp for the wallet in user's watchlist
-          const updatedWatchlist = (userData?.watchlist || []).map((w: any) =>
-            w.address === walletAddress
-              ? {
-                  ...w,
-                  lastCheckedAt: new Date(),
-                  lastTransactionHash: tx.signature,
-                }
-              : w,
-          );
-
-          await db.collection("users").doc(userId).update({
-            watchlist: updatedWatchlist,
-            updatedAt: new Date(),
-          });
+        let notificationTitle: string;
+        let notificationMessage: string;
+        if (isBuy) {
+          notificationTitle = "Buy Transaction";
+          notificationMessage = `${displayName} bought ${amountUsdFormatted} of ${tokenSymbol}`;
+        } else if (isSell) {
+          notificationTitle = "Sell Transaction";
+          notificationMessage = `${displayName} sold ${amountUsdFormatted} of ${tokenSymbol}`;
+        } else if (isSwap) {
+          notificationTitle = "Swap Transaction";
+          notificationMessage = `${displayName} swapped ${amountUsdFormatted} (${tokenSymbol})`;
+        } else {
+          notificationTitle = "Transaction";
+          notificationMessage = `${displayName} had a transaction (${amountUsdFormatted})`;
         }
+
+        const notificationId = createHash("sha256")
+          .update(`${tx.signature}:${uid}`)
+          .digest("hex");
+        const notificationRef = db
+          .collection("notifications")
+          .doc(notificationId);
+
+        const notificationData = {
+          userId: uid,
+          walletAddress: actorWallet,
+          type: notificationType,
+          title: notificationTitle,
+          message: notificationMessage,
+          txHash: tx.signature,
+          tokenAddress: tokenAddress ?? null,
+          amount:
+            primaryTransfer?.tokenAmount ?? nativeTransfers[0]?.amount,
+          amountUsd,
+          read: false,
+          createdAt: new Date(),
+        };
+
+        const deepLink =
+          hasTokenTransfer && tokenAddress
+            ? `/token/${tokenAddress}`
+            : `/scanner/wallet/${actorWallet}`;
+
+        try {
+          await notificationRef.create(notificationData);
+        } catch (err: any) {
+          // Firestore code 6 = ALREADY_EXISTS; duplicate webhook/retry – skip
+          if (err?.code === 6) continue;
+          throw err;
+        }
+
+        createdNotifications.push({
+          userId: uid,
+          title: notificationTitle,
+          message: notificationMessage,
+          type: notificationType,
+          txHash: tx.signature,
+          deepLink,
+        });
+      }
+    }
+
+    // Fetch push tokens only for users we actually created a notification for
+    const createdUserIds = [...new Set(createdNotifications.map((n) => n.userId))];
+    const pushTokensByUid = new Map<string, PushToken[]>();
+    await Promise.all(
+      createdUserIds.map(async (uid) => {
+        const tokens = await getUserTokens(uid);
+        pushTokensByUid.set(uid, tokens);
+      }),
+    );
+
+    for (const item of createdNotifications) {
+      try {
+        const tokens = pushTokensByUid.get(item.userId) ?? [];
+        const pushPayload = {
+          title: item.title,
+          body: item.message,
+          deepLink: item.deepLink,
+          data: {
+            type: item.type,
+            txHash: item.txHash || "",
+          },
+        };
+        const invalidTokens = await sendToTokens(tokens, pushPayload);
+        for (const token of invalidTokens) {
+          const docId = pushTokenDocId(token);
+          await Promise.all([
+            db
+              .collection("users")
+              .doc(item.userId)
+              .collection("pushTokens")
+              .doc(docId)
+              .delete(),
+            db.collection("pushTokenIndex").doc(docId).delete(),
+          ]);
+        }
+      } catch (pushError) {
+        console.error("Error sending push notification:", pushError);
       }
     }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useLocation } from "react-router";
+import { useLocation, useSearchParams } from "react-router";
 import { Button } from "@/components/Button";
 import { Input } from "@/components/Input";
 import { Card } from "@/components/Card";
@@ -41,6 +41,7 @@ const SOL_MINT = "So11111111111111111111111111111111111111112";
 
 export function Trade() {
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user, userProfile, updateBalance } = useAuth();
   const [mint, setMint] = useState("");
   const [amount, setAmount] = useState("");
@@ -66,21 +67,26 @@ export function Trade() {
   const slippagePresets = [50, 100, 200]; // 0.5%, 1%, 2%
   const REFRESH_COOLDOWN_MS = 15000; // 15 seconds
 
-  // Check if mint address was passed from navigation (e.g., from Positions page or feed)
+  // Check if mint was passed from navigation state (e.g., from Positions page or feed)
   useEffect(() => {
     if (location.state?.mint) {
-      const passedMint = location.state.mint as string;
-      // Set mint and fetch immediately
+      const passedMint = (location.state.mint as string).trim();
       setMint(passedMint);
-      fetchTokenDetails(passedMint);
-      // Clear location state to prevent re-triggering on re-renders
       window.history.replaceState({}, document.title);
+      setSearchParams({ mint: passedMint }, { replace: true });
     }
-  }, [location.state]);
+  }, [location.state, setSearchParams]);
 
-  // Fetch token details when mint is set via other means (e.g., TokenSearch component)
+  // Read mint from URL (e.g. /app/trade?mint=...) so links are shareable
   useEffect(() => {
-    if (mint && (!token || token.mint !== mint) && !location.state?.mint) {
+    if (location.state?.mint) return;
+    const urlMint = searchParams.get("mint")?.trim();
+    if (urlMint) setMint(urlMint);
+  }, [searchParams, location.state?.mint]);
+
+  // Fetch token details when mint is set (from URL, TokenSearch, or state)
+  useEffect(() => {
+    if (mint && (!token || token.mint !== mint)) {
       fetchTokenDetails(mint);
     }
   }, [mint, token]);
@@ -166,6 +172,19 @@ export function Trade() {
     setLastRefresh(Date.now());
     setRefreshCooldown(15);
     await fetchTokenDetails(mint);
+  };
+
+  const handleCopyShareLink = async () => {
+    if (!mint) return;
+    const url = `${window.location.origin}${window.location.pathname}?mint=${encodeURIComponent(mint)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Link copied", {
+        description: "Share this link to open this token in Trade",
+      });
+    } catch {
+      toast.error("Could not copy link");
+    }
   };
 
   const formatCurrency = (value: number | undefined) => {
@@ -380,6 +399,7 @@ export function Trade() {
             onSelect={(selectedToken) => {
               setToken(selectedToken);
               setMint(selectedToken.mint);
+              setSearchParams({ mint: selectedToken.mint }, { replace: true });
             }}
             placeholder="Search or paste token address..."
           />
@@ -449,26 +469,37 @@ export function Trade() {
                     </div>
                   </div>
                 </div>
-                {/* Refresh Button */}
-                <button
-                  onClick={handleRefresh}
-                  disabled={refreshCooldown > 0 || loading}
-                  className={`flex items-center justify-center gap-2 px-3 py-2 sm:px-4 rounded-lg text-sm font-medium transition-all shrink-0 ${
-                    refreshCooldown > 0 || loading
-                      ? "bg-white/5 text-white/30 cursor-not-allowed"
-                      : "bg-white/10 hover:bg-white/15 text-white"
-                  }`}
-                  title={
-                    refreshCooldown > 0
-                      ? `Refresh available in ${refreshCooldown}s`
-                      : "Refresh token data"
-                  }
-                >
-                  <RefreshCw
-                    className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
-                  />
-                  {refreshCooldown > 0 ? `${refreshCooldown}s` : "Refresh"}
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleCopyShareLink}
+                    className="flex items-center justify-center gap-2 px-3 py-2 sm:px-4 rounded-lg text-sm font-medium bg-white/10 hover:bg-white/15 text-white transition-all touch-manipulation min-h-[44px] sm:min-h-0"
+                    title="Copy share link"
+                  >
+                    <Copy className="w-4 h-4" />
+                    <span className="hidden sm:inline">Copy link</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRefresh}
+                    disabled={refreshCooldown > 0 || loading}
+                    className={`flex items-center justify-center gap-2 px-3 py-2 sm:px-4 rounded-lg text-sm font-medium transition-all shrink-0 min-h-[44px] sm:min-h-0 ${
+                      refreshCooldown > 0 || loading
+                        ? "bg-white/5 text-white/30 cursor-not-allowed"
+                        : "bg-white/10 hover:bg-white/15 text-white"
+                    }`}
+                    title={
+                      refreshCooldown > 0
+                        ? `Refresh available in ${refreshCooldown}s`
+                        : "Refresh token data"
+                    }
+                  >
+                    <RefreshCw
+                      className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
+                    />
+                    {refreshCooldown > 0 ? `${refreshCooldown}s` : "Refresh"}
+                  </button>
+                </div>
               </div>
 
               {/* Token Stats Grid */}

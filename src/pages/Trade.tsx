@@ -35,9 +35,9 @@ import {
 } from "lucide-react";
 import { shortenAddress } from "@/lib/utils";
 import { toast } from "sonner";
-import { LAMPORTS_PER_SOL } from "@solana/web3.js";
 
-const SOL_MINT = "So11111111111111111111111111111111111111112";
+const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const USDC_DECIMALS = 6;
 
 export function Trade() {
   const location = useLocation();
@@ -63,7 +63,7 @@ export function Trade() {
   const [sellAmount, setSellAmount] = useState("");
   const [loadingBalance, setLoadingBalance] = useState(false);
 
-  const quickAmounts = [0.1, 0.5, 1];
+  const quickAmounts = [10, 50, 100];
   const slippagePresets = [50, 100, 200]; // 0.5%, 1%, 2%
   const REFRESH_COOLDOWN_MS = 15000; // 15 seconds
 
@@ -233,14 +233,14 @@ export function Trade() {
 
     setSwapping(true);
     try {
-      // Get quote
+      // Get quote (buy: USDC -> token)
       const quote = await getSwapQuote(
-        SOL_MINT,
+        USDC_MINT,
         token.mint,
-        Math.floor(amountNum * LAMPORTS_PER_SOL),
+        Math.floor(amountNum * 1e6),
         userProfile.walletAddress,
         slippage,
-        9, // SOL decimals
+        USDC_DECIMALS,
         token.decimals,
       );
 
@@ -284,12 +284,12 @@ export function Trade() {
       const amountRaw = Math.floor(amountNum * Math.pow(10, token.decimals));
       const quote = await getSwapQuote(
         token.mint,
-        SOL_MINT,
+        USDC_MINT,
         amountRaw,
         userProfile.walletAddress,
         slippage,
-        token.decimals, // token decimals
-        9, // SOL decimals
+        token.decimals,
+        USDC_DECIMALS,
       );
 
       setSwapQuote(quote);
@@ -651,7 +651,7 @@ export function Trade() {
             {/* Buy Section */}
             <div className="mb-4 sm:mb-6">
               <label className="block text-sm font-medium mb-2">
-                Buy Amount (SOL)
+                Buy Amount (USDC)
               </label>
               <Input
                 type="number"
@@ -667,7 +667,7 @@ export function Trade() {
                     onClick={() => setAmount(amt.toString())}
                     className="flex-1 min-w-[4rem] h-9 sm:h-8 rounded-[10px] bg-white/5 hover:bg-white/10 text-sm transition-colors"
                   >
-                    {amt} SOL
+                    {amt} USDC
                   </button>
                 ))}
               </div>
@@ -837,7 +837,7 @@ export function Trade() {
                   </div>
                   <div className="font-bold text-sm sm:text-base truncate">
                     {swapDirection === "buy"
-                      ? `${swapQuote.inputAmountUi.toFixed(4)} SOL`
+                      ? `${swapQuote.inputAmountUi.toFixed(2)} USDC`
                       : `${formatTokenAmount(swapQuote.inputAmount, token.decimals)} ${token.symbol}`}
                   </div>
                 </div>
@@ -846,7 +846,7 @@ export function Trade() {
                     {swapQuote.inUsdValue != null
                       ? `~$${swapQuote.inUsdValue.toFixed(2)}`
                       : swapDirection === "buy"
-                        ? `~$${(swapQuote.inputAmountUi * 150).toFixed(2)}`
+                        ? `~$${swapQuote.inputAmountUi.toFixed(2)}`
                         : `~$${((swapQuote.inputAmount / Math.pow(10, token.decimals)) * (token.priceUsd || 0)).toFixed(2)}`}
                   </div>
                 </div>
@@ -864,7 +864,7 @@ export function Trade() {
                   <div className="font-bold text-sm sm:text-base truncate">
                     {swapDirection === "buy"
                       ? `${formatTokenAmount(swapQuote.outputAmount, token.decimals)} ${token.symbol}`
-                      : `${swapQuote.outputAmountUi.toFixed(4)} SOL`}
+                      : `${swapQuote.outputAmountUi.toFixed(2)} USDC`}
                   </div>
                 </div>
                 <div className="text-right shrink-0">
@@ -873,7 +873,7 @@ export function Trade() {
                       ? `~$${swapQuote.outUsdValue.toFixed(2)}`
                       : swapDirection === "buy"
                         ? `~$${((swapQuote.outputAmount / Math.pow(10, token.decimals)) * (token.priceUsd || 0)).toFixed(2)}`
-                        : `~$${(swapQuote.outputAmountUi * 150).toFixed(2)}`}
+                        : `~$${swapQuote.outputAmountUi.toFixed(2)}`}
                   </div>
                 </div>
               </div>

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
-import { ArrowLeft, Sparkles, Shield, Loader2 } from "lucide-react";
+import { ArrowLeft, Sparkles, Loader2 } from "lucide-react";
 import { generateWallet } from "@/lib/wallet";
 import { useAuth } from "@/contexts/AuthContext";
 import { encrypt, generateEncryptionKey } from "@/lib/encryption";
@@ -125,10 +125,8 @@ export function WalletSetup() {
                   duration: 5000,
                 });
 
-                // Navigate to fund page with mnemonic in state (for display only)
                 navigate("/wallet/fund", {
                   state: {
-                    mnemonic: wallet.mnemonic,
                     publicKey: wallet.publicKey,
                     isNewWallet: true,
                   },
@@ -163,29 +161,6 @@ export function WalletSetup() {
               </div>
             </div>
           </Card>
-
-          <Card
-            className="cursor-pointer hover:border-white/20 transition-colors"
-            onClick={() => navigate("/auth/import-wallet")}
-          >
-            <div className="flex items-start gap-4">
-              <div className="w-12 h-12 rounded-[16px] bg-white/5 flex items-center justify-center flex-shrink-0">
-                <Shield className="w-6 h-6 text-white/70" />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-semibold mb-1">Import Existing Wallet</h3>
-                <p className="text-sm text-white/60">
-                  Use your existing wallet's private key or seed phrase
-                </p>
-              </div>
-            </div>
-          </Card>
-        </div>
-
-        <div className="mt-8 p-4 rounded-[16px] bg-[#FFB84D]/10 border border-[#FFB84D]/20">
-          <p className="text-sm text-[#FFB84D]">
-            ⚠️ Never share your private key or seed phrase with anyone.
-          </p>
         </div>
       </div>
     </div>

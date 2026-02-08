@@ -47,7 +47,6 @@ export function ProtectedRoute({
   // Check if we're on a wallet setup page - allow access to these pages
   const isWalletSetupPage =
     location.pathname.startsWith("/auth/wallet-setup") ||
-    location.pathname.startsWith("/auth/import-wallet") ||
     location.pathname.startsWith("/wallet/fund");
 
   // If this is a wallet setup page, allow access without wallet

@@ -56,6 +56,7 @@ interface AuthContextType {
     options?: { uid?: string },
   ) => Promise<void>;
   watchlist: WatchedWallet[];
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -422,6 +423,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const handleDeleteAccount = async () => {
+    if (!user) throw new Error("User not authenticated");
+    try {
+      const token = await user.getIdToken();
+      const base = import.meta.env.VITE_API_BASE_URL || "";
+      const res = await fetch(`${base}/api/account/delete`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { error?: string }).error || res.statusText);
+      }
+      setUser(null);
+      setUserProfile(null);
+      setWatchlist([]);
+      await signOutUser();
+      toast.success("Account deleted");
+    } catch (error: any) {
+      console.error("Delete account error:", error);
+      toast.error(error.message || "Failed to delete account");
+      throw error;
+    }
+  };
+
   const value: AuthContextType = {
     user,
     userProfile,
@@ -437,6 +466,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     addToWatchlist: handleAddToWatchlist,
     removeFromWatchlist: handleRemoveFromWatchlist,
     watchlist,
+    deleteAccount: handleDeleteAccount,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

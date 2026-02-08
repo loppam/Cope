@@ -1,4 +1,4 @@
-import { Home, TrendingUp, Activity, Bell, User } from "lucide-react";
+import { Home, Search, Activity, Bell, User } from "lucide-react";
 import { useNavigate, useLocation } from "react-router";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -11,7 +11,7 @@ export function BottomNav() {
 
   const tabs = [
     { path: "/app/home", icon: Home, label: "Home" },
-    { path: "/app/positions", icon: TrendingUp, label: "Positions" },
+    { path: "/app/scanner", icon: Search, label: "Scanner" },
     { path: "/app/trade", icon: Activity, label: "Trade", primary: true },
     { path: "/app/alerts", icon: Bell, label: "Alerts" },
     { path: "/app/profile", icon: User, label: "Profile" },

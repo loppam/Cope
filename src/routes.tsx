@@ -2,12 +2,11 @@ import { createBrowserRouter } from "react-router";
 import { Splash } from "@/pages/Splash";
 import { ConnectX } from "@/pages/onboarding/ConnectX";
 import { WalletSetup } from "@/pages/onboarding/WalletSetup";
-import { ImportWallet } from "@/pages/onboarding/ImportWallet";
 import { FundWallet } from "@/pages/onboarding/FundWallet";
 import { MainLayout } from "@/layouts/MainLayout";
 import { AppLayout } from "@/layouts/AppLayout";
 import { Home } from "@/pages/Home";
-import { Positions } from "@/pages/Positions";
+import { TokenScanner } from "@/pages/TokenScanner";
 import { Trade } from "@/pages/Trade";
 import { Alerts } from "@/pages/Alerts";
 import { Profile } from "@/pages/Profile";
@@ -42,14 +41,6 @@ export const router = createBrowserRouter([
     ),
   },
   {
-    path: "/auth/import-wallet",
-    element: (
-      <ProtectedRoute>
-        <ImportWallet />
-      </ProtectedRoute>
-    ),
-  },
-  {
     path: "/wallet/fund",
     element: (
       <ProtectedRoute>
@@ -66,7 +57,7 @@ export const router = createBrowserRouter([
     ),
     children: [
       { path: "home", element: <Home /> },
-      { path: "positions", element: <Positions /> },
+      { path: "tscanner", element: <TokenScanner /> },
       { path: "trade", element: <Trade /> },
       { path: "alerts", element: <Alerts /> },
       { path: "profile", element: <Profile /> },

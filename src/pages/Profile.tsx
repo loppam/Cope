@@ -9,14 +9,27 @@ import {
   LogOut,
   ExternalLink,
   Trash2,
-  RefreshCw,
   Bell,
   Globe,
   GlobeLock,
+  Gift,
+  History,
+  Settings,
+  DollarSign,
+  ArrowUpDown,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
 import { shortenAddress } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
-import { getSolBalance } from "@/lib/rpc";
+import { getSolBalance, getTokenAccounts } from "@/lib/rpc";
 import {
   getPushNotificationStatus,
   requestPermissionAndGetPushToken,
@@ -27,16 +40,34 @@ import {
 import { updatePublicWalletStatus } from "@/lib/auth";
 import { syncWebhook } from "@/lib/webhook";
 import { getFollowersCount } from "@/lib/profile";
+import { getWalletPositions } from "@/lib/solanatracker";
 import { toast } from "sonner";
 import type { WatchedWallet } from "@/lib/auth";
 
+const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+
+interface TokenPosition {
+  mint: string;
+  symbol: string;
+  name: string;
+  image?: string;
+  amount: number;
+  value: number;
+}
+
 export function Profile() {
   const navigate = useNavigate();
-  const { user, userProfile, signOut, removeWallet, loading, watchlist } =
+  const { user, userProfile, signOut, removeWallet, deleteAccount, loading, watchlist } =
     useAuth();
   const [isRemovingWallet, setIsRemovingWallet] = useState(false);
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [balance, setBalance] = useState<number>(userProfile?.balance || 0);
+  const [usdcBalance, setUsdcBalance] = useState<number>(0);
   const [isRefreshingBalance, setIsRefreshingBalance] = useState(false);
+  const [openPositions, setOpenPositions] = useState<TokenPosition[]>([]);
+  const [closedPositions, setClosedPositions] = useState<TokenPosition[]>([]);
   const [followersCount, setFollowersCount] = useState<number | null>(null);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [isPublic, setIsPublic] = useState(userProfile?.isPublic !== false);
@@ -59,17 +90,21 @@ export function Profile() {
   const walletAddress = userProfile?.walletAddress || null;
   const walletConnected = userProfile?.walletConnected || false;
 
-  // Fetch real-time balance using RPC
+  // Fetch real-time balance (SOL) and USDC using RPC
   const fetchBalance = async () => {
     if (!walletAddress) return;
 
     setIsRefreshingBalance(true);
     try {
-      const solBalance = await getSolBalance(walletAddress);
-      setBalance(solBalance);
+      const [solBal, tokenAccounts] = await Promise.all([
+        getSolBalance(walletAddress),
+        getTokenAccounts(walletAddress),
+      ]);
+      setBalance(solBal);
+      const usdcAccount = tokenAccounts.find((a) => a.mint === USDC_MINT);
+      setUsdcBalance(usdcAccount?.uiAmount ?? 0);
     } catch (error) {
       console.error("Error fetching balance:", error);
-      // Keep the stored balance if RPC fails
     } finally {
       setIsRefreshingBalance(false);
     }
@@ -81,7 +116,41 @@ export function Profile() {
       fetchBalance();
     } else {
       setBalance(0);
+      setUsdcBalance(0);
     }
+  }, [walletAddress]);
+
+  // Fetch open token positions (exclude SOL and USDC)
+  useEffect(() => {
+    if (!walletAddress) {
+      setOpenPositions([]);
+      setClosedPositions([]);
+      return;
+    }
+    getWalletPositions(walletAddress, false)
+      .then((res) => {
+        const tokens: TokenPosition[] = [];
+        for (const t of res.tokens) {
+          const mint = t.token.mint;
+          if (mint === SOL_MINT || mint === USDC_MINT) continue;
+          const value = t.value || 0;
+          if (value <= 0) continue;
+          tokens.push({
+            mint,
+            symbol: t.token.symbol || mint.slice(0, 8),
+            name: t.token.name || "Unknown",
+            image: t.token.image,
+            amount: t.balance ?? 0,
+            value,
+          });
+        }
+        setOpenPositions(tokens);
+        setClosedPositions([]); // TODO: closed positions from history when available
+      })
+      .catch(() => {
+        setOpenPositions([]);
+        setClosedPositions([]);
+      });
   }, [walletAddress]);
 
   // Fetch stats
@@ -210,8 +279,24 @@ export function Profile() {
       initial="initial"
       animate="animate"
     >
-      <motion.div className="mb-6" variants={item}>
+      <motion.div className="mb-6 flex items-center justify-between" variants={item}>
         <h1 className="text-2xl font-bold">Profile</h1>
+        <div className="flex items-center gap-2">
+          <button className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white" aria-label="Gift">
+            <Gift className="w-5 h-5" />
+          </button>
+          <button
+            onClick={fetchBalance}
+            disabled={isRefreshingBalance}
+            className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white disabled:opacity-50"
+            aria-label="Refresh"
+          >
+            <History className={`w-5 h-5 ${isRefreshingBalance ? "animate-spin" : ""}`} />
+          </button>
+          <button className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white" aria-label="Settings">
+            <Settings className="w-5 h-5" />
+          </button>
+        </div>
       </motion.div>
 
       {/* User + Stats merged card */}
@@ -244,16 +329,14 @@ export function Profile() {
                       <Twitter className="w-4 h-4" />
                       <span>Connected</span>
                     </div>
+                          <button className="text-sm text-accent-primary hover:underline mt-0.5">
+                      + Add a bio
+                    </button>
                     {walletConnected && walletAddress && (
-                      <div className="flex items-center gap-2 mt-2 min-w-0 overflow-hidden">
+                      <div className="flex items-center gap-2 mt-1 min-w-0 overflow-hidden">
                         <code className="text-xs font-mono text-white/50 truncate">
                           {shortenAddress(walletAddress)}
                         </code>
-                        {balance > 0 && (
-                          <span className="text-xs text-white/60 flex-shrink-0">
-                            · {balance.toFixed(4)} SOL
-                          </span>
-                        )}
                       </div>
                     )}
                   </div>
@@ -309,37 +392,119 @@ export function Profile() {
                 </div>
               </div>
 
-              {/* Wallet + balance - when connected */}
+              {/* Cash balance + performance placeholder - when connected */}
               {walletConnected && walletAddress && (
-                <div className="mt-4 pt-4 border-t border-white/6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 min-w-0">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-sm text-white/60 flex-shrink-0">
-                      Balance
-                    </span>
-                    <span className="font-medium truncate">
-                      {balance.toFixed(4)} SOL
-                    </span>
-                    <button
-                      onClick={fetchBalance}
-                      disabled={isRefreshingBalance}
-                      className="p-1 hover:bg-white/10 rounded transition-colors disabled:opacity-50"
-                      title="Refresh balance"
-                    >
-                      <RefreshCw
-                        className={`w-3.5 h-3.5 text-white/50 ${isRefreshingBalance ? "animate-spin" : ""}`}
-                      />
-                    </button>
+                <>
+                  <div className="mt-4 pt-4 border-t border-white/10">
+                    <p className="text-2xl sm:text-3xl font-bold">
+                      ${usdcBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                    <p className="text-sm text-[#12d585] mt-0.5">+$0.00 24h</p>
+                    <div className="flex gap-2 mt-2 text-xs text-white/60">
+                      {["24h", "7d", "30d", "All"].map((label) => (
+                        <button
+                          key={label}
+                          className={`px-2 py-1 rounded ${label === "24h" ? "bg-white/10 text-white" : "hover:bg-white/5"}`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="h-24 mt-3 rounded-lg bg-white/5 flex items-center justify-center">
+                      <span className="text-white/40 text-sm">Chart</span>
+                    </div>
                   </div>
-                  <a
-                    href={`https://solscan.io/account/${walletAddress}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-accent-primary hover:text-accent-hover flex items-center gap-1"
-                  >
-                    View on Explorer
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                </div>
+                  <div className="mt-4 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center">
+                        <DollarSign className="w-4 h-4 text-white/70" />
+                      </div>
+                      <div>
+                        <p className="text-sm text-white/60">Cash balance</p>
+                        <p className="font-semibold">
+                          ${usdcBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => navigate("/wallet/fund")}
+                        className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center text-lg font-medium"
+                      >
+                        +
+                      </button>
+                      <button className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center text-white/70">
+                        …
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-white/10">
+                    <p className="text-sm font-medium mb-2">Open positions</p>
+                    {openPositions.length === 0 ? (
+                      <p className="text-sm text-white/50">No open positions</p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {openPositions.map((pos) => (
+                          <li
+                            key={pos.mint}
+                            className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5"
+                            role="button"
+                            onClick={() => navigate(`/token/${pos.mint}`)}
+                          >
+                            {pos.image ? (
+                              <img src={pos.image} alt="" className="w-8 h-8 rounded-full object-cover" />
+                            ) : (
+                              <div className="w-8 h-8 rounded-full bg-white/10" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium truncate">{pos.symbol}</p>
+                              <p className="text-xs text-white/50">${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2 })}</p>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-white/10">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-sm font-medium">Closed positions</p>
+                      <button className="flex items-center gap-1 text-xs text-white/50 hover:text-white/70">
+                        Sort by <ArrowUpDown className="w-3 h-3" /> Recent
+                      </button>
+                    </div>
+                    {closedPositions.length === 0 ? (
+                      <p className="text-sm text-white/50">No closed positions</p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {closedPositions.map((pos) => (
+                          <li key={pos.mint} className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5">
+                            {pos.image ? (
+                              <img src={pos.image} alt="" className="w-8 h-8 rounded-full object-cover" />
+                            ) : (
+                              <div className="w-8 h-8 rounded-full bg-white/10" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium truncate">{pos.symbol}</p>
+                              <p className="text-xs text-white/50">Closed</p>
+                            </div>
+                            <p className="text-sm text-[#12d585]">+${pos.value.toFixed(2)}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div className="mt-2 flex justify-end">
+                    <a
+                      href={`https://solscan.io/account/${walletAddress}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-accent-primary hover:text-accent-hover flex items-center gap-1"
+                    >
+                      View on Explorer
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                </>
               )}
 
               {!walletConnected && (
@@ -540,10 +705,62 @@ export function Profile() {
                   </div>
                 </button>
               )}
+
+              <button
+                onClick={() => setShowDeleteConfirmModal(true)}
+                className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-[#FF4757]/10 active:bg-[#FF4757]/15 transition-colors text-left group min-h-[48px]"
+              >
+                <div className="w-9 h-9 rounded-lg bg-[#FF4757]/10 flex items-center justify-center flex-shrink-0">
+                  <Trash2 className="w-4 h-4 text-[#FF4757]" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm sm:text-base text-[#FF4757]">
+                    Delete account
+                  </p>
+                  <p className="text-xs text-white/60 line-clamp-2 sm:line-clamp-none">
+                    Permanently delete your account and all data
+                  </p>
+                </div>
+              </button>
             </div>
           </div>
         </Card>
       </motion.div>
+
+      {/* Delete account confirmation modal - double verification */}
+      <AlertDialog open={showDeleteConfirmModal} onOpenChange={setShowDeleteConfirmModal}>
+        <AlertDialogContent className="bg-[#0f0f0f] border-white/10 text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete account?</AlertDialogTitle>
+            <AlertDialogDescription className="text-white/70">
+              This will permanently delete your account and all data from our platform. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-white/10 border-white/10 text-white hover:bg-white/15">
+              Cancel
+            </AlertDialogCancel>
+            <button
+              onClick={async () => {
+                setIsDeletingAccount(true);
+                try {
+                  await deleteAccount();
+                  setShowDeleteConfirmModal(false);
+                  navigate("/");
+                } catch {
+                  // toast already shown by deleteAccount
+                } finally {
+                  setIsDeletingAccount(false);
+                }
+              }}
+              disabled={isDeletingAccount}
+              className="bg-[#FF4757] hover:bg-[#FF4757]/90 text-white px-4 py-2 rounded-lg font-medium disabled:opacity-50"
+            >
+              {isDeletingAccount ? "Deleting…" : "Delete my account"}
+            </button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Disconnect */}
       <motion.div variants={item}>

@@ -11,7 +11,7 @@ export function BottomNav() {
 
   const tabs = [
     { path: "/app/home", icon: Home, label: "Home" },
-    { path: "/app/scanner", icon: Search, label: "Scanner" },
+    { path: "/app/tscanner", icon: Search, label: "Scanner" },
     { path: "/app/trade", icon: Activity, label: "Trade", primary: true },
     { path: "/app/alerts", icon: Bell, label: "Alerts" },
     { path: "/app/profile", icon: User, label: "Profile" },

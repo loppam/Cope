@@ -5,19 +5,22 @@ import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import {
   Twitter,
-  Wallet,
   LogOut,
   ExternalLink,
   Trash2,
   Bell,
   Globe,
   GlobeLock,
-  Gift,
-  History,
   Settings,
   DollarSign,
   ArrowUpDown,
 } from "lucide-react";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -29,7 +32,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { shortenAddress } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
-import { getSolBalance, getTokenAccounts } from "@/lib/rpc";
+import { getTokenAccounts } from "@/lib/rpc";
 import {
   getPushNotificationStatus,
   requestPermissionAndGetPushToken,
@@ -63,9 +66,7 @@ export function Profile() {
   const [isRemovingWallet, setIsRemovingWallet] = useState(false);
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
-  const [balance, setBalance] = useState<number>(userProfile?.balance || 0);
   const [usdcBalance, setUsdcBalance] = useState<number>(0);
-  const [isRefreshingBalance, setIsRefreshingBalance] = useState(false);
   const [openPositions, setOpenPositions] = useState<TokenPosition[]>([]);
   const [closedPositions, setClosedPositions] = useState<TokenPosition[]>([]);
   const [followersCount, setFollowersCount] = useState<number | null>(null);
@@ -73,6 +74,7 @@ export function Profile() {
   const [isPublic, setIsPublic] = useState(userProfile?.isPublic !== false);
   const [isTogglingPublic, setIsTogglingPublic] = useState(false);
   const [isTogglingPush, setIsTogglingPush] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const following = watchlist.filter(
     (w): w is WatchedWallet & { uid: string } =>
       w.onPlatform === true && !!w.uid,
@@ -93,20 +95,12 @@ export function Profile() {
   // Fetch real-time balance (SOL) and USDC using RPC
   const fetchBalance = async () => {
     if (!walletAddress) return;
-
-    setIsRefreshingBalance(true);
     try {
-      const [solBal, tokenAccounts] = await Promise.all([
-        getSolBalance(walletAddress),
-        getTokenAccounts(walletAddress),
-      ]);
-      setBalance(solBal);
+      const tokenAccounts = await getTokenAccounts(walletAddress);
       const usdcAccount = tokenAccounts.find((a) => a.mint === USDC_MINT);
       setUsdcBalance(usdcAccount?.uiAmount ?? 0);
     } catch (error) {
       console.error("Error fetching balance:", error);
-    } finally {
-      setIsRefreshingBalance(false);
     }
   };
 
@@ -115,7 +109,6 @@ export function Profile() {
     if (walletAddress) {
       fetchBalance();
     } else {
-      setBalance(0);
       setUsdcBalance(0);
     }
   }, [walletAddress]);
@@ -281,22 +274,13 @@ export function Profile() {
     >
       <motion.div className="mb-6 flex items-center justify-between" variants={item}>
         <h1 className="text-2xl font-bold">Profile</h1>
-        <div className="flex items-center gap-2">
-          <button className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white" aria-label="Gift">
-            <Gift className="w-5 h-5" />
-          </button>
-          <button
-            onClick={fetchBalance}
-            disabled={isRefreshingBalance}
-            className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white disabled:opacity-50"
-            aria-label="Refresh"
-          >
-            <History className={`w-5 h-5 ${isRefreshingBalance ? "animate-spin" : ""}`} />
-          </button>
-          <button className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white" aria-label="Settings">
-            <Settings className="w-5 h-5" />
-          </button>
-        </div>
+        <button
+          onClick={() => setSettingsOpen(true)}
+          className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white"
+          aria-label="Settings"
+        >
+          <Settings className="w-5 h-5" />
+        </button>
       </motion.div>
 
       {/* User + Stats merged card */}
@@ -399,20 +383,6 @@ export function Profile() {
                     <p className="text-2xl sm:text-3xl font-bold">
                       ${usdcBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
-                    <p className="text-sm text-[#12d585] mt-0.5">+$0.00 24h</p>
-                    <div className="flex gap-2 mt-2 text-xs text-white/60">
-                      {["24h", "7d", "30d", "All"].map((label) => (
-                        <button
-                          key={label}
-                          className={`px-2 py-1 rounded ${label === "24h" ? "bg-white/10 text-white" : "hover:bg-white/5"}`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="h-24 mt-3 rounded-lg bg-white/5 flex items-center justify-center">
-                      <span className="text-white/40 text-sm">Chart</span>
-                    </div>
                   </div>
                   <div className="mt-4 flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -439,7 +409,12 @@ export function Profile() {
                     </div>
                   </div>
                   <div className="mt-4 pt-4 border-t border-white/10">
-                    <p className="text-sm font-medium mb-2">Open positions</p>
+                    <button
+                      onClick={() => navigate("/app/trade")}
+                      className="text-sm font-medium mb-2 block w-full text-left py-2 -mx-2 px-2 rounded-lg min-h-[44px] flex items-center hover:bg-white/5 active:bg-white/10 hover:text-accent-primary transition-colors touch-manipulation"
+                    >
+                      Open positions
+                    </button>
                     {openPositions.length === 0 ? (
                       <p className="text-sm text-white/50">No open positions</p>
                     ) : (
@@ -447,7 +422,7 @@ export function Profile() {
                         {openPositions.map((pos) => (
                           <li
                             key={pos.mint}
-                            className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5"
+                            className="flex items-center gap-3 py-3 px-2 rounded-lg min-h-[44px] hover:bg-white/5 active:bg-white/10 touch-manipulation"
                             role="button"
                             onClick={() => navigate(`/token/${pos.mint}`)}
                           >
@@ -527,205 +502,128 @@ export function Profile() {
         </Card>
       </motion.div>
 
-      {/* Settings */}
-      <motion.div variants={item} className="mb-6">
-        <Card glass className="overflow-hidden">
-          <div className="h-1 bg-gradient-to-r from-accent-purple/40 via-accent-purple/20 to-transparent" />
-          <div className="p-4 sm:p-6">
-            <div className="flex items-center gap-3 mb-4 sm:mb-5">
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-accent-purple/10 flex items-center justify-center flex-shrink-0">
-                <Bell className="w-4 h-4 sm:w-5 sm:h-5 text-accent-purple" />
+      {/* Settings sheet (cog) */}
+      <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <SheetContent side="right" className="bg-[#0f0f0f] border-white/10 text-white w-[90vw] max-w-sm sm:w-full">
+          <SheetHeader>
+            <SheetTitle className="text-white">Settings</SheetTitle>
+          </SheetHeader>
+          <div className="mt-6 space-y-1 overflow-y-auto flex-1 min-h-0 pb-8">
+            {/* Push Notifications Toggle */}
+            <div className="flex items-center justify-between gap-3 py-3 rounded-xl hover:bg-white/5 active:bg-white/10 -mx-2 px-3 transition-colors min-h-[44px] touch-manipulation">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
+                  <Bell className="w-4 h-4 text-white/70" />
+                </div>
+                <div className="min-w-0">
+                  <p className="font-medium text-sm">Push Notifications</p>
+                  <p className="text-xs text-white/60">Get notified about watched wallet trades</p>
+                </div>
               </div>
-              <h3 className="font-semibold text-base sm:text-lg">Settings</h3>
+              <button
+                onClick={handleTogglePush}
+                disabled={isTogglingPush}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  pushEnabled ? "bg-accent-primary" : "bg-white/20"
+                } disabled:opacity-50`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    pushEnabled ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
             </div>
-            <div className="space-y-2 sm:space-y-4">
-              {/* Push Notifications Toggle */}
-              <div className="flex items-center justify-between gap-3 py-3 sm:py-2 rounded-xl hover:bg-white/5 -mx-2 px-3 transition-colors min-h-[44px]">
+
+            {/* Public Wallet Toggle */}
+            {walletAddress && (
+              <div className="flex items-center justify-between gap-3 py-3 rounded-xl hover:bg-white/5 active:bg-white/10 -mx-2 px-3 transition-colors border-t border-white/6 min-h-[44px] touch-manipulation">
                 <div className="flex items-center gap-3 min-w-0 flex-1">
                   <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
-                    <Bell className="w-4 h-4 text-white/70" />
+                    {isPublic ? (
+                      <Globe className="w-4 h-4 text-accent-primary" />
+                    ) : (
+                      <GlobeLock className="w-4 h-4 text-white/70" />
+                    )}
                   </div>
                   <div className="min-w-0">
-                    <p className="font-medium text-sm sm:text-base">
-                      Push Notifications
-                    </p>
-                    <p className="text-xs text-white/60 line-clamp-2 sm:line-clamp-none">
-                      Get notified about watched wallet trades
+                    <p className="font-medium text-sm">Public Wallet</p>
+                    <p className="text-xs text-white/60">
+                      {isPublic ? "Your wallet is visible to others" : "Your wallet is private"}
                     </p>
                   </div>
                 </div>
                 <button
-                  onClick={handleTogglePush}
-                  disabled={isTogglingPush}
+                  onClick={handleTogglePublic}
+                  disabled={isTogglingPublic}
                   className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    pushEnabled ? "bg-accent-primary" : "bg-white/20"
+                    isPublic ? "bg-accent-primary" : "bg-white/20"
                   } disabled:opacity-50`}
                 >
                   <span
                     className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      pushEnabled ? "translate-x-6" : "translate-x-1"
+                      isPublic ? "translate-x-6" : "translate-x-1"
                     }`}
                   />
                 </button>
               </div>
+            )}
 
-              {/* Public Wallet Toggle */}
-              {walletAddress && (
-                <div className="flex items-center justify-between gap-3 py-3 sm:py-2 rounded-xl hover:bg-white/5 -mx-2 px-3 transition-colors border-t border-white/6 min-h-[44px]">
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
-                      {isPublic ? (
-                        <Globe className="w-4 h-4 text-accent-primary" />
-                      ) : (
-                        <GlobeLock className="w-4 h-4 text-white/70" />
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-medium text-sm sm:text-base">
-                        Public Wallet
-                      </p>
-                      <p className="text-xs text-white/60 line-clamp-2 sm:line-clamp-none">
-                        {isPublic
-                          ? "Your wallet is visible to others"
-                          : "Your wallet is private"}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={handleTogglePublic}
-                    disabled={isTogglingPublic}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      isPublic ? "bg-accent-primary" : "bg-white/20"
-                    } disabled:opacity-50`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        isPublic ? "translate-x-6" : "translate-x-1"
-                      }`}
-                    />
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </Card>
-      </motion.div>
-
-      {/* Quick Actions */}
-      <motion.div variants={item} className="mb-6">
-        <Card glass className="overflow-hidden">
-          <div className="h-1 bg-gradient-to-r from-[#12d585]/30 via-[#08b16b]/20 to-transparent" />
-          <div className="p-4 sm:p-6">
-            <div className="flex items-center gap-3 mb-3 sm:mb-4">
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-accent-primary/10 flex items-center justify-center flex-shrink-0">
-                <Wallet className="w-4 h-4 sm:w-5 sm:h-5 text-accent-primary" />
-              </div>
-              <h3 className="font-semibold text-base sm:text-lg">
-                Quick Actions
-              </h3>
-            </div>
-            <div className="space-y-1 sm:space-y-2">
-              {walletAddress && (
-                <button
-                  onClick={() => navigate("/wallet/fund")}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 active:bg-white/10 transition-colors text-left group min-h-[48px]"
-                >
-                  <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center group-hover:bg-accent-primary/10 transition-colors flex-shrink-0">
-                    <Wallet className="w-4 h-4 text-white/70" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm sm:text-base">
-                      Fund Wallet
-                    </p>
-                    <p className="text-xs text-white/60 truncate">
-                      Add SOL to your wallet
-                    </p>
-                  </div>
-                  <ExternalLink className="w-4 h-4 text-white/40 group-hover:text-accent-primary transition-colors" />
-                </button>
-              )}
-
-              {walletAddress && (
-                <button
-                  onClick={() =>
-                    window.open(
-                      `https://solscan.io/account/${walletAddress}`,
-                      "_blank",
-                    )
-                  }
-                  className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 active:bg-white/10 transition-colors text-left group min-h-[48px]"
-                >
-                  <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center group-hover:bg-accent-primary/10 transition-colors flex-shrink-0">
-                    <ExternalLink className="w-4 h-4 text-white/70" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm sm:text-base">
-                      View on Explorer
-                    </p>
-                    <p className="text-xs text-white/60 truncate">
-                      Open Solscan
-                    </p>
-                  </div>
-                  <ExternalLink className="w-4 h-4 text-white/40 group-hover:text-accent-primary transition-colors" />
-                </button>
-              )}
-
-              {walletAddress && (
-                <button
-                  onClick={async () => {
-                    if (
-                      !confirm(
-                        "Are you sure you want to remove your wallet? You will need to set it up again.",
-                      )
-                    ) {
-                      return;
-                    }
-                    setIsRemovingWallet(true);
-                    try {
-                      await removeWallet();
-                      navigate("/auth/wallet-setup");
-                    } catch (error) {
-                      console.error("Remove wallet error:", error);
-                    } finally {
-                      setIsRemovingWallet(false);
-                    }
-                  }}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-[#FF4757]/10 active:bg-[#FF4757]/15 transition-colors text-left group min-h-[48px]"
-                >
-                  <div className="w-9 h-9 rounded-lg bg-[#FF4757]/10 flex items-center justify-center flex-shrink-0">
-                    <Trash2 className="w-4 h-4 text-[#FF4757]" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm sm:text-base text-[#FF4757]">
-                      {isRemovingWallet ? "Removing..." : "Remove Wallet"}
-                    </p>
-                    <p className="text-xs text-white/60 line-clamp-2 sm:line-clamp-none">
-                      Disconnect and delete wallet from account
-                    </p>
-                  </div>
-                </button>
-              )}
-
+            {/* Remove Wallet */}
+            {walletAddress && (
               <button
-                onClick={() => setShowDeleteConfirmModal(true)}
-                className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-[#FF4757]/10 active:bg-[#FF4757]/15 transition-colors text-left group min-h-[48px]"
+                onClick={async () => {
+                  if (
+                    !confirm(
+                      "Are you sure you want to remove your wallet? You will need to set it up again.",
+                    )
+                  ) {
+                    return;
+                  }
+                  setIsRemovingWallet(true);
+                  try {
+                    await removeWallet();
+                    setSettingsOpen(false);
+                    navigate("/auth/wallet-setup");
+                  } catch (error) {
+                    console.error("Remove wallet error:", error);
+                  } finally {
+                    setIsRemovingWallet(false);
+                  }
+                }}
+                className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-[#FF4757]/10 active:bg-[#FF4757]/15 transition-colors text-left group min-h-[48px] mt-2"
               >
                 <div className="w-9 h-9 rounded-lg bg-[#FF4757]/10 flex items-center justify-center flex-shrink-0">
                   <Trash2 className="w-4 h-4 text-[#FF4757]" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm sm:text-base text-[#FF4757]">
-                    Delete account
+                  <p className="font-medium text-sm text-[#FF4757]">
+                    {isRemovingWallet ? "Removing..." : "Remove Wallet"}
                   </p>
-                  <p className="text-xs text-white/60 line-clamp-2 sm:line-clamp-none">
-                    Permanently delete your account and all data
-                  </p>
+                  <p className="text-xs text-white/60">Disconnect and delete wallet from account</p>
                 </div>
               </button>
-            </div>
+            )}
+
+            {/* Delete account */}
+            <button
+              onClick={() => {
+                setSettingsOpen(false);
+                setShowDeleteConfirmModal(true);
+              }}
+              className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-[#FF4757]/10 active:bg-[#FF4757]/15 transition-colors text-left group min-h-[48px]"
+            >
+              <div className="w-9 h-9 rounded-lg bg-[#FF4757]/10 flex items-center justify-center flex-shrink-0">
+                <Trash2 className="w-4 h-4 text-[#FF4757]" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-sm text-[#FF4757]">Delete account</p>
+                <p className="text-xs text-white/60">Permanently delete your account and all data</p>
+              </div>
+            </button>
           </div>
-        </Card>
-      </motion.div>
+        </SheetContent>
+      </Sheet>
 
       {/* Delete account confirmation modal - double verification */}
       <AlertDialog open={showDeleteConfirmModal} onOpenChange={setShowDeleteConfirmModal}>

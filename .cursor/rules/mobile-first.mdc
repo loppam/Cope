@@ -1,0 +1,12 @@
+---
+description: Mobile-first design and responsiveness for the app
+alwaysApply: true
+---
+
+# Mobile-first design
+
+- **Primary target**: This app is designed for **mobile first**. All layouts and components must work well on small screens (320px–430px width) and scale up for larger viewports.
+- **Touch targets**: Interactive elements (buttons, links, list rows, toggles) must have a minimum touch target of **44×44px** (use `min-h-[44px]`, `min-w-[44px]`, or padding that achieves this) so they are easy to tap.
+- **Spacing**: Use consistent, comfortable spacing on mobile (`p-4`, `gap-3`, `space-y-4`). Avoid cramped tap areas or text that runs into edges; use `min-w-0` and `truncate` where needed to prevent overflow.
+- **Sheets/overlays**: On mobile, side sheets (e.g. settings) should use most of the viewport width (e.g. `w-[90vw]` or `max-w-[100%]` on small screens) and `max-w-sm` or similar on larger screens. Ensure content scrolls when needed (`overflow-y-auto`, `flex-1 min-h-0`).
+- **Testing**: When changing UI, consider narrow viewport (375px) and very small (320px). Use responsive utilities: `sm:`, `md:` for layout and typography adjustments as viewport grows.

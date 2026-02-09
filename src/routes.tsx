@@ -20,7 +20,7 @@ import { ScannerResults } from "@/pages/scanner/ScannerResults";
 import { ScannerWalletDetail } from "@/pages/scanner/ScannerWalletDetail";
 import { TokenDetail } from "@/pages/TokenDetail";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
-import { PublicRoute } from "@/components/PublicRoute";
+// import { PublicRoute } from "@/components/PublicRoute";
 import { AdminPush } from "@/pages/lopam/AdminPush";
 
 export const router = createBrowserRouter([

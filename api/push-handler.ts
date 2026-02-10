@@ -3,8 +3,8 @@
 //           /api/push/send → /api/push-handler?action=send
 //           /api/push/status → /api/push-handler?action=status
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { createHash } from "crypto";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
-import { pushTokenDocId } from "./lib/tokenHash";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
@@ -48,6 +48,10 @@ const adminDb = getFirestore();
 const adminMessaging = getMessaging();
 
 const PUSH_TOKEN_INDEX = "pushTokenIndex";
+
+function pushTokenDocId(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
 
 async function getUidFromHeader(req: VercelRequest) {
   const authorization = req.headers.authorization;

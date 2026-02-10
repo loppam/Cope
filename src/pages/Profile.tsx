@@ -14,7 +14,11 @@ import {
   Settings,
   DollarSign,
   ArrowUpDown,
+  ArrowLeft,
+  Copy,
 } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+import { getApiBase } from "@/lib/utils";
 import {
   Sheet,
   SheetContent,
@@ -44,9 +48,12 @@ import { updatePublicWalletStatus } from "@/lib/auth";
 import { syncWebhook } from "@/lib/webhook";
 import { getFollowersCount } from "@/lib/profile";
 import { getWalletPositions } from "@/lib/solanatracker";
+import { getIntentStatus } from "@/lib/relay";
 import { toast } from "sonner";
 import type { WatchedWallet } from "@/lib/auth";
 import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
+import { Input } from "@/components/Input";
+import { Loader2 } from "lucide-react";
 
 interface TokenPosition {
   mint: string;
@@ -73,6 +80,18 @@ export function Profile() {
   const [isTogglingPublic, setIsTogglingPublic] = useState(false);
   const [isTogglingPush, setIsTogglingPush] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [depositSheetOpen, setDepositSheetOpen] = useState(false);
+  const [depositStep, setDepositStep] = useState<"chain" | "detail">("chain");
+  const [selectedDepositChain, setSelectedDepositChain] = useState<"solana" | "base" | "bnb">("solana");
+  const [evmAddress, setEvmAddress] = useState<string | null>(null);
+  const [withdrawSheetOpen, setWithdrawSheetOpen] = useState(false);
+  const [withdrawNetwork, setWithdrawNetwork] = useState<"solana" | "base" | "bnb">("solana");
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [withdrawDestination, setWithdrawDestination] = useState("");
+  const [withdrawQuote, setWithdrawQuote] = useState<unknown>(null);
+  const [withdrawQuoteLoading, setWithdrawQuoteLoading] = useState(false);
+  const [withdrawExecuting, setWithdrawExecuting] = useState(false);
+  const [withdrawRequestId, setWithdrawRequestId] = useState<string | null>(null);
   const following = watchlist.filter(
     (w): w is WatchedWallet & { uid: string } =>
       w.onPlatform === true && !!w.uid,
@@ -158,6 +177,141 @@ export function Profile() {
       });
     }
   }, [user]);
+
+  // Load evmAddress from user collection (or API) for deposit/withdraw when needed
+  useEffect(() => {
+    if (!user || (selectedDepositChain !== "base" && selectedDepositChain !== "bnb" && withdrawNetwork !== "base" && withdrawNetwork !== "bnb")) {
+      return;
+    }
+    if (userProfile?.evmAddress) {
+      setEvmAddress(userProfile.evmAddress);
+      return;
+    }
+    let cancelled = false;
+    user.getIdToken().then((token) => {
+      const base = getApiBase();
+      return fetch(`${base}/api/relay/evm-address`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    }).then((res) => res.json()).then((data) => {
+      if (!cancelled && data.evmAddress) setEvmAddress(data.evmAddress);
+      else if (!cancelled) setEvmAddress(null);
+    }).catch(() => {
+      if (!cancelled) setEvmAddress(null);
+    });
+    return () => { cancelled = true; };
+  }, [user, userProfile?.evmAddress, selectedDepositChain, withdrawNetwork]);
+
+  // Prefill withdraw destination with evmAddress when it loads and Base/BNB is selected
+  useEffect(() => {
+    if (
+      withdrawSheetOpen &&
+      (withdrawNetwork === "base" || withdrawNetwork === "bnb") &&
+      evmAddress &&
+      !withdrawDestination.trim()
+    ) {
+      setWithdrawDestination(evmAddress);
+    }
+  }, [withdrawSheetOpen, withdrawNetwork, evmAddress, withdrawDestination]);
+
+  const copyAddress = (value: string) => {
+    navigator.clipboard.writeText(value);
+    toast.success("Address copied!");
+  };
+
+  const fetchWithdrawQuote = async () => {
+    if (!user || !walletAddress) return;
+    const num = parseFloat(withdrawAmount);
+    if (!Number.isFinite(num) || num <= 0 || num > usdcBalance) {
+      toast.error("Enter a valid amount");
+      return;
+    }
+    const dest = withdrawDestination.trim();
+    if (!dest || dest.length < 20) {
+      toast.error("Enter a valid destination address");
+      return;
+    }
+    setWithdrawQuoteLoading(true);
+    setWithdrawQuote(null);
+    setWithdrawRequestId(null);
+    try {
+      const token = await user.getIdToken();
+      const base = getApiBase();
+      const res = await fetch(`${base}/api/relay/withdraw-quote`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          destinationNetwork: withdrawNetwork,
+          amount: num,
+          destinationAddress: dest,
+          originAddress: walletAddress,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to get quote");
+      setWithdrawQuote(data);
+      const firstStep = data?.steps?.[0];
+      if (firstStep?.requestId) setWithdrawRequestId(firstStep.requestId);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to get quote");
+    } finally {
+      setWithdrawQuoteLoading(false);
+    }
+  };
+
+  const executeWithdraw = async () => {
+    if (!user || !withdrawQuote) return;
+    setWithdrawExecuting(true);
+    try {
+      const token = await user.getIdToken();
+      const base = getApiBase();
+      const res = await fetch(`${base}/api/relay/execute-step`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          quoteResponse: withdrawQuote,
+          stepIndex: 0,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Execution failed");
+      if (data.signature) {
+        toast.success("Withdraw submitted", {
+          description: "Transaction sent. Relay will complete the transfer.",
+        });
+        setWithdrawQuote(null);
+        setWithdrawAmount("");
+        const amt = parseFloat(withdrawAmount);
+        if (Number.isFinite(amt)) setUsdcBalance((prev) => Math.max(0, prev - amt));
+        if (withdrawRequestId) {
+          let attempts = 0;
+          const interval = setInterval(async () => {
+            attempts++;
+            try {
+              const status = await getIntentStatus(withdrawRequestId);
+              if (status?.status === "filled" || status?.status === "complete") {
+                clearInterval(interval);
+                toast.success("Withdraw complete");
+              }
+            } catch {
+              // ignore
+            }
+            if (attempts >= 30) clearInterval(interval);
+          }, 2000);
+        }
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Withdraw failed");
+    } finally {
+      setWithdrawExecuting(false);
+    }
+  };
 
   const handleTogglePublic = async () => {
     if (!user) return;
@@ -396,14 +550,23 @@ export function Profile() {
                     </div>
                     <div className="flex items-center gap-1">
                       <button
-                        onClick={() => navigate("/wallet/fund")}
+                        onClick={() => {
+                          setDepositStep("chain");
+                          setDepositSheetOpen(true);
+                        }}
                         className="w-9 h-9 min-w-[44px] min-h-[44px] rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center text-lg font-medium touch-manipulation"
                         aria-label="Deposit"
                       >
                         +
                       </button>
                       <button
-                        onClick={() => navigate("/wallet/withdraw")}
+                        onClick={() => {
+                          setWithdrawNetwork("solana");
+                          setWithdrawAmount("");
+                          setWithdrawDestination("");
+                          setWithdrawQuote(null);
+                          setWithdrawSheetOpen(true);
+                        }}
                         className="w-9 h-9 min-w-[44px] min-h-[44px] rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center text-white/70 touch-manipulation"
                         aria-label="Withdraw"
                       >
@@ -505,13 +668,282 @@ export function Profile() {
         </Card>
       </motion.div>
 
-      {/* Settings sheet (cog) */}
+      {/* Deposit sheet - from bottom: chain picker then deposit detail */}
+      <Sheet
+        open={depositSheetOpen}
+        onOpenChange={(open) => {
+          setDepositSheetOpen(open);
+          if (!open) setDepositStep("chain");
+        }}
+      >
+        <SheetContent
+          side="bottom"
+          className="bg-[#0f0f0f] border-white/10 text-white w-full max-w-[100%] sm:max-w-md mx-auto rounded-t-2xl overflow-hidden flex flex-col"
+          style={{ paddingBottom: "calc(1rem + var(--safe-area-inset-bottom, 0px))" }}
+        >
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/30" aria-hidden />
+          {depositStep === "chain" ? (
+            <>
+              <SheetHeader>
+                <SheetTitle className="text-white">Deposit crypto</SheetTitle>
+              </SheetHeader>
+              <p className="text-sm text-white/60 px-4 -mt-2">Choose a chain to deposit from.</p>
+              <div className="p-4 space-y-3 flex-1 overflow-y-auto">
+                {(
+                  [
+                    { id: "solana" as const, label: "Solana" },
+                    { id: "base" as const, label: "Base" },
+                    { id: "bnb" as const, label: "BNB Chain" },
+                  ] as const
+                ).map(({ id, label }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedDepositChain(id);
+                      setDepositStep("detail");
+                    }}
+                    className="w-full min-h-[44px] rounded-[12px] border border-white/20 bg-white/5 hover:bg-white/10 flex items-center justify-between px-4 py-3 touch-manipulation text-left"
+                  >
+                    <span className="font-medium">{label}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-3 p-4 border-b border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setDepositStep("chain")}
+                  className="p-2 -ml-2 rounded-full hover:bg-white/10 min-w-[44px] min-h-[44px] flex items-center justify-center touch-manipulation"
+                  aria-label="Back"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+                <h2 className="text-lg font-semibold flex-1">Deposit crypto</h2>
+              </div>
+              <div className="p-4 flex-1 overflow-y-auto space-y-4">
+                {selectedDepositChain === "solana" && (
+                  <>
+                    <p className="text-sm text-white/80">Send any token on the Solana network.</p>
+                    <p className="text-sm text-white/60">Deposit USDC to add to your cash balance.</p>
+                  </>
+                )}
+                {(selectedDepositChain === "base" || selectedDepositChain === "bnb") && (
+                  <>
+                    <p className="text-sm text-white/80">
+                      Send any token on the {selectedDepositChain === "base" ? "Base" : "BNB Chain"} network.
+                    </p>
+                    <p className="text-sm text-white/60">Deposit USDC to add to your cash balance.</p>
+                  </>
+                )}
+                {(() => {
+                  const address =
+                    selectedDepositChain === "solana"
+                      ? walletAddress
+                      : selectedDepositChain === "base" || selectedDepositChain === "bnb"
+                        ? evmAddress
+                        : null;
+                  const showQr = !!address;
+                  return (
+                    <>
+                      {showQr ? (
+                        <div className="w-48 h-48 mx-auto bg-white rounded-[16px] flex items-center justify-center p-3">
+                          <QRCodeSVG value={address} size={192} level="H" includeMargin={false} />
+                        </div>
+                      ) : (
+                        <div className="w-48 h-48 mx-auto bg-white/10 rounded-[16px] flex items-center justify-center">
+                          <p className="text-white/40 text-sm">
+                            {selectedDepositChain === "solana" ? "No address" : "Loading address…"}
+                          </p>
+                        </div>
+                      )}
+                      {address && (
+                        <div className="flex items-center gap-2 min-w-0">
+                          <code className="flex-1 px-3 py-2 bg-black/30 rounded-[12px] text-sm font-mono text-white/90 truncate">
+                            {address}
+                          </code>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => copyAddress(address)}
+                            className="min-h-[44px] min-w-[44px] shrink-0"
+                          >
+                            <Copy className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      )}
+                      {address && (
+                        <Button
+                          onClick={() => copyAddress(address)}
+                          className="w-full min-h-[44px] rounded-[12px] bg-white/10 hover:bg-white/15"
+                        >
+                          Copy wallet address
+                        </Button>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {/* Withdraw sheet - from bottom: network then amount + destination (evmAddress from user) */}
+      <Sheet
+        open={withdrawSheetOpen}
+        onOpenChange={(open) => {
+          setWithdrawSheetOpen(open);
+          if (!open) {
+            setWithdrawQuote(null);
+            setWithdrawAmount("");
+            setWithdrawDestination("");
+          }
+        }}
+      >
+        <SheetContent
+          side="bottom"
+          className="bg-[#0f0f0f] border-white/10 text-white w-full max-w-[100%] sm:max-w-md mx-auto rounded-t-2xl overflow-hidden flex flex-col"
+          style={{ paddingBottom: "calc(1rem + var(--safe-area-inset-bottom, 0px))" }}
+        >
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/30" aria-hidden />
+          <div className="flex items-center gap-3 p-4 border-b border-white/10">
+            <button
+              type="button"
+              onClick={() => (!withdrawQuote ? setWithdrawSheetOpen(false) : setWithdrawQuote(null))}
+              className="p-2 -ml-2 rounded-full hover:bg-white/10 min-w-[44px] min-h-[44px] flex items-center justify-center touch-manipulation"
+              aria-label="Back"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <h2 className="text-lg font-semibold flex-1">Withdraw</h2>
+          </div>
+          <div className="p-4 flex-1 overflow-y-auto space-y-4">
+            <p className="text-sm text-white/60">
+              Withdraw USDC to {withdrawNetwork === "solana" ? "Solana" : withdrawNetwork === "base" ? "Base" : "BNB"}. You will receive USDC on the selected network.
+            </p>
+            <div className="flex rounded-[12px] bg-white/5 p-1 gap-1">
+              {(
+                [
+                  { id: "base" as const, label: "Base" },
+                  { id: "bnb" as const, label: "BNB" },
+                  { id: "solana" as const, label: "Solana" },
+                ] as const
+              ).map(({ id, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setWithdrawNetwork(id);
+                    setWithdrawQuote(null);
+                    if (id === "base" || id === "bnb") {
+                      setWithdrawDestination(userProfile?.evmAddress ?? evmAddress ?? "");
+                    } else {
+                      setWithdrawDestination("");
+                    }
+                  }}
+                  className={`flex-1 min-h-[44px] rounded-[10px] text-sm font-medium transition-colors touch-manipulation ${
+                    withdrawNetwork === id ? "bg-accent-primary text-white" : "bg-transparent text-white/70 hover:text-white"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-white/80">Amount (USDC)</label>
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  placeholder="0.00"
+                  value={withdrawAmount}
+                  onChange={(e) => setWithdrawAmount(e.target.value)}
+                  className="flex-1 min-w-0 min-h-[44px]"
+                />
+                <Button
+                  variant="outline"
+                  onClick={() => setWithdrawAmount(usdcBalance.toFixed(2))}
+                  className="min-h-[44px] shrink-0"
+                >
+                  Max
+                </Button>
+              </div>
+              <p className="text-xs text-white/50">Available: {usdcBalance.toFixed(2)} USDC</p>
+            </div>
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-white/80">
+                Destination address ({withdrawNetwork === "solana" ? "Solana" : withdrawNetwork === "base" ? "Base" : "BNB"})
+              </label>
+              <Input
+                type="text"
+                placeholder={withdrawNetwork === "solana" ? "Solana address" : "0x..."}
+                value={withdrawDestination}
+                onChange={(e) => setWithdrawDestination(e.target.value)}
+                className="min-w-0 min-h-[44px]"
+              />
+            </div>
+            {!withdrawQuote ? (
+              <Button
+                onClick={fetchWithdrawQuote}
+                disabled={withdrawQuoteLoading || !withdrawAmount || !withdrawDestination.trim()}
+                className="w-full min-h-[44px]"
+              >
+                {withdrawQuoteLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Getting quote...
+                  </>
+                ) : (
+                  "Get quote"
+                )}
+              </Button>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-white/80">Review and confirm withdraw.</p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="flex-1 min-h-[44px]"
+                    onClick={() => setWithdrawQuote(null)}
+                    disabled={withdrawExecuting}
+                  >
+                    Back
+                  </Button>
+                  <Button
+                    className="flex-1 min-h-[44px]"
+                    onClick={executeWithdraw}
+                    disabled={withdrawExecuting}
+                  >
+                    {withdrawExecuting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Sending...
+                      </>
+                    ) : (
+                      "Confirm"
+                    )}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Settings sheet (cog) - bottom sheet, PWA safe area */}
       <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <SheetContent side="right" className="bg-[#0f0f0f] border-white/10 text-white w-[90vw] max-w-sm sm:w-full">
+        <SheetContent
+          side="bottom"
+          className="bg-[#0f0f0f] border-white/10 text-white w-full max-w-[100%] sm:max-w-md mx-auto rounded-t-2xl overflow-y-auto"
+          style={{ paddingBottom: "calc(1rem + var(--safe-area-inset-bottom, 0px))" }}
+        >
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/30" aria-hidden />
           <SheetHeader>
             <SheetTitle className="text-white">Settings</SheetTitle>
           </SheetHeader>
-          <div className="mt-6 space-y-1 overflow-y-auto flex-1 min-h-0 pb-8">
+          <div className="mt-6 space-y-1 overflow-y-auto flex-1 min-h-0">
             {/* Push Notifications Toggle */}
             <div className="flex items-center justify-between gap-3 py-3 rounded-xl hover:bg-white/5 active:bg-white/10 -mx-2 px-3 transition-colors min-h-[44px] touch-manipulation">
               <div className="flex items-center gap-3 min-w-0 flex-1">

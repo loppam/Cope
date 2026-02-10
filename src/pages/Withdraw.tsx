@@ -24,10 +24,8 @@ export function Withdraw() {
   const [executing, setExecuting] = useState(false);
   const [quote, setQuote] = useState<unknown>(null);
   const [requestId, setRequestId] = useState<string | null>(null);
-  const [evmAddress, setEvmAddress] = useState<string | null>(userProfile?.evmAddress ?? null);
 
   const walletAddress = userProfile?.walletAddress;
-  const evmAddressFromUser = userProfile?.evmAddress ?? null;
 
   useEffect(() => {
     if (!walletAddress) return;
@@ -36,33 +34,6 @@ export function Withdraw() {
       setUsdcBalance(usdc?.uiAmount ?? 0);
     });
   }, [walletAddress]);
-
-  // evmAddress from user collection (or API fallback) for Base/BNB destination prefill
-  useEffect(() => {
-    if (evmAddressFromUser) {
-      setEvmAddress(evmAddressFromUser);
-      return;
-    }
-    if (!user || (network !== "base" && network !== "bnb")) return;
-    let cancelled = false;
-    user.getIdToken().then((token) => {
-      const base = getApiBase();
-      return fetch(`${base}/api/relay/evm-address`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-    }).then((res) => res.json()).then((data) => {
-      if (!cancelled && data.evmAddress) setEvmAddress(data.evmAddress);
-    }).catch(() => { if (!cancelled) setEvmAddress(null); });
-    return () => { cancelled = true; };
-  }, [user, evmAddressFromUser, network]);
-
-  // Prefill destination with evmAddress when it loads and user has Base/BNB selected
-  useEffect(() => {
-    if ((network === "base" || network === "bnb") && evmAddress && !destinationAddress.trim()) {
-      setDestinationAddress(evmAddress);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- only when evmAddress or network changes
-  }, [network, evmAddress]);
 
   const fetchWithdrawQuote = async () => {
     if (!user || !walletAddress) return;
@@ -193,9 +164,6 @@ export function Withdraw() {
               onClick={() => {
                 setNetwork(id);
                 setQuote(null);
-                if (id === "base" || id === "bnb") {
-                  setDestinationAddress(evmAddress ?? "");
-                }
               }}
               className={`flex-1 min-h-[44px] rounded-[10px] text-sm font-medium transition-colors touch-manipulation ${
                 network === id ? "bg-accent-primary text-white" : "bg-transparent text-white/70 hover:text-white"

@@ -85,6 +85,7 @@ export function Profile() {
   const [selectedDepositChain, setSelectedDepositChain] = useState<"solana" | "base" | "bnb">("solana");
   const [evmAddress, setEvmAddress] = useState<string | null>(null);
   const [withdrawSheetOpen, setWithdrawSheetOpen] = useState(false);
+  const [withdrawStep, setWithdrawStep] = useState<"chain" | "form">("chain");
   const [withdrawNetwork, setWithdrawNetwork] = useState<"solana" | "base" | "bnb">("solana");
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [withdrawDestination, setWithdrawDestination] = useState("");
@@ -201,18 +202,6 @@ export function Profile() {
     });
     return () => { cancelled = true; };
   }, [user, userProfile?.evmAddress, selectedDepositChain, withdrawNetwork]);
-
-  // Prefill withdraw destination with evmAddress when it loads and Base/BNB is selected
-  useEffect(() => {
-    if (
-      withdrawSheetOpen &&
-      (withdrawNetwork === "base" || withdrawNetwork === "bnb") &&
-      evmAddress &&
-      !withdrawDestination.trim()
-    ) {
-      setWithdrawDestination(evmAddress);
-    }
-  }, [withdrawSheetOpen, withdrawNetwork, evmAddress, withdrawDestination]);
 
   const copyAddress = (value: string) => {
     navigator.clipboard.writeText(value);
@@ -561,6 +550,7 @@ export function Profile() {
                       </button>
                       <button
                         onClick={() => {
+                          setWithdrawStep("chain");
                           setWithdrawNetwork("solana");
                           setWithdrawAmount("");
                           setWithdrawDestination("");
@@ -678,16 +668,17 @@ export function Profile() {
       >
         <SheetContent
           side="bottom"
-          className="bg-[#0f0f0f] border-white/10 text-white w-full max-w-[100%] sm:max-w-md mx-auto rounded-t-2xl overflow-hidden flex flex-col"
+          className="bg-white/[0.06] backdrop-blur-xl border border-white/10 text-white w-full max-w-[100%] sm:max-w-md mx-auto rounded-t-2xl overflow-hidden flex flex-col shadow-2xl"
           style={{ paddingBottom: "calc(1rem + var(--safe-area-inset-bottom, 0px))" }}
         >
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/30" aria-hidden />
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#12d585]/50 via-[#08b16b]/40 to-transparent rounded-t-2xl" aria-hidden />
+          <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/30" aria-hidden />
           {depositStep === "chain" ? (
             <>
-              <SheetHeader>
-                <SheetTitle className="text-white">Deposit crypto</SheetTitle>
+              <SheetHeader className="text-center pt-2">
+                <SheetTitle className="text-white text-xl">Deposit crypto</SheetTitle>
               </SheetHeader>
-              <p className="text-sm text-white/60 px-4 -mt-2">Choose a chain to deposit from.</p>
+              <p className="text-sm text-white/70 text-center px-4 -mt-1">Choose a chain to deposit from</p>
               <div className="p-4 space-y-3 flex-1 overflow-y-auto">
                 {(
                   [
@@ -703,9 +694,9 @@ export function Profile() {
                       setSelectedDepositChain(id);
                       setDepositStep("detail");
                     }}
-                    className="w-full min-h-[44px] rounded-[12px] border border-white/20 bg-white/5 hover:bg-white/10 flex items-center justify-between px-4 py-3 touch-manipulation text-left"
+                    className="w-full min-h-[44px] rounded-[12px] border border-white/20 bg-white/5 hover:bg-white/10 backdrop-blur-sm flex items-center justify-center px-4 py-3 touch-manipulation font-medium transition-colors hover:border-[#12d585]/30"
                   >
-                    <span className="font-medium">{label}</span>
+                    {label}
                   </button>
                 ))}
               </div>
@@ -721,21 +712,21 @@ export function Profile() {
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </button>
-                <h2 className="text-lg font-semibold flex-1">Deposit crypto</h2>
+                <h2 className="text-lg font-semibold flex-1 text-center pr-10">Deposit crypto</h2>
               </div>
-              <div className="p-4 flex-1 overflow-y-auto space-y-4">
+              <div className="p-4 flex-1 overflow-y-auto space-y-5 text-center">
                 {selectedDepositChain === "solana" && (
                   <>
-                    <p className="text-sm text-white/80">Send any token on the Solana network.</p>
-                    <p className="text-sm text-white/60">Deposit USDC to add to your cash balance.</p>
+                    <p className="text-sm text-white/90">Send any token on the Solana network</p>
+                    <p className="text-sm text-white/60">Deposit USDC to add to your cash balance</p>
                   </>
                 )}
                 {(selectedDepositChain === "base" || selectedDepositChain === "bnb") && (
                   <>
-                    <p className="text-sm text-white/80">
-                      Send any token on the {selectedDepositChain === "base" ? "Base" : "BNB Chain"} network.
+                    <p className="text-sm text-white/90">
+                      Send any token on the {selectedDepositChain === "base" ? "Base" : "BNB Chain"} network
                     </p>
-                    <p className="text-sm text-white/60">Deposit USDC to add to your cash balance.</p>
+                    <p className="text-sm text-white/60">Deposit USDC to add to your cash balance</p>
                   </>
                 )}
                 {(() => {
@@ -749,38 +740,29 @@ export function Profile() {
                   return (
                     <>
                       {showQr ? (
-                        <div className="w-48 h-48 mx-auto bg-white rounded-[16px] flex items-center justify-center p-3">
+                        <div className="w-48 h-48 mx-auto bg-white rounded-2xl flex items-center justify-center p-3 shadow-lg ring-1 ring-white/20">
                           <QRCodeSVG value={address} size={192} level="H" includeMargin={false} />
                         </div>
                       ) : (
-                        <div className="w-48 h-48 mx-auto bg-white/10 rounded-[16px] flex items-center justify-center">
-                          <p className="text-white/40 text-sm">
-                            {selectedDepositChain === "solana" ? "No address" : "Loading address…"}
-                          </p>
+                        <div className="w-48 h-48 mx-auto bg-white/10 rounded-2xl flex items-center justify-center backdrop-blur-sm">
+                          <p className="text-white/40 text-sm">Loading address…</p>
                         </div>
                       )}
                       {address && (
-                        <div className="flex items-center gap-2 min-w-0">
-                          <code className="flex-1 px-3 py-2 bg-black/30 rounded-[12px] text-sm font-mono text-white/90 truncate">
-                            {address}
-                          </code>
+                        <div className="space-y-3 w-full">
+                          <div className="w-full px-1">
+                            <code className="block w-full px-3 py-2.5 bg-black/30 rounded-[12px] text-xs font-mono text-white/90 break-all text-center">
+                              {address}
+                            </code>
+                          </div>
                           <Button
-                            variant="outline"
-                            size="sm"
                             onClick={() => copyAddress(address)}
-                            className="min-h-[44px] min-w-[44px] shrink-0"
+                            className="w-full min-h-[44px] rounded-[12px] bg-gradient-to-r from-[#12d585]/20 to-[#08b16b]/20 border border-[#12d585]/30 hover:from-[#12d585]/30 hover:to-[#08b16b]/30 text-white font-medium"
                           >
-                            <Copy className="w-4 h-4" />
+                            <Copy className="w-4 h-4 mr-2 inline" />
+                            Copy wallet address
                           </Button>
                         </div>
-                      )}
-                      {address && (
-                        <Button
-                          onClick={() => copyAddress(address)}
-                          className="w-full min-h-[44px] rounded-[12px] bg-white/10 hover:bg-white/15"
-                        >
-                          Copy wallet address
-                        </Button>
                       )}
                     </>
                   );
@@ -791,12 +773,13 @@ export function Profile() {
         </SheetContent>
       </Sheet>
 
-      {/* Withdraw sheet - from bottom: network then amount + destination (evmAddress from user) */}
+      {/* Withdraw sheet - from bottom: chain picker then amount + destination (same flow as deposit) */}
       <Sheet
         open={withdrawSheetOpen}
         onOpenChange={(open) => {
           setWithdrawSheetOpen(open);
           if (!open) {
+            setWithdrawStep("chain");
             setWithdrawQuote(null);
             setWithdrawAmount("");
             setWithdrawDestination("");
@@ -805,130 +788,138 @@ export function Profile() {
       >
         <SheetContent
           side="bottom"
-          className="bg-[#0f0f0f] border-white/10 text-white w-full max-w-[100%] sm:max-w-md mx-auto rounded-t-2xl overflow-hidden flex flex-col"
+          className="bg-white/[0.06] backdrop-blur-xl border border-white/10 text-white w-full max-w-[100%] sm:max-w-md mx-auto rounded-t-2xl overflow-hidden flex flex-col shadow-2xl"
           style={{ paddingBottom: "calc(1rem + var(--safe-area-inset-bottom, 0px))" }}
         >
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/30" aria-hidden />
-          <div className="flex items-center gap-3 p-4 border-b border-white/10">
-            <button
-              type="button"
-              onClick={() => (!withdrawQuote ? setWithdrawSheetOpen(false) : setWithdrawQuote(null))}
-              className="p-2 -ml-2 rounded-full hover:bg-white/10 min-w-[44px] min-h-[44px] flex items-center justify-center touch-manipulation"
-              aria-label="Back"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <h2 className="text-lg font-semibold flex-1">Withdraw</h2>
-          </div>
-          <div className="p-4 flex-1 overflow-y-auto space-y-4">
-            <p className="text-sm text-white/60">
-              Withdraw USDC to {withdrawNetwork === "solana" ? "Solana" : withdrawNetwork === "base" ? "Base" : "BNB"}. You will receive USDC on the selected network.
-            </p>
-            <div className="flex rounded-[12px] bg-white/5 p-1 gap-1">
-              {(
-                [
-                  { id: "base" as const, label: "Base" },
-                  { id: "bnb" as const, label: "BNB" },
-                  { id: "solana" as const, label: "Solana" },
-                ] as const
-              ).map(({ id, label }) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => {
-                    setWithdrawNetwork(id);
-                    setWithdrawQuote(null);
-                    if (id === "base" || id === "bnb") {
-                      setWithdrawDestination(userProfile?.evmAddress ?? evmAddress ?? "");
-                    } else {
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#12d585]/50 via-[#08b16b]/40 to-transparent rounded-t-2xl" aria-hidden />
+          <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/30" aria-hidden />
+          {withdrawStep === "chain" ? (
+            <>
+              <SheetHeader className="text-center pt-2">
+                <SheetTitle className="text-white text-xl">Withdraw</SheetTitle>
+              </SheetHeader>
+              <p className="text-sm text-white/70 text-center px-4 -mt-1">Choose a chain to withdraw to</p>
+              <div className="p-4 space-y-3 flex-1 overflow-y-auto">
+                {(
+                  [
+                    { id: "solana" as const, label: "Solana" },
+                    { id: "base" as const, label: "Base" },
+                    { id: "bnb" as const, label: "BNB Chain" },
+                  ] as const
+                ).map(({ id, label }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => {
+                      setWithdrawNetwork(id);
+                      setWithdrawAmount("");
                       setWithdrawDestination("");
-                    }
-                  }}
-                  className={`flex-1 min-h-[44px] rounded-[10px] text-sm font-medium transition-colors touch-manipulation ${
-                    withdrawNetwork === id ? "bg-accent-primary text-white" : "bg-transparent text-white/70 hover:text-white"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-white/80">Amount (USDC)</label>
-              <div className="flex gap-2">
-                <Input
-                  type="number"
-                  placeholder="0.00"
-                  value={withdrawAmount}
-                  onChange={(e) => setWithdrawAmount(e.target.value)}
-                  className="flex-1 min-w-0 min-h-[44px]"
-                />
-                <Button
-                  variant="outline"
-                  onClick={() => setWithdrawAmount(usdcBalance.toFixed(2))}
-                  className="min-h-[44px] shrink-0"
-                >
-                  Max
-                </Button>
+                      setWithdrawQuote(null);
+                      setWithdrawStep("form");
+                    }}
+                    className="w-full min-h-[44px] rounded-[12px] border border-white/20 bg-white/5 hover:bg-white/10 backdrop-blur-sm flex items-center justify-center px-4 py-3 touch-manipulation font-medium transition-colors hover:border-[#12d585]/30"
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
-              <p className="text-xs text-white/50">Available: {usdcBalance.toFixed(2)} USDC</p>
-            </div>
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-white/80">
-                Destination address ({withdrawNetwork === "solana" ? "Solana" : withdrawNetwork === "base" ? "Base" : "BNB"})
-              </label>
-              <Input
-                type="text"
-                placeholder={withdrawNetwork === "solana" ? "Solana address" : "0x..."}
-                value={withdrawDestination}
-                onChange={(e) => setWithdrawDestination(e.target.value)}
-                className="min-w-0 min-h-[44px]"
-              />
-            </div>
-            {!withdrawQuote ? (
-              <Button
-                onClick={fetchWithdrawQuote}
-                disabled={withdrawQuoteLoading || !withdrawAmount || !withdrawDestination.trim()}
-                className="w-full min-h-[44px]"
-              >
-                {withdrawQuoteLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Getting quote...
-                  </>
-                ) : (
-                  "Get quote"
-                )}
-              </Button>
-            ) : (
-              <div className="space-y-3">
-                <p className="text-sm text-white/80">Review and confirm withdraw.</p>
-                <div className="flex gap-2">
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-3 p-4 border-b border-white/10">
+                <button
+                  type="button"
+                  onClick={() => (!withdrawQuote ? setWithdrawStep("chain") : setWithdrawQuote(null))}
+                  className="p-2 -ml-2 rounded-full hover:bg-white/10 min-w-[44px] min-h-[44px] flex items-center justify-center touch-manipulation"
+                  aria-label="Back"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+                <h2 className="text-lg font-semibold flex-1 text-center pr-10">Withdraw</h2>
+              </div>
+              <div className="p-4 flex-1 overflow-y-auto space-y-4">
+                <p className="text-sm text-white/70 text-center">
+                  Withdraw USDC to {withdrawNetwork === "solana" ? "Solana" : withdrawNetwork === "base" ? "Base" : "BNB Chain"}. You will receive USDC on the selected network.
+                </p>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-white/80">Amount (USDC)</label>
+                  <div className="flex gap-2">
+                    <Input
+                      type="number"
+                      placeholder="0.00"
+                      value={withdrawAmount}
+                      onChange={(e) => setWithdrawAmount(e.target.value)}
+                      className="flex-1 min-w-0 min-h-[44px] bg-white/5 border-white/10 rounded-[12px]"
+                    />
+                    <Button
+                      variant="outline"
+                      onClick={() => setWithdrawAmount(usdcBalance.toFixed(2))}
+                      className="min-h-[44px] shrink-0 border-white/20 hover:bg-white/10"
+                    >
+                      Max
+                    </Button>
+                  </div>
+                  <p className="text-xs text-white/50">Available: {usdcBalance.toFixed(2)} USDC</p>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-white/80">
+                    Destination address ({withdrawNetwork === "solana" ? "Solana" : withdrawNetwork === "base" ? "Base" : "BNB"})
+                  </label>
+                  <Input
+                    type="text"
+                    placeholder={withdrawNetwork === "solana" ? "Enter Solana address" : "Enter 0x address"}
+                    value={withdrawDestination}
+                    onChange={(e) => setWithdrawDestination(e.target.value)}
+                    className="min-w-0 min-h-[44px] bg-white/5 border-white/10 rounded-[12px]"
+                  />
+                </div>
+                {!withdrawQuote ? (
                   <Button
-                    variant="outline"
-                    className="flex-1 min-h-[44px]"
-                    onClick={() => setWithdrawQuote(null)}
-                    disabled={withdrawExecuting}
+                    onClick={fetchWithdrawQuote}
+                    disabled={withdrawQuoteLoading || !withdrawAmount || !withdrawDestination.trim()}
+                    className="w-full min-h-[44px] rounded-[12px] bg-gradient-to-r from-[#12d585] to-[#08b16b] text-[#000000] font-medium hover:opacity-90"
                   >
-                    Back
-                  </Button>
-                  <Button
-                    className="flex-1 min-h-[44px]"
-                    onClick={executeWithdraw}
-                    disabled={withdrawExecuting}
-                  >
-                    {withdrawExecuting ? (
+                    {withdrawQuoteLoading ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        Sending...
+                        Getting quote...
                       </>
                     ) : (
-                      "Confirm"
+                      "Get quote"
                     )}
                   </Button>
-                </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-sm text-white/80 text-center">Review and confirm withdraw</p>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        className="flex-1 min-h-[44px] border-white/20 hover:bg-white/10"
+                        onClick={() => setWithdrawQuote(null)}
+                        disabled={withdrawExecuting}
+                      >
+                        Back
+                      </Button>
+                      <Button
+                        className="flex-1 min-h-[44px] rounded-[12px] bg-gradient-to-r from-[#12d585] to-[#08b16b] text-[#000000] font-medium hover:opacity-90"
+                        onClick={executeWithdraw}
+                        disabled={withdrawExecuting}
+                      >
+                        {withdrawExecuting ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Sending...
+                          </>
+                        ) : (
+                          "Confirm"
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </>
+          )}
         </SheetContent>
       </Sheet>
 
@@ -936,12 +927,13 @@ export function Profile() {
       <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
         <SheetContent
           side="bottom"
-          className="bg-[#0f0f0f] border-white/10 text-white w-full max-w-[100%] sm:max-w-md mx-auto rounded-t-2xl overflow-y-auto"
+          className="bg-white/[0.06] backdrop-blur-xl border border-white/10 text-white w-full max-w-[100%] sm:max-w-md mx-auto rounded-t-2xl overflow-y-auto shadow-2xl"
           style={{ paddingBottom: "calc(1rem + var(--safe-area-inset-bottom, 0px))" }}
         >
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/30" aria-hidden />
-          <SheetHeader>
-            <SheetTitle className="text-white">Settings</SheetTitle>
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#12d585]/50 via-[#08b16b]/40 to-transparent rounded-t-2xl" aria-hidden />
+          <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/30" aria-hidden />
+          <SheetHeader className="text-center pt-2">
+            <SheetTitle className="text-white text-xl">Settings</SheetTitle>
           </SheetHeader>
           <div className="mt-6 space-y-1 overflow-y-auto flex-1 min-h-0">
             {/* Push Notifications Toggle */}

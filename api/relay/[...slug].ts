@@ -421,12 +421,18 @@ async function currenciesHandler(req: VercelRequest, res: VercelResponse) {
     const body = req.method === "POST" ? req.body : {};
     const query = req.query || {};
     const term = (body.term ?? query.term ?? "").toString().trim();
+    const addressParam = (body.address ?? query.address ?? "").toString().trim();
     const tokensParam = body.tokens ?? query.tokens;
     const chainIdsParam = body.chainIds ?? query.chainIds;
     const limit = Math.min(Math.max(1, parseInt(String(body.limit ?? query.limit ?? "20"), 10) || 20), 50);
     const verified = body.verified ?? query.verified;
     const relayParams: Record<string, unknown> = { limit, useExternalSearch: true };
     if (term) relayParams.term = term;
+    if (addressParam) {
+      relayParams.address = addressParam;
+      if (!Array.isArray(chainIdsParam) || chainIdsParam.length === 0) relayParams.chainIds = [CHAIN_IDS.solana];
+      if (verified === undefined) relayParams.verified = false;
+    }
     if (Array.isArray(tokensParam) && tokensParam.length > 0) relayParams.tokens = tokensParam;
     else if (typeof tokensParam === "string" && tokensParam) {
       try {
@@ -446,6 +452,7 @@ async function currenciesHandler(req: VercelRequest, res: VercelResponse) {
     if (relayRes.status === 404 || relayRes.status === 405) {
       const getUrl = new URL(`${RELAY_API_BASE}/currencies/v2`);
       if (term) getUrl.searchParams.set("term", term);
+      if (addressParam) getUrl.searchParams.set("address", addressParam);
       getUrl.searchParams.set("limit", String(limit));
       relayRes = await fetch(getUrl.toString(), { headers: apiKey ? { "x-api-key": apiKey } : {} });
     }

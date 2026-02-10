@@ -11,6 +11,10 @@ import {
   convertTokenInfoToSearchResult,
   getWalletPositions,
 } from "@/lib/solanatracker";
+import {
+  fetchCoinGeckoTokenDetails,
+  coingeckoAttributesToTokenFields,
+} from "@/lib/coingecko";
 import type { SwapQuote } from "@/lib/jupiter-swap";
 import {
   formatTokenAmount,
@@ -87,12 +91,12 @@ export function Trade() {
     if (urlMint) setMint(urlMint);
   }, [searchParams, location.state?.mint]);
 
-  // Fetch token details when mint is set (from URL, TokenSearch, or state)
+  // Fetch token details from CoinGecko when mint is set (on select or URL)
   useEffect(() => {
-    if (mint && (!token || token.mint !== mint)) {
-      fetchTokenDetails(mint);
+    if (mint) {
+      fetchTokenDetails(mint, token);
     }
-  }, [mint, token]);
+  }, [mint]);
 
   // Refresh cooldown timer
   useEffect(() => {
@@ -166,8 +170,46 @@ export function Trade() {
     fetchBalance();
   }, [token?.mint, userProfile?.walletAddress]);
 
-  const fetchTokenDetails = async (mintAddress: string) => {
+  const fetchTokenDetails = async (
+    mintAddress: string,
+    currentToken: TokenSearchResult | null
+  ) => {
     setLoading(true);
+    const base: TokenSearchResult =
+      currentToken?.mint === mintAddress
+        ? currentToken
+        : {
+            id: mintAddress,
+            mint: mintAddress,
+            name: "",
+            symbol: "",
+            decimals: 6,
+            hasSocials: false,
+            chain: "solana",
+            chainId: 792703809,
+          };
+    try {
+      const coingecko = await fetchCoinGeckoTokenDetails("solana", [mintAddress]);
+      const first = coingecko.data?.[0]?.attributes;
+      if (first) {
+        const fields = coingeckoAttributesToTokenFields(first);
+        setToken({
+          ...base,
+          name: base.name || fields.name || "",
+          symbol: base.symbol || fields.symbol || "",
+          image: base.image || fields.image,
+          decimals: fields.decimals ?? base.decimals,
+          priceUsd: fields.priceUsd,
+          marketCapUsd: fields.marketCapUsd,
+          liquidityUsd: fields.liquidityUsd,
+          volume_24h: fields.volume_24h,
+          launchpad: fields.launchpad ?? base.launchpad,
+        });
+        return;
+      }
+    } catch (e) {
+      console.warn("CoinGecko token details failed, using fallback:", e);
+    }
     try {
       const tokenInfo = await getTokenInfo(mintAddress);
       const tokenData = convertTokenInfoToSearchResult(tokenInfo);
@@ -182,9 +224,12 @@ export function Trade() {
           response.data.length > 0
         ) {
           setToken({ ...response.data[0], chain: "solana", chainId: 792703809 });
+        } else {
+          setToken(base);
         }
       } catch (searchError) {
         console.error("Error with search fallback:", searchError);
+        setToken(base);
       }
     } finally {
       setLoading(false);
@@ -196,7 +241,7 @@ export function Trade() {
 
     setLastRefresh(Date.now());
     setRefreshCooldown(15);
-    await fetchTokenDetails(mint);
+    await fetchTokenDetails(mint, token);
   };
 
   const handleCopyShareLink = async () => {

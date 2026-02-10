@@ -52,9 +52,19 @@ export interface RelayCurrency {
   verified?: boolean;
 }
 
+/** Base58 alphabet; Solana addresses use this. */
+const BASE58_REGEX = /^[1-9A-HJ-NP-Za-km-z]+$/;
+
+/** Heuristic: looks like a Solana mint/account (32–44 base58 chars). */
+function looksLikeSolanaAddress(q: string): boolean {
+  const t = q.trim();
+  return t.length >= 32 && t.length <= 44 && BASE58_REGEX.test(t);
+}
+
 /**
  * Search tokens via Relay currencies API (proxied through our backend).
  * One search for all chains; response includes chain so UI can show Solana / Base / BNB.
+ * If the query looks like a Solana address, sends an `address` param for exact lookup.
  */
 export async function searchRelayTokens(
   term: string,
@@ -62,7 +72,12 @@ export async function searchRelayTokens(
   apiBase: string
 ): Promise<{ raw: unknown; currencies: RelayCurrency[] }> {
   const params = new URLSearchParams({ limit: String(limit) });
-  if (term.trim()) params.set("term", term.trim());
+  const trimmed = term.trim();
+  if (looksLikeSolanaAddress(trimmed)) {
+    params.set("address", trimmed);
+  } else if (trimmed) {
+    params.set("term", trimmed);
+  }
   const res = await fetch(`${apiBase}/api/relay/currencies?${params.toString()}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

@@ -33,6 +33,8 @@ export interface CoinGeckoTokenResponse {
   included?: unknown[];
 }
 
+export type CoinGeckoTokenAttributes = NonNullable<CoinGeckoTokenResponse["data"]>[number]["attributes"];
+
 /**
  * Fetch token details from CoinGecko On-Chain API via our relay proxy.
  * @param network - Chain: "solana" | "base" | "bnb"
@@ -51,4 +53,41 @@ export async function fetchCoinGeckoTokenDetails(
     throw new Error((err as { error?: string }).error || `CoinGecko tokens failed: ${res.status}`);
   }
   return res.json();
+}
+
+/**
+ * Map CoinGecko token attributes to fields compatible with TokenSearchResult (partial).
+ * Use with existing token from Relay search to fill price, FDV, reserves, launchpad, etc.
+ */
+export function coingeckoAttributesToTokenFields(attrs: CoinGeckoTokenAttributes): {
+  priceUsd?: number;
+  marketCapUsd?: number;
+  liquidityUsd?: number;
+  volume_24h?: number;
+  launchpad?: { curvePercentage?: number; completed?: boolean };
+  name?: string;
+  symbol?: string;
+  image?: string;
+  decimals?: number;
+} {
+  const priceUsd = attrs.price_usd != null ? parseFloat(String(attrs.price_usd)) : undefined;
+  const fdv = attrs.fdv_usd != null ? parseFloat(String(attrs.fdv_usd)) : undefined;
+  const reserveUsd = attrs.total_reserve_in_usd != null ? parseFloat(String(attrs.total_reserve_in_usd)) : undefined;
+  const vol = attrs.volume_usd;
+  const vol24 = typeof vol === "object" && vol != null && "h24" in vol ? parseFloat(String((vol as { h24?: string }).h24)) : undefined;
+  const marketCapUsd = attrs.market_cap_usd != null ? parseFloat(String(attrs.market_cap_usd)) : fdv;
+  const lp = attrs.launchpad_details;
+  return {
+    priceUsd: Number.isFinite(priceUsd) ? priceUsd : undefined,
+    marketCapUsd: Number.isFinite(marketCapUsd) ? marketCapUsd : undefined,
+    liquidityUsd: Number.isFinite(reserveUsd) ? reserveUsd : undefined,
+    volume_24h: Number.isFinite(vol24) ? vol24 : undefined,
+    launchpad: lp
+      ? { curvePercentage: lp.graduation_percentage ?? undefined, completed: lp.completed }
+      : undefined,
+    name: attrs.name,
+    symbol: attrs.symbol,
+    image: attrs.image_url,
+    decimals: typeof attrs.decimals === "number" ? attrs.decimals : undefined,
+  };
 }

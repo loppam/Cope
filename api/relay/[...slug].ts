@@ -35,17 +35,35 @@ const ALCHEMY_UPDATE_WEBHOOK_URL = "https://dashboard.alchemy.com/api/update-web
 
 /** Fire-and-forget: add custodial evm address to both Alchemy webhooks (Base + BNB) so deposits trigger evm-deposit. */
 function addEvmAddressToAlchemyWebhooks(addr: string): void {
-  const apiKey = process.env.ALCHEMY_API_KEY;
+  // Notify API requires Auth Token from Dashboard → Data → Webhooks → AUTH TOKEN (app API Key can 401)
+  const apiKey = process.env.ALCHEMY_NOTIFY_AUTH_TOKEN || process.env.ALCHEMY_API_KEY;
   const webhookIdBase = process.env.ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BASE;
   const webhookIdBnb = process.env.ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BNB;
   if (!apiKey || !webhookIdBase || !webhookIdBnb) return;
   const low = addr.toLowerCase();
-  const body = (id: string) => JSON.stringify({ webhook_id: id, addresses_to_add: [low] });
+  const body = (id: string) =>
+    JSON.stringify({ webhook_id: id, addresses_to_add: [low], addresses_to_remove: [] });
   const opts = { method: "PATCH" as const, headers: { "Content-Type": "application/json", "X-Alchemy-Token": apiKey } };
   Promise.all([
     fetch(ALCHEMY_UPDATE_WEBHOOK_URL, { ...opts, body: body(webhookIdBase) }),
     fetch(ALCHEMY_UPDATE_WEBHOOK_URL, { ...opts, body: body(webhookIdBnb) }),
   ]).catch((e) => console.warn("Alchemy webhook address add failed:", e));
+}
+
+/** Fire-and-forget: remove custodial evm address from both Alchemy webhooks (e.g. when user removes wallet or deletes account). */
+function removeEvmAddressFromAlchemyWebhooks(addr: string): void {
+  const apiKey = process.env.ALCHEMY_NOTIFY_AUTH_TOKEN || process.env.ALCHEMY_API_KEY;
+  const webhookIdBase = process.env.ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BASE;
+  const webhookIdBnb = process.env.ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BNB;
+  if (!apiKey || !webhookIdBase || !webhookIdBnb) return;
+  const low = addr.toLowerCase();
+  const body = (id: string) =>
+    JSON.stringify({ webhook_id: id, addresses_to_add: [], addresses_to_remove: [low] });
+  const opts = { method: "PATCH" as const, headers: { "Content-Type": "application/json", "X-Alchemy-Token": apiKey } };
+  Promise.all([
+    fetch(ALCHEMY_UPDATE_WEBHOOK_URL, { ...opts, body: body(webhookIdBase) }),
+    fetch(ALCHEMY_UPDATE_WEBHOOK_URL, { ...opts, body: body(webhookIdBnb) }),
+  ]).catch((e) => console.warn("Alchemy webhook address remove failed:", e));
 }
 
 function ensureFirebase() {
@@ -445,6 +463,27 @@ async function evmBalancesHandler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+async function evmAddressRemoveHandler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST" && req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  try {
+    ensureFirebase();
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    const decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
+    const userId = decoded.uid;
+    const db = getAdminDb();
+    const userSnap = await db.collection("users").doc(userId).get();
+    const evmAddress = userSnap.data()?.evmAddress;
+    if (evmAddress && typeof evmAddress === "string" && evmAddress.length >= 40) {
+      removeEvmAddressFromAlchemyWebhooks(evmAddress);
+    }
+    return res.status(200).json({ success: true });
+  } catch (e: unknown) {
+    console.error("evm-address-remove error:", e);
+    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+  }
+}
+
 async function currenciesHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET" && req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   try {
@@ -784,6 +823,7 @@ const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promis
   "bridge-from-evm-quote": bridgeFromEvmQuoteHandler,
   "execute-bridge-custodial": executeBridgeCustodialHandler,
   "evm-address": evmAddressHandler,
+  "evm-address-remove": evmAddressRemoveHandler,
   "evm-balances": evmBalancesHandler,
   currencies: currenciesHandler,
   "coingecko-tokens": coingeckoTokensHandler,

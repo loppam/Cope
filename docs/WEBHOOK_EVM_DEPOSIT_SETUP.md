@@ -24,6 +24,7 @@ Put these in your `.env` (and in Vercel → Project → Settings → Environment
 |--------|---------|------------------|
 | **Authenticate incoming webhook** | `WEBHOOK_EVM_DEPOSIT_SECRET` | You generate this (e.g. `openssl rand -hex 32`). Set the same value when configuring the Alchemy webhook (see below). |
 | **Alchemy: create/update webhook & add addresses** | `ALCHEMY_API_KEY` | [Alchemy Dashboard](https://dashboard.alchemy.com/) → your app → API Key. |
+| **Alchemy: add addresses to webhooks (PATCH API)** | `ALCHEMY_NOTIFY_AUTH_TOKEN` | **Required for update-webhook-addresses.** Dashboard → **Data** → **Webhooks** → **AUTH TOKEN** (copy). If you get 401, you're likely using the app API Key; use this token and set it in `.env` as `ALCHEMY_NOTIFY_AUTH_TOKEN`. |
 | **Alchemy: webhook ID (Base)** | `ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BASE` | Set **after** creating the Address Activity webhook for Base (step 4 below). |
 | **Alchemy: webhook ID (BSC/BNB)** | `ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BNB` | Set **after** creating the Address Activity webhook for BSC (step 4 below). |
 | **Relay: bridge & execute** | `RELAY_API_KEY` | [Relay Link](https://docs.relay.link/) – required for deposit quote + execute and for withdraw. |
@@ -95,7 +96,7 @@ When any new custodial EVM address is persisted, add it to **both** webhooks so 
 Use Alchemy’s **Update webhook addresses** API **twice** (once per webhook):
 
 - **Endpoint:** `PATCH` to the URL in [Alchemy’s Notify API docs](https://www.alchemy.com/docs/data/webhooks/webhooks-api-endpoints/notify-api-endpoints/update-webhook-addresses).
-- **Headers:** Include the header Alchemy specifies (e.g. `X-Alchemy-Token`) with your `ALCHEMY_API_KEY`.
+- **Headers:** `X-Alchemy-Token` must be the **Notify Auth Token** (Dashboard → Data → Webhooks → AUTH TOKEN). Set it as `ALCHEMY_NOTIFY_AUTH_TOKEN` in `.env`. The app API Key often returns 401 for this endpoint.
 - **Body:** `webhook_id` (use `ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BASE` for the first call, `ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BNB` for the second) and `addresses_to_add` (array with the new custodial address). Use `addresses_to_remove` when a user is deleted (again, call once per webhook ID).
 
 Call both updates from your backend whenever you persist a new `evmAddress` (e.g. after writing to Firestore in your `evm-address` or `evm-balances` handler). Limits: typically up to 500 addresses per request and up to 100,000 addresses per webhook; see Alchemy’s current docs.

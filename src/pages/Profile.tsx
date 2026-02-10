@@ -122,6 +122,7 @@ export function Profile() {
       setUsdcBalance(usdcAccount?.uiAmount ?? 0);
     } catch (error) {
       console.error("Error fetching balance:", error);
+      setUsdcBalance(0);
     }
   };
 

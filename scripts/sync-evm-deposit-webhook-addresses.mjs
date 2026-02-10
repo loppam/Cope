@@ -73,11 +73,15 @@ async function addAddressesToWebhook(webhookId, addresses, apiKey) {
     body: JSON.stringify({
       webhook_id: webhookId,
       addresses_to_add: addresses,
+      addresses_to_remove: [],
     }),
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Alchemy PATCH failed ${res.status}: ${text}`);
+    const hint = res.status === 401
+      ? " Use the Notify Auth Token: Alchemy Dashboard → Data → Webhooks → AUTH TOKEN (set ALCHEMY_NOTIFY_AUTH_TOKEN in .env)."
+      : "";
+    throw new Error(`Alchemy PATCH failed ${res.status}: ${text}${hint}`);
   }
 }
 
@@ -85,12 +89,13 @@ async function main() {
   const dryRun = process.argv.includes("--dry-run");
   if (dryRun) console.log("[DRY RUN] No API calls will be made.\n");
 
-  const apiKey = process.env.ALCHEMY_API_KEY;
+  // Notify API (update-webhook-addresses) requires the Auth Token from Dashboard → Data → Webhooks → AUTH TOKEN; app API Key can 401
+  const apiKey = process.env.ALCHEMY_NOTIFY_AUTH_TOKEN || process.env.ALCHEMY_API_KEY;
   const webhookIdBase = process.env.ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BASE;
   const webhookIdBnb = process.env.ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BNB;
 
   if (!apiKey) {
-    console.error("Missing ALCHEMY_API_KEY in .env");
+    console.error("Missing ALCHEMY_NOTIFY_AUTH_TOKEN or ALCHEMY_API_KEY in .env");
     process.exit(1);
   }
   if (!webhookIdBase || !webhookIdBnb) {

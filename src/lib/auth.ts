@@ -435,7 +435,7 @@ export async function updateUserProfile(
   }
 }
 
-// Remove wallet (delete wallet and reset isNew flag)
+// Remove wallet (delete wallet and reset isNew flag). Call relay evm-address-remove first to remove from Alchemy webhooks.
 export async function removeUserWallet(uid: string) {
   try {
     const userRef = doc(db, "users", uid);
@@ -448,6 +448,7 @@ export async function removeUserWallet(uid: string) {
         isNew: true, // Reset to new user state
         encryptedMnemonic: null,
         encryptedSecretKey: null,
+        evmAddress: null,
         updatedAt: serverTimestamp(),
       },
       { merge: true },

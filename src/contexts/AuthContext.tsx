@@ -414,6 +414,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const handleRemoveWallet = async () => {
     if (!user) throw new Error("User not authenticated");
     try {
+      // Remove custodial EVM address from Alchemy deposit webhooks before clearing wallet
+      const token = await user.getIdToken();
+      const base = getApiBase();
+      await fetch(`${base}/api/relay/evm-address-remove`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
       await removeUserWallet(user.uid);
       await refreshProfile();
       toast.success("Wallet removed successfully");

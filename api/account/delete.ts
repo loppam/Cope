@@ -80,8 +80,28 @@ export default async function handler(
     }
     await batch.commit();
 
-    // 2. Delete user document (removes profile, watchlist, wallet refs, etc.)
-    await db.collection("users").doc(uid).delete();
+    // 2. Remove user's evmAddress from Alchemy deposit webhooks (if any), then delete user document
+    const userRef = db.collection("users").doc(uid);
+    const userSnap = await userRef.get();
+    const evmAddress = userSnap.data()?.evmAddress;
+    if (evmAddress && typeof evmAddress === "string" && evmAddress.length >= 40) {
+      const apiKey = process.env.ALCHEMY_NOTIFY_AUTH_TOKEN || process.env.ALCHEMY_API_KEY;
+      const webhookIdBase = process.env.ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BASE;
+      const webhookIdBnb = process.env.ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BNB;
+      const url = "https://dashboard.alchemy.com/api/update-webhook-addresses";
+      const low = evmAddress.toLowerCase();
+      const opts = {
+        method: "PATCH" as const,
+        headers: { "Content-Type": "application/json", "X-Alchemy-Token": apiKey },
+      };
+      if (apiKey && webhookIdBase && webhookIdBnb) {
+        await Promise.all([
+          fetch(url, { ...opts, body: JSON.stringify({ webhook_id: webhookIdBase, addresses_to_add: [], addresses_to_remove: [low] }) }),
+          fetch(url, { ...opts, body: JSON.stringify({ webhook_id: webhookIdBnb, addresses_to_add: [], addresses_to_remove: [low] }) }),
+        ]).catch((e) => console.warn("Alchemy webhook address remove on account delete:", e));
+      }
+    }
+    await userRef.delete();
 
     // 3. Delete Firebase Auth user
     await adminAuth.deleteUser(uid);

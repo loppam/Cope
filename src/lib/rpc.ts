@@ -80,12 +80,21 @@ export async function getTokenAccounts(walletAddress: string): Promise<TokenAcco
     return tokenAccounts.value.map(account => {
       const parsedInfo = account.account.data as ParsedAccountData;
       const tokenAmount = parsedInfo.parsed.info.tokenAmount;
-      
+      // uiAmount can be null from some RPCs; use uiAmountString or derive from amount/decimals
+      let uiAmount = tokenAmount.uiAmount ?? 0;
+      if (uiAmount === 0 && tokenAmount.uiAmountString != null) {
+        const parsed = parseFloat(tokenAmount.uiAmountString);
+        if (Number.isFinite(parsed)) uiAmount = parsed;
+      }
+      if (uiAmount === 0 && tokenAmount.amount != null && tokenAmount.decimals != null) {
+        const raw = Number(tokenAmount.amount);
+        if (Number.isFinite(raw)) uiAmount = raw / Math.pow(10, tokenAmount.decimals);
+      }
       return {
         mint: tokenAmount.mint,
         balance: tokenAmount.amount,
         decimals: tokenAmount.decimals,
-        uiAmount: tokenAmount.uiAmount || 0,
+        uiAmount,
       };
     });
   } catch (error) {

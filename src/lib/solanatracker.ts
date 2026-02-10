@@ -190,6 +190,10 @@ export interface TokenSearchResult {
     tx?: string;
     time?: number;
   };
+  /** Chain from Relay (e.g. solana, base, bnb). Set when using Relay token search. */
+  chain?: "solana" | "base" | "bnb";
+  /** Relay chain ID (792703809 Solana, 8453 Base, 56 BNB). */
+  chainId?: number;
 }
 
 export interface TokenSearchResponse {

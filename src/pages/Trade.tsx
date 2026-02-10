@@ -180,14 +180,11 @@ export function Trade() {
   const fetchTokenDetails = async (mintAddress: string) => {
     setLoading(true);
     try {
-      // Use getTokenInfo for complete token data (better than search)
-      // This endpoint returns full token information with price, market cap, etc.
       const tokenInfo = await getTokenInfo(mintAddress);
       const tokenData = convertTokenInfoToSearchResult(tokenInfo);
-      setToken(tokenData);
+      setToken({ ...tokenData, chain: "solana", chainId: 792703809 });
     } catch (error) {
       console.error("Error fetching token details:", error);
-      // Fallback to search if getTokenInfo fails
       try {
         const response = await searchTokens(mintAddress, 1, 1);
         if (
@@ -195,7 +192,7 @@ export function Trade() {
           response.data &&
           response.data.length > 0
         ) {
-          setToken(response.data[0]);
+          setToken({ ...response.data[0], chain: "solana", chainId: 792703809 });
         }
       } catch (searchError) {
         console.error("Error with search fallback:", searchError);
@@ -534,8 +531,33 @@ export function Trade() {
           </Card>
         )}
 
-        {/* Chain + Token */}
+        {/* Token search first (one for all chains); token metadata shows chain */}
         <div className="min-w-0 space-y-3">
+          <div>
+            <label className="block text-sm font-medium mb-2">Token</label>
+            <TokenSearch
+              onSelect={(selectedToken) => {
+                const chain = selectedToken.chain ?? "solana";
+                setTradeChain(chain);
+                if (chain === "solana") {
+                  setToken(selectedToken);
+                  setMint(selectedToken.mint);
+                  setCrossChainToken(null);
+                  setSearchParams({ mint: selectedToken.mint }, { replace: true });
+                } else {
+                  setCrossChainToken({
+                    symbol: selectedToken.symbol,
+                    address: selectedToken.mint,
+                    name: selectedToken.name,
+                  });
+                  setToken(null);
+                  setMint("");
+                  setSearchParams({}, { replace: true });
+                }
+              }}
+              placeholder="Search token by name, symbol, or address..."
+            />
+          </div>
           <div>
             <label className="block text-sm font-medium mb-2">Network</label>
             <div className="flex rounded-[12px] bg-white/5 p-1 gap-1">
@@ -560,21 +582,9 @@ export function Trade() {
               ))}
             </div>
           </div>
-          {tradeChain === "solana" ? (
+          {tradeChain !== "solana" && (
             <div>
-              <label className="block text-sm font-medium mb-2">Token</label>
-              <TokenSearch
-                onSelect={(selectedToken) => {
-                  setToken(selectedToken);
-                  setMint(selectedToken.mint);
-                  setSearchParams({ mint: selectedToken.mint }, { replace: true });
-                }}
-                placeholder="Search or paste token address..."
-              />
-            </div>
-          ) : (
-            <div>
-              <label className="block text-sm font-medium mb-2">Token ({tradeChain === "base" ? "Base" : "BNB"})</label>
+              <p className="text-xs text-white/50 mb-2">Or pick a token on {tradeChain === "base" ? "Base" : "BNB"}</p>
               <div className="flex flex-wrap gap-2">
                 {CROSS_CHAIN_TOKENS[tradeChain].map((t) => (
                   <button

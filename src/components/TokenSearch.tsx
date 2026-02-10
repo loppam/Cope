@@ -1,12 +1,38 @@
 import { useState, useEffect, useRef } from 'react';
 import { Search, X, Loader2 } from 'lucide-react';
-import { searchTokens, TokenSearchResult } from '@/lib/solanatracker';
-import { shortenAddress } from '@/lib/utils';
+import { TokenSearchResult } from '@/lib/solanatracker';
+import { searchRelayTokens, RELAY_CHAIN_ID_TO_NETWORK } from '@/lib/relay';
+import { shortenAddress, getApiBase } from '@/lib/utils';
 
 interface TokenSearchProps {
   onSelect: (token: TokenSearchResult) => void;
   placeholder?: string;
   className?: string;
+}
+
+function relayCurrencyToSearchResult(c: {
+  chainId: number;
+  chain: string;
+  address: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+  logoURI?: string;
+  verified?: boolean;
+}): TokenSearchResult {
+  const chain = (RELAY_CHAIN_ID_TO_NETWORK[c.chainId] ?? c.chain) as 'solana' | 'base' | 'bnb';
+  return {
+    id: `${c.chainId}-${c.address}`,
+    name: c.name,
+    symbol: c.symbol,
+    mint: c.address,
+    image: c.logoURI,
+    decimals: c.decimals,
+    hasSocials: false,
+    chain,
+    chainId: c.chainId,
+    status: c.verified ? 'graduated' : undefined,
+  };
 }
 
 export function TokenSearch({ onSelect, placeholder = "Search token by name or symbol...", className = "" }: TokenSearchProps) {
@@ -29,13 +55,12 @@ export function TokenSearch({ onSelect, placeholder = "Search token by name or s
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Debounced search
+  // Debounced search via Relay (one search for all chains; metadata includes chain)
   useEffect(() => {
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
 
-    // Allow searching by name, symbol, or address (SolanaTracker supports all)
     if (query.trim().length < 1) {
       setResults([]);
       setShowResults(false);
@@ -45,20 +70,18 @@ export function TokenSearch({ onSelect, placeholder = "Search token by name or s
     setLoading(true);
     searchTimeoutRef.current = setTimeout(async () => {
       try {
-        const response = await searchTokens(query.trim(), 1, 20);
-        if (response.status === 'success' && response.data) {
-          setResults(response.data);
-          setShowResults(true);
-        } else {
-          setResults([]);
-        }
+        const apiBase = getApiBase();
+        const { currencies } = await searchRelayTokens(query.trim(), 20, apiBase);
+        const list = (currencies ?? []).map(relayCurrencyToSearchResult);
+        setResults(list);
+        setShowResults(true);
       } catch (error) {
-        console.error('Error searching tokens:', error);
+        console.error('Error searching tokens (Relay):', error);
         setResults([]);
       } finally {
         setLoading(false);
       }
-    }, 300); // 300ms debounce
+    }, 300);
 
     return () => {
       if (searchTimeoutRef.current) {
@@ -147,6 +170,11 @@ export function TokenSearch({ onSelect, placeholder = "Search token by name or s
                           {token.name}
                         </span>
                         <span className="text-white/60 text-sm shrink-0">{token.symbol}</span>
+                        {token.chain && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/70 shrink-0 capitalize">
+                            {token.chain}
+                          </span>
+                        )}
                       </div>
                       <div className="flex flex-wrap gap-x-3 gap-y-0 text-xs text-white/50 overflow-hidden">
                         <span className="font-mono truncate">{shortenAddress(token.mint)}</span>

@@ -34,3 +34,40 @@ export async function getIntentStatus(requestId: string): Promise<{
   return res.json();
 }
 
+/** Chain ID to network name for Relay currencies. */
+export const RELAY_CHAIN_ID_TO_NETWORK: Record<number, RelayNetwork> = {
+  792703809: "solana",
+  8453: "base",
+  56: "bnb",
+};
+
+export interface RelayCurrency {
+  chainId: number;
+  chain: string;
+  address: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+  logoURI?: string;
+  verified?: boolean;
+}
+
+/**
+ * Search tokens via Relay currencies API (proxied through our backend).
+ * One search for all chains; response includes chain so UI can show Solana / Base / BNB.
+ */
+export async function searchRelayTokens(
+  term: string,
+  limit = 20,
+  apiBase: string
+): Promise<{ raw: unknown; currencies: RelayCurrency[] }> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (term.trim()) params.set("term", term.trim());
+  const res = await fetch(`${apiBase}/api/relay/currencies?${params.toString()}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { error?: string }).error || `Relay search failed: ${res.status}`);
+  }
+  return res.json();
+}
+

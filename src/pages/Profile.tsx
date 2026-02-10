@@ -75,6 +75,7 @@ export function Profile() {
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [usdcBalance, setUsdcBalance] = useState<number>(0);
+  const [usdcBalanceLoading, setUsdcBalanceLoading] = useState(true);
   const [openPositions, setOpenPositions] = useState<TokenPosition[]>([]);
   const [closedPositions, setClosedPositions] = useState<TokenPosition[]>([]);
   const [followersCount, setFollowersCount] = useState<number | null>(null);
@@ -113,25 +114,29 @@ export function Profile() {
   const walletAddress = userProfile?.walletAddress || null;
   const walletConnected = userProfile?.walletConnected || false;
 
-  // Fetch real-time balance (SOL) and USDC using RPC
+  // Fetch Solana USDC (SPL) balance via RPC
   const fetchBalance = async () => {
     if (!walletAddress) return;
+    setUsdcBalanceLoading(true);
     try {
       const tokenAccounts = await getTokenAccounts(walletAddress);
-      const usdcAccount = tokenAccounts.find((a) => a.mint === SOLANA_USDC_MINT);
-      setUsdcBalance(usdcAccount?.uiAmount ?? 0);
+      const solUsdcAccount = tokenAccounts.find((a) => a.mint === SOLANA_USDC_MINT);
+      const solUsdcBalance = solUsdcAccount?.uiAmount ?? 0;
+      setUsdcBalance(solUsdcBalance);
     } catch (error) {
-      console.error("Error fetching balance:", error);
+      console.error("Error fetching Solana USDC balance:", error);
       setUsdcBalance(0);
+    } finally {
+      setUsdcBalanceLoading(false);
     }
   };
 
-  // Fetch balance on mount and when wallet address changes
   useEffect(() => {
     if (walletAddress) {
       fetchBalance();
     } else {
       setUsdcBalance(0);
+      setUsdcBalanceLoading(false);
     }
   }, [walletAddress]);
 
@@ -568,7 +573,9 @@ export function Profile() {
                 <>
                   <div className="mt-4 pt-4 border-t border-white/10">
                     <p className="text-2xl sm:text-3xl font-bold">
-                      ${(usdcBalance + openPositions.reduce((s, p) => s + p.value, 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {usdcBalanceLoading
+                        ? "—"
+                        : `$${(usdcBalance + openPositions.reduce((s, p) => s + p.value, 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                     </p>
                     <p className="text-xs text-white/50 mt-0.5">Total wallet balance</p>
                 </div>
@@ -578,9 +585,11 @@ export function Profile() {
                         <DollarSign className="w-4 h-4 text-white/70" />
                       </div>
                       <div>
-                        <p className="text-sm text-white/60">Cash balance</p>
+                        <p className="text-sm text-white/60">Cash balance (Solana USDC)</p>
                         <p className="font-semibold">
-                          ${usdcBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {usdcBalanceLoading
+                            ? "—"
+                            : `$${usdcBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         </p>
                       </div>
                     </div>

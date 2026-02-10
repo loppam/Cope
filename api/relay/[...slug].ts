@@ -3,8 +3,17 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
-import { Keypair, VersionedTransaction, Connection } from "@solana/web3.js";
+import {
+  AddressLookupTableAccount,
+  Connection,
+  Keypair,
+  PublicKey,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import { HDNodeWallet, JsonRpcProvider, Contract, type TransactionRequest } from "ethers";
+import bs58 from "bs58";
 
 // --- constants ---
 const RELAY_API_BASE = process.env.RELAY_API_BASE || "https://api.relay.link";
@@ -244,7 +253,8 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
     ensureFirebase();
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
-    await getAdminAuth().verifyIdToken(authHeader.slice(7));
+    const decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
+    const userId = decoded?.uid ?? "unknown";
     const body = req.body as { inputMint?: string; outputMint?: string; amount?: string; slippageBps?: number; userWallet?: string; outputChainId?: number; outputChain?: string; recipient?: string };
     const inputMint = (body?.inputMint || "").trim();
     const outputMint = (body?.outputMint || "").trim();
@@ -254,7 +264,12 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
     let destinationChainId = CHAIN_IDS.solana;
     if (typeof body?.outputChainId === "number") destinationChainId = body.outputChainId;
     else if (body?.outputChain) destinationChainId = CHAIN_IDS[(body.outputChain as string).toLowerCase()] ?? destinationChainId;
-    if (!inputMint || !outputMint || !amount || !userWallet) return res.status(400).json({ error: "Missing inputMint, outputMint, amount, or userWallet" });
+    if (!inputMint || !outputMint || !amount || !userWallet) {
+      console.warn("[swap-quote] missing params", { userId, inputMint: !!inputMint, outputMint: !!outputMint, amount: !!amount, userWallet: !!userWallet });
+      return res.status(400).json({ error: "Missing inputMint, outputMint, amount, or userWallet" });
+    }
+    const tradeDir = outputMint === SOLANA_USDC_MINT ? "sell" : "buy";
+    console.log("[swap-quote] start", { userId, tradeDir, inputMint: inputMint.slice(0, 8) + "…", outputMint: outputMint.slice(0, 8) + "…", amount, slippageBps, userWallet: userWallet.slice(0, 8) + "…" });
     const apiKey = process.env.RELAY_API_KEY;
     const recipient = body?.recipient?.trim() || userWallet;
     const quoteRes = await fetch(`${RELAY_API_BASE}/quote/v2`, {
@@ -282,12 +297,15 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
       } catch {
         if (errBody) message = errBody.slice(0, 200);
       }
+      console.warn("[swap-quote] Relay quote failed", { userId, status: quoteRes.status, message: message.slice(0, 200) });
       return res.status(quoteRes.status >= 500 ? 502 : 400).json({ error: message });
     }
     const quote = await quoteRes.json();
+    const stepCount = Array.isArray(quote?.steps) ? quote.steps.length : 0;
+    console.log("[swap-quote] success", { userId, tradeDir, stepCount });
     return res.status(200).json(quote);
   } catch (e: unknown) {
-    console.error("swap-quote error:", e);
+    console.error("[swap-quote] error", e);
     return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
   }
 }
@@ -345,6 +363,80 @@ async function withdrawQuoteHandler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+type RelaySolanaAccountMeta = { pubkey: string; isSigner: boolean; isWritable: boolean };
+type RelaySolanaInstruction = { programId: string; keys: RelaySolanaAccountMeta[]; data: string };
+type RelaySolanaTxData = { instructions: RelaySolanaInstruction[]; addressLookupTableAddresses?: string[] };
+
+function isRelaySolanaTxData(x: unknown): x is RelaySolanaTxData {
+  if (!x || typeof x !== "object") return false;
+  const obj = x as Record<string, unknown>;
+  if (!Array.isArray(obj.instructions)) return false;
+  // light validation; Relay provides full structure
+  return true;
+}
+
+function isHexLike(s: string): boolean {
+  const v = s.startsWith("0x") ? s.slice(2) : s;
+  return v.length > 0 && v.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(v);
+}
+
+function isBase64Like(s: string): boolean {
+  // quick heuristic: base64 charset + correct padding/length
+  if (!s || s.length % 4 !== 0) return false;
+  return /^[A-Za-z0-9+/]+={0,2}$/.test(s);
+}
+
+function decodeRelayInstructionData(data: string): Buffer {
+  if (isHexLike(data)) {
+    const hex = data.startsWith("0x") ? data.slice(2) : data;
+    return Buffer.from(hex, "hex");
+  }
+  if (isBase64Like(data)) {
+    return Buffer.from(data, "base64");
+  }
+  // Relay sometimes uses base58 for Solana payloads; fall back to bs58
+  return Buffer.from(bs58.decode(data));
+}
+
+async function buildVersionedTxFromRelayInstructions(
+  data: RelaySolanaTxData,
+  payerKey: PublicKey,
+  connection: Connection
+): Promise<VersionedTransaction> {
+  const ixs: TransactionInstruction[] = data.instructions.map((ix) => {
+    const keys = (ix.keys ?? []).map((k) => ({
+      pubkey: new PublicKey(k.pubkey),
+      isSigner: !!k.isSigner,
+      isWritable: !!k.isWritable,
+    }));
+    return new TransactionInstruction({
+      programId: new PublicKey(ix.programId),
+      keys,
+      data: decodeRelayInstructionData(ix.data ?? ""),
+    });
+  });
+
+  const lookupAddrs = Array.isArray(data.addressLookupTableAddresses) ? data.addressLookupTableAddresses : [];
+  const lookupAccounts: AddressLookupTableAccount[] = [];
+  for (const addr of lookupAddrs) {
+    try {
+      const res = await connection.getAddressLookupTable(new PublicKey(addr));
+      if (res.value) lookupAccounts.push(res.value);
+    } catch {
+      // if a lookup table is missing/unavailable, compilation may fail; ignore here and let send fail with a clear error
+    }
+  }
+
+  const { blockhash } = await connection.getLatestBlockhash("confirmed");
+  const messageV0 = new TransactionMessage({
+    payerKey,
+    recentBlockhash: blockhash,
+    instructions: ixs,
+  }).compileToV0Message(lookupAccounts);
+
+  return new VersionedTransaction(messageV0);
+}
+
 async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   try {
@@ -356,23 +448,43 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
     const body = req.body as { quoteResponse?: unknown; stepIndex?: number };
     const quoteResponse = body?.quoteResponse;
     const stepIndex = typeof body?.stepIndex === "number" ? body.stepIndex : 0;
-    if (!quoteResponse || typeof quoteResponse !== "object") return res.status(400).json({ error: "Missing quoteResponse" });
+    console.log("[execute-step] start", { userId, stepIndex });
+    if (!quoteResponse || typeof quoteResponse !== "object") {
+      console.warn("[execute-step] missing quoteResponse", { userId });
+      return res.status(400).json({ error: "Missing quoteResponse" });
+    }
     const quote = quoteResponse as { steps?: Array<{ items?: Array<{ data?: unknown }> }> };
     const steps = quote?.steps;
-    if (!Array.isArray(steps) || !steps[stepIndex]) return res.status(400).json({ error: "Invalid step index or steps" });
+    if (!Array.isArray(steps) || !steps[stepIndex]) {
+      console.warn("[execute-step] invalid step index or steps", { userId, stepIndex, stepCount: steps?.length });
+      return res.status(400).json({ error: "Invalid step index or steps" });
+    }
     const firstItem = steps[stepIndex]?.items?.[0];
     const data = firstItem?.data;
-    if (!data) return res.status(400).json({ error: "No step data to execute" });
+    if (!data) {
+      console.warn("[execute-step] no step data", { userId, stepIndex });
+      return res.status(400).json({ error: "No step data to execute" });
+    }
     const encryptionSecret = process.env.ENCRYPTION_SECRET;
-    if (!encryptionSecret) return res.status(503).json({ error: "ENCRYPTION_SECRET not configured" });
+    if (!encryptionSecret) {
+      console.warn("[execute-step] ENCRYPTION_SECRET not configured");
+      return res.status(503).json({ error: "ENCRYPTION_SECRET not configured" });
+    }
     const db = getAdminDb();
     const userSnap = await db.collection("users").doc(userId).get();
     const userData = userSnap.data();
     const encryptedSecretKey = userData?.encryptedSecretKey;
     const encryptedMnemonic = userData?.encryptedMnemonic;
-    if (!encryptedSecretKey) return res.status(400).json({ error: "Wallet credentials not found" });
+    if (!encryptedSecretKey) {
+      console.warn("[execute-step] wallet credentials not found", { userId });
+      return res.status(400).json({ error: "Wallet credentials not found" });
+    }
     const { secretKey } = await decryptWalletCredentials(userId, encryptedMnemonic, encryptedSecretKey, encryptionSecret);
     const wallet = Keypair.fromSecretKey(secretKey);
+    console.log("[execute-step] wallet loaded, signing", { userId, stepIndex });
+    const connection = new Connection(getRpcUrl());
+
+    let transaction: VersionedTransaction | null = null;
     let serializedTx: string | null = null;
     if (typeof data === "string") serializedTx = data;
     else if (data && typeof data === "object") {
@@ -382,16 +494,26 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       else if (typeof d.payload === "string") serializedTx = d.payload;
       else if (typeof d.transactionBytes === "string") serializedTx = d.transactionBytes;
     }
-    if (!serializedTx) return res.status(400).json({ error: "Step data does not contain Solana transaction" });
-    const txBuffer = Buffer.from(serializedTx, "base64");
-    const transaction = VersionedTransaction.deserialize(txBuffer);
+
+    if (serializedTx) {
+      const txBuffer = Buffer.from(serializedTx, "base64");
+      transaction = VersionedTransaction.deserialize(txBuffer);
+    } else if (isRelaySolanaTxData(data)) {
+      // Relay can return Solana steps as { instructions, addressLookupTableAddresses } instead of a serialized tx
+      transaction = await buildVersionedTxFromRelayInstructions(data, wallet.publicKey, connection);
+    }
+
+    if (!transaction) {
+      console.warn("[execute-step] step data has no Solana transaction", { userId, stepIndex });
+      return res.status(400).json({ error: "Step data does not contain Solana transaction" });
+    }
+
     transaction.sign([wallet]);
-    const signedSerialized = Buffer.from(transaction.serialize()).toString("base64");
-    const connection = new Connection(getRpcUrl());
-    const sig = await connection.sendRawTransaction(Buffer.from(signedSerialized, "base64"), { skipPreflight: false, preflightCommitment: "confirmed" });
+    const sig = await connection.sendRawTransaction(transaction.serialize(), { skipPreflight: false, preflightCommitment: "confirmed" });
+    console.log("[execute-step] success", { userId, stepIndex, signature: sig });
     return res.status(200).json({ signature: sig, status: "Success" });
   } catch (e: unknown) {
-    console.error("execute-step error:", e);
+    console.error("[execute-step] error", { error: e instanceof Error ? e.message : String(e) });
     return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error", signature: "", status: "Failed" });
   }
 }
@@ -708,6 +830,7 @@ async function executeBridgeCustodialHandler(req: VercelRequest, res: VercelResp
     }
     const apiKey = process.env.RELAY_API_KEY;
     const relayHeaders: Record<string, string> = { "Content-Type": "application/json", ...(apiKey && { "x-api-key": apiKey }) };
+    const solanaConnection = new Connection(getRpcUrl());
 
     for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
       const step = steps[stepIndex];
@@ -776,20 +899,26 @@ async function executeBridgeCustodialHandler(req: VercelRequest, res: VercelResp
           const tx = await connected.sendTransaction(txRequest);
           await tx.wait();
         } else {
+          let tx: VersionedTransaction | null = null;
           let serializedTx: string | null = null;
           if (typeof d.serializedTransaction === "string") serializedTx = d.serializedTransaction;
           else if (typeof d.transaction === "string") serializedTx = d.transaction;
           else if (typeof d.payload === "string") serializedTx = d.payload;
           else if (typeof d.transactionBytes === "string") serializedTx = d.transactionBytes;
-          if (!serializedTx) {
+
+          if (serializedTx) {
+            const txBuffer = Buffer.from(serializedTx, "base64");
+            tx = VersionedTransaction.deserialize(txBuffer);
+          } else if (isRelaySolanaTxData(d)) {
+            tx = await buildVersionedTxFromRelayInstructions(d, solanaKeypair.publicKey, solanaConnection);
+          }
+
+          if (!tx) {
             return res.status(400).json({ error: "Step data does not contain Solana transaction" });
           }
-          const txBuffer = Buffer.from(serializedTx, "base64");
-          const transaction = VersionedTransaction.deserialize(txBuffer);
-          transaction.sign([solanaKeypair]);
-          const signedSerialized = Buffer.from(transaction.serialize()).toString("base64");
-          const connection = new Connection(getRpcUrl());
-          await connection.sendRawTransaction(Buffer.from(signedSerialized, "base64"), { skipPreflight: false, preflightCommitment: "confirmed" });
+
+          tx.sign([solanaKeypair]);
+          await solanaConnection.sendRawTransaction(tx.serialize(), { skipPreflight: false, preflightCommitment: "confirmed" });
         }
       }
 
@@ -833,6 +962,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const path = (req.url ?? "").split("?")[0];
   const segments = path.split("/").filter(Boolean);
   const action = segments[segments.length - 1];
+  if (action === "swap-quote" || action === "execute-step") {
+    console.log("[relay] request", { action, method: req.method });
+  }
   const routeHandler = action ? ROUTES[action] : undefined;
   if (!routeHandler) {
     res.status(404).json({

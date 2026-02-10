@@ -86,7 +86,11 @@ You need both IDs to add or remove addresses per chain via the Alchemy API.
 
 ### Step 5: Adding new users’ addresses (dynamic)
 
-When a new user gets their custodial EVM address (e.g. when your backend first derives and stores `evmAddress` in Firestore), add that address to **both** webhooks so deposits on Base and on BSC trigger the bridge.
+**New users:** The app derives and stores `evmAddress` immediately after generating the Solana wallet (in onboarding `WalletSetup`), and the relay adds it to both webhooks when that happens. No extra step needed for new signups.
+
+**Existing users (one-time backfill):** For users who had a wallet before this flow existed, run `npm run backfill-evm-addresses` (optionally with `--dry-run` first), then `npm run sync-evm-deposit-webhook-addresses` to add their addresses to the webhooks.
+
+When any new custodial EVM address is persisted, add it to **both** webhooks so deposits on Base and on BSC trigger the bridge.
 
 Use Alchemy’s **Update webhook addresses** API **twice** (once per webhook):
 
@@ -146,5 +150,5 @@ The first entry in `activity` is used; field names may vary (`to` / `toAddress`,
 - [ ] Create the Address Activity webhook in Alchemy (URL, Base + BSC, optional initial addresses).
 - [ ] Set `ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BASE` and `ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BNB` after creating the two webhooks.
 - [ ] (Optional) Set `API_BASE_URL`, `BASE_RPC_URL`, `BNB_RPC_URL` if needed.
-- [ ] Ensure users get `evmAddress` written in Firestore (e.g. when they hit `evm-address` or `evm-balances`).
-- [ ] When new users get an `evmAddress`, add it to **both** webhooks (Base and BNB) via Alchemy’s update-webhook-addresses API so **deposit → trading → withdraw** works cross-chain for them.
+- [ ] New users get `evmAddress` at wallet setup (WalletSetup calls relay `evm-address` after saving Solana). Existing users: run `npm run backfill-evm-addresses` then `npm run sync-evm-deposit-webhook-addresses`.
+- [ ] When new users get an `evmAddress`, add it to **both** webhooks (Base and BNB) via Alchemy’s update-webhook-addresses API so **deposit → trading → withdraw** works cross-chain for them. (The relay does this when persisting `evmAddress`.)

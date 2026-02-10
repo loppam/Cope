@@ -31,6 +31,23 @@ const RELAY_CHAIN_IDS: Record<number, string> = { 792703809: "solana", 8453: "ba
 const COINGECKO_API_BASE = "https://api.coingecko.com/api/v3/onchain";
 const CHAIN_TO_NETWORK: Record<string, string> = { solana: "solana", base: "base", bnb: "bsc" };
 
+const ALCHEMY_UPDATE_WEBHOOK_URL = "https://dashboard.alchemy.com/api/update-webhook-addresses";
+
+/** Fire-and-forget: add custodial evm address to both Alchemy webhooks (Base + BNB) so deposits trigger evm-deposit. */
+function addEvmAddressToAlchemyWebhooks(addr: string): void {
+  const apiKey = process.env.ALCHEMY_API_KEY;
+  const webhookIdBase = process.env.ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BASE;
+  const webhookIdBnb = process.env.ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BNB;
+  if (!apiKey || !webhookIdBase || !webhookIdBnb) return;
+  const low = addr.toLowerCase();
+  const body = (id: string) => JSON.stringify({ webhook_id: id, addresses_to_add: [low] });
+  const opts = { method: "PATCH" as const, headers: { "Content-Type": "application/json", "X-Alchemy-Token": apiKey } };
+  Promise.all([
+    fetch(ALCHEMY_UPDATE_WEBHOOK_URL, { ...opts, body: body(webhookIdBase) }),
+    fetch(ALCHEMY_UPDATE_WEBHOOK_URL, { ...opts, body: body(webhookIdBnb) }),
+  ]).catch((e) => console.warn("Alchemy webhook address add failed:", e));
+}
+
 function ensureFirebase() {
   if (getApps().length > 0) return;
   const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
@@ -383,6 +400,7 @@ async function evmAddressHandler(req: VercelRequest, res: VercelResponse) {
     const addr = wallet.address.toLowerCase();
     try {
       await userSnap.ref.update({ evmAddress: addr });
+      addEvmAddressToAlchemyWebhooks(addr);
     } catch {
       // best-effort persist for webhook lookup
     }
@@ -415,6 +433,7 @@ async function evmBalancesHandler(req: VercelRequest, res: VercelResponse) {
     const addr = wallet.address.toLowerCase();
     try {
       await userSnap.ref.update({ evmAddress: addr });
+      addEvmAddressToAlchemyWebhooks(addr);
     } catch {
       // best-effort persist for webhook lookup
     }
@@ -685,9 +704,10 @@ async function executeBridgeCustodialHandler(req: VercelRequest, res: VercelResp
           const message = (signData.message as string) ?? "";
           signature = await evmWallet.signMessage(message.startsWith("0x") ? Buffer.from(message.slice(2), "hex") : message);
         }
-        const postBody = typeof postData.body === "object" && postData.body !== null ? { ...postData.body, signature } : { ...(postData.body as object), signature };
+        const postBody = typeof postData.body === "object" && postData.body !== null ? { ...postData.body } : {};
         const postUrl = postData.endpoint.startsWith("http") ? postData.endpoint : `${RELAY_API_BASE}${postData.endpoint.startsWith("/") ? "" : "/"}${postData.endpoint}`;
-        const postRes = await fetch(postUrl, {
+        const postUrlWithSignature = `${postUrl}${postUrl.includes("?") ? "&" : "?"}signature=${encodeURIComponent(signature)}`;
+        const postRes = await fetch(postUrlWithSignature, {
           method: (postData.method as string) ?? "POST",
           headers: relayHeaders,
           body: JSON.stringify(postBody),

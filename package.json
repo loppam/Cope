@@ -13,7 +13,9 @@
     "sync-collections": "node scripts/sync-collections.mjs",
     "migrate-push-token-index": "node scripts/migrate-push-token-index.mjs",
     "reset-all": "node scripts/reset-all.mjs",
-    "bridge-evm-usdc-to-sol": "node scripts/bridge-evm-usdc-to-sol.mjs"
+    "bridge-evm-usdc-to-sol": "node scripts/bridge-evm-usdc-to-sol.mjs",
+    "backfill-evm-addresses": "node scripts/backfill-evm-addresses.mjs",
+    "sync-evm-deposit-webhook-addresses": "node scripts/sync-evm-deposit-webhook-addresses.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

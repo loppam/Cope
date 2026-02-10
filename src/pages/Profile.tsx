@@ -47,7 +47,8 @@ import {
 import { updatePublicWalletStatus } from "@/lib/auth";
 import { syncWebhook } from "@/lib/webhook";
 import { getFollowersCount } from "@/lib/profile";
-import { getWalletPositions, getWalletPnL } from "@/lib/solanatracker";
+import { getWalletPositions, getWalletPnL, getSolPrice } from "@/lib/solanatracker";
+import { getSolBalance } from "@/lib/rpc";
 import { getIntentStatus } from "@/lib/relay";
 import { toast } from "sonner";
 import type { WatchedWallet } from "@/lib/auth";
@@ -133,55 +134,80 @@ export function Profile() {
     }
   }, [walletAddress]);
 
-  // Fetch open token positions (exclude SOL and USDC), then merge PnL
+  // Fetch open positions: SOL + EVM (Base/BNB USDC and native) + SPL tokens
+  const APPROX_ETH_PRICE = 3000;
+  const APPROX_BNB_PRICE = 600;
   useEffect(() => {
     if (!walletAddress) {
       setOpenPositions([]);
       setClosedPositions([]);
       return;
     }
-    getWalletPositions(walletAddress, false)
-      .then((res) => {
-        const tokens: TokenPosition[] = [];
-        for (const t of res.tokens) {
+    const base = getApiBase();
+    Promise.all([
+      getWalletPositions(walletAddress, false),
+      getWalletPnL(walletAddress, false),
+      getSolBalance(walletAddress),
+      getSolPrice(),
+      user ? user.getIdToken().then((token) => fetch(`${base}/api/relay/evm-balances`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => null)) : Promise.resolve(null),
+    ])
+      .then(([positionsRes, pnlRes, solBalance, solPrice, evmData]) => {
+        const combined: TokenPosition[] = [];
+        if (solBalance > 0 && solPrice > 0) {
+          combined.push({
+            mint: SOL_MINT,
+            symbol: "SOL",
+            name: "Solana",
+            amount: solBalance,
+            value: solBalance * solPrice,
+          });
+        }
+        if (evmData?.evmAddress) {
+          if (evmData.base?.usdc > 0) {
+            combined.push({ mint: "base-usdc", symbol: "USDC", name: "USD Coin (Base)", amount: evmData.base.usdc, value: evmData.base.usdc });
+          }
+          if (evmData.base?.native > 0) {
+            combined.push({ mint: "base-eth", symbol: "ETH", name: "Ethereum (Base)", amount: evmData.base.native, value: evmData.base.native * APPROX_ETH_PRICE });
+          }
+          if (evmData.bnb?.usdc > 0) {
+            combined.push({ mint: "bnb-usdc", symbol: "USDC", name: "USD Coin (BNB)", amount: evmData.bnb.usdc, value: evmData.bnb.usdc });
+          }
+          if (evmData.bnb?.native > 0) {
+            combined.push({ mint: "bnb-bnb", symbol: "BNB", name: "BNB", amount: evmData.bnb.native, value: evmData.bnb.native * APPROX_BNB_PRICE });
+          }
+        }
+        const pnlByMint = pnlRes?.tokens ?? {};
+        for (const t of positionsRes.tokens) {
           const mint = t.token.mint;
           if (mint === SOL_MINT || mint === SOLANA_USDC_MINT) continue;
           const value = t.value || 0;
           if (value <= 0) continue;
-          tokens.push({
+          const p = pnlByMint[mint];
+          const pnl = p?.total ?? 0;
+          const totalInvested = p?.total_invested ?? 0;
+          const costBasis = p?.cost_basis ?? 0;
+          let pnlPercent: number | undefined;
+          if (totalInvested > 0) pnlPercent = (pnl / totalInvested) * 100;
+          else if (costBasis > 0) pnlPercent = (pnl / costBasis) * 100;
+          combined.push({
             mint,
             symbol: t.token.symbol || mint.slice(0, 8),
             name: t.token.name || "Unknown",
             image: t.token.image,
             amount: t.balance ?? 0,
             value,
+            pnl,
+            pnlPercent,
           });
         }
-        return getWalletPnL(walletAddress, false)
-          .then((pnlRes) => {
-            const pnlByMint = pnlRes.tokens || {};
-            return tokens.map((pos) => {
-              const p = pnlByMint[pos.mint];
-              const pnl = p?.total ?? 0;
-              const totalInvested = p?.total_invested ?? 0;
-              const costBasis = p?.cost_basis ?? 0;
-              let pnlPercent: number | undefined;
-              if (totalInvested > 0) pnlPercent = (pnl / totalInvested) * 100;
-              else if (costBasis > 0) pnlPercent = (pnl / costBasis) * 100;
-              return { ...pos, pnl, pnlPercent };
-            });
-          })
-          .catch(() => tokens);
-      })
-      .then((merged) => {
-        setOpenPositions(merged);
-        setClosedPositions([]); // TODO: closed positions from history when available
+        setOpenPositions(combined);
+        setClosedPositions([]);
       })
       .catch(() => {
         setOpenPositions([]);
         setClosedPositions([]);
       });
-  }, [walletAddress]);
+  }, [walletAddress, user]);
 
   // Fetch stats
   useEffect(() => {

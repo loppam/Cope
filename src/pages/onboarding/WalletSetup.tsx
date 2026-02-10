@@ -6,6 +6,7 @@ import { ArrowLeft, Sparkles, Loader2 } from "lucide-react";
 import { generateWallet } from "@/lib/wallet";
 import { useAuth } from "@/contexts/AuthContext";
 import { encrypt, generateEncryptionKey } from "@/lib/encryption";
+import { getApiBase } from "@/lib/utils";
 import { toast } from "sonner";
 
 export function WalletSetup() {
@@ -44,7 +45,8 @@ export function WalletSetup() {
 
               setIsGenerating(true);
               try {
-                // Generate new wallet (one mnemonic backs both Solana and EVM; we never show private keys or recovery phrase)
+                // Generate new wallet: one mnemonic backs both Solana and EVM.
+                // We persist Solana via updateWallet below, then derive and persist EVM address so new users get both immediately.
                 const wallet = generateWallet();
 
                 // Validate wallet has required fields
@@ -119,6 +121,21 @@ export function WalletSetup() {
                   throw new Error(
                     "Wallet generation verification failed: isNew not set to false",
                   );
+                }
+
+                // Derive and persist EVM address (same mnemonic); register with deposit webhooks.
+                // Without this, evmAddress is only set when user hits Profile/Trade/Positions.
+                try {
+                  const token = await user.getIdToken();
+                  const base = getApiBase();
+                  const res = await fetch(`${base}/api/relay/evm-address`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                  });
+                  if (!res.ok) {
+                    console.warn("EVM address derivation failed:", res.status);
+                  }
+                } catch (e) {
+                  console.warn("EVM address derivation failed:", e);
                 }
 
                 toast.success("Wallet generated successfully!", {

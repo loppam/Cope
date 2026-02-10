@@ -46,9 +46,7 @@ import { getFollowersCount } from "@/lib/profile";
 import { getWalletPositions } from "@/lib/solanatracker";
 import { toast } from "sonner";
 import type { WatchedWallet } from "@/lib/auth";
-
-const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const SOL_MINT = "So11111111111111111111111111111111111111112";
+import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
 
 interface TokenPosition {
   mint: string;
@@ -97,7 +95,7 @@ export function Profile() {
     if (!walletAddress) return;
     try {
       const tokenAccounts = await getTokenAccounts(walletAddress);
-      const usdcAccount = tokenAccounts.find((a) => a.mint === USDC_MINT);
+      const usdcAccount = tokenAccounts.find((a) => a.mint === SOLANA_USDC_MINT);
       setUsdcBalance(usdcAccount?.uiAmount ?? 0);
     } catch (error) {
       console.error("Error fetching balance:", error);
@@ -125,7 +123,7 @@ export function Profile() {
         const tokens: TokenPosition[] = [];
         for (const t of res.tokens) {
           const mint = t.token.mint;
-          if (mint === SOL_MINT || mint === USDC_MINT) continue;
+          if (mint === SOL_MINT || mint === SOLANA_USDC_MINT) continue;
           const value = t.value || 0;
           if (value <= 0) continue;
           tokens.push({

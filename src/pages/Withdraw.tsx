@@ -8,8 +8,8 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { getTokenAccounts } from "@/lib/rpc";
 import { getIntentStatus } from "@/lib/relay";
-
-const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+import { SOLANA_USDC_MINT } from "@/lib/constants";
+import { getApiBase } from "@/lib/utils";
 
 type WithdrawNetwork = "base" | "bnb" | "solana";
 
@@ -30,7 +30,7 @@ export function Withdraw() {
   useEffect(() => {
     if (!walletAddress) return;
     getTokenAccounts(walletAddress).then((accounts) => {
-      const usdc = accounts.find((a) => a.mint === USDC_MINT);
+      const usdc = accounts.find((a) => a.mint === SOLANA_USDC_MINT);
       setUsdcBalance(usdc?.uiAmount ?? 0);
     });
   }, [walletAddress]);
@@ -51,7 +51,7 @@ export function Withdraw() {
     setRequestId(null);
     try {
       const token = await user.getIdToken();
-      const base = import.meta.env.VITE_API_BASE_URL || "";
+      const base = getApiBase();
       const res = await fetch(`${base}/api/relay/withdraw-quote`, {
         method: "POST",
         headers: {
@@ -82,7 +82,7 @@ export function Withdraw() {
     setExecuting(true);
     try {
       const token = await user.getIdToken();
-      const base = import.meta.env.VITE_API_BASE_URL || "";
+      const base = getApiBase();
       const res = await fetch(`${base}/api/relay/execute-step`, {
         method: "POST",
         headers: {

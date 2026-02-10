@@ -44,7 +44,7 @@ export function WalletSetup() {
 
               setIsGenerating(true);
               try {
-                // Generate new wallet
+                // Generate new wallet (one mnemonic backs both Solana and EVM; we never show private keys or recovery phrase)
                 const wallet = generateWallet();
 
                 // Validate wallet has required fields

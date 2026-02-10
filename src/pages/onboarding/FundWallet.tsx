@@ -7,6 +7,7 @@ import { ArrowLeft, Copy, Loader2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import { getApiBase } from "@/lib/utils";
 
 type DepositTab = "base" | "bnb" | "solana";
 
@@ -54,7 +55,7 @@ export function FundWallet() {
     setQuote(null);
     try {
       const token = await user.getIdToken();
-      const base = import.meta.env.VITE_API_BASE_URL || "";
+      const base = getApiBase();
       const res = await fetch(`${base}/api/relay/deposit-quote`, {
         method: "POST",
         headers: {

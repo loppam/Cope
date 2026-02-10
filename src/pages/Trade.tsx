@@ -31,24 +31,23 @@ import {
   Loader2,
   Settings,
 } from "lucide-react";
-import { shortenAddress } from "@/lib/utils";
+import { shortenAddress, getApiBase } from "@/lib/utils";
+import { getChainId } from "@/lib/relay";
+import { SOLANA_USDC_MINT, BASE_USDC_ADDRESS, BNB_USDC_ADDRESS } from "@/lib/constants";
 import { toast } from "sonner";
-
-const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 type TradeChain = "solana" | "base" | "bnb";
 const CROSS_CHAIN_TOKENS: Record<TradeChain, { symbol: string; address: string; name: string }[]> = {
   solana: [],
   base: [
     { symbol: "ETH", address: "0x4200000000000000000000000000000000000006", name: "Wrapped Ether" },
-    { symbol: "USDC", address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", name: "USD Coin" },
+    { symbol: "USDC", address: BASE_USDC_ADDRESS, name: "USD Coin" },
   ],
   bnb: [
     { symbol: "BNB", address: "0x0000000000000000000000000000000000000000", name: "BNB" },
-    { symbol: "USDC", address: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", name: "USD Coin" },
+    { symbol: "USDC", address: BNB_USDC_ADDRESS, name: "USD Coin" },
   ],
 };
-const CHAIN_IDS: Record<TradeChain, number> = { solana: 792703809, base: 8453, bnb: 56 };
 
 export function Trade() {
   const location = useLocation();
@@ -123,15 +122,19 @@ export function Trade() {
     return () => clearInterval(interval);
   }, [lastRefresh]);
 
-  // Fetch EVM address when trading on Base/BNB (for cross-chain recipient)
+  // EVM address for Base/BNB (from profile when backfilled, else from API)
   useEffect(() => {
     if (tradeChain === "solana" || !user) {
       setEvmAddress(null);
       return;
     }
+    if (userProfile?.evmAddress) {
+      setEvmAddress(userProfile.evmAddress);
+      return;
+    }
     let cancelled = false;
     user.getIdToken().then((token) => {
-      const base = import.meta.env.VITE_API_BASE_URL || "";
+      const base = getApiBase();
       return fetch(`${base}/api/relay/evm-address`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -142,7 +145,7 @@ export function Trade() {
       if (!cancelled) setEvmAddress(null);
     });
     return () => { cancelled = true; };
-  }, [tradeChain, user]);
+  }, [tradeChain, user, userProfile?.evmAddress]);
 
   // Fetch user's token balance for the selected token (for Sell section)
   useEffect(() => {
@@ -283,10 +286,10 @@ export function Trade() {
     setSwapping(true);
     try {
       const tokenId = await user.getIdToken();
-      const base = import.meta.env.VITE_API_BASE_URL || "";
+      const base = getApiBase();
       const outputMint = isCrossChain ? crossChainToken!.address : token!.mint;
       const body: Record<string, unknown> = {
-        inputMint: USDC_MINT,
+        inputMint: SOLANA_USDC_MINT,
         outputMint,
         amount: Math.floor(amountNum * 1e6).toString(),
         slippageBps: slippage,
@@ -294,7 +297,7 @@ export function Trade() {
         tradeType: "buy",
       };
       if (isCrossChain) {
-        body.outputChainId = CHAIN_IDS[tradeChain];
+        body.outputChainId = getChainId(tradeChain);
         body.recipient = evmAddress;
       }
       const res = await fetch(`${base}/api/relay/swap-quote`, {
@@ -321,7 +324,7 @@ export function Trade() {
       const impact = details.totalImpact?.percent != null ? parseFloat(details.totalImpact.percent) : 0;
 
       setSwapQuote({
-        inputMint: USDC_MINT,
+        inputMint: SOLANA_USDC_MINT,
         outputMint: outputMint,
         inputAmount,
         outputAmount,
@@ -331,7 +334,7 @@ export function Trade() {
         outUsdValue: outUsd,
         priceImpact: impact,
         feeBps: 0,
-        feeMint: USDC_MINT,
+        feeMint: SOLANA_USDC_MINT,
         requestId: data?.steps?.[0]?.requestId || "",
         transaction: "",
         slippage,
@@ -374,7 +377,7 @@ export function Trade() {
     try {
       const amountRaw = Math.floor(amountNum * Math.pow(10, token.decimals));
       const tokenId = await user.getIdToken();
-      const base = import.meta.env.VITE_API_BASE_URL || "";
+      const base = getApiBase();
       const res = await fetch(`${base}/api/relay/swap-quote`, {
         method: "POST",
         headers: {
@@ -383,7 +386,7 @@ export function Trade() {
         },
         body: JSON.stringify({
           inputMint: token.mint,
-          outputMint: USDC_MINT,
+          outputMint: SOLANA_USDC_MINT,
           amount: amountRaw.toString(),
           slippageBps: slippage,
           userWallet: userProfile.walletAddress,
@@ -407,7 +410,7 @@ export function Trade() {
 
       setSwapQuote({
         inputMint: token.mint,
-        outputMint: USDC_MINT,
+        outputMint: SOLANA_USDC_MINT,
         inputAmount,
         outputAmount,
         inputAmountUi,
@@ -441,7 +444,7 @@ export function Trade() {
 
     try {
       const tokenId = await user.getIdToken();
-      const base = import.meta.env.VITE_API_BASE_URL || "";
+      const base = getApiBase();
       const res = await fetch(`${base}/api/relay/execute-step`, {
         method: "POST",
         headers: {

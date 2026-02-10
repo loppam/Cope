@@ -4,7 +4,9 @@ import { mnemonicToSeedSync, generateMnemonic, validateMnemonic } from 'bip39';
 import bs58 from 'bs58';
 
 /**
- * Generate a new Solana wallet from mnemonic
+ * Generate a new Solana wallet from mnemonic.
+ * The same mnemonic is stored encrypted and used server-side to derive the EVM wallet (BIP44 m/44'/60'/0'/0/0).
+ * Private keys and recovery phrase are never shown to the user.
  * @returns {Object} { publicKey, secretKey, mnemonic }
  */
 export function generateWallet() {

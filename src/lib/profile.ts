@@ -2,8 +2,10 @@
  * Profile-related API helpers
  */
 
+import { getApiBase } from "./utils";
+
 export async function getFollowersCount(idToken: string): Promise<number> {
-  const base = import.meta.env.VITE_API_BASE_URL || "";
+  const base = getApiBase();
   const res = await fetch(`${base}/api/profile/followers-count`, {
     method: "GET",
     headers: {
@@ -24,7 +26,7 @@ export interface FollowerEntry {
 export async function getFollowersList(
   idToken: string,
 ): Promise<FollowerEntry[]> {
-  const base = import.meta.env.VITE_API_BASE_URL || "";
+  const base = getApiBase();
   const res = await fetch(`${base}/api/profile/followers-list`, {
     method: "GET",
     headers: {

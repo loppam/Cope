@@ -5,7 +5,7 @@
 
 const RELAY_API_BASE = "https://api.relay.link";
 
-/** Chain IDs from Relay (fallbacks when GET /chains not used). Solana: 792703809 per Relay docs. */
+/** Chain IDs from Relay. Solana: 792703809 per Relay docs. */
 export const RELAY_CHAIN_IDS = {
   base: 8453,
   bnb: 56,
@@ -14,43 +14,9 @@ export const RELAY_CHAIN_IDS = {
 
 export type RelayNetwork = "base" | "bnb" | "solana";
 
-export interface RelayChain {
-  id: number;
-  name: string;
-  displayName: string;
-  depositEnabled?: boolean;
-  disabled?: boolean;
-}
-
-let chainsCache: RelayChain[] | null = null;
-
-/**
- * Fetch supported chains from Relay and cache. Maps by name for Base, BNB, Solana.
- */
-export async function getChains(): Promise<RelayChain[]> {
-  if (chainsCache) return chainsCache;
-  const res = await fetch(`${RELAY_API_BASE}/chains`);
-  if (!res.ok) throw new Error("Failed to fetch Relay chains");
-  const data = await res.json();
-  const chains = (data.chains || []).map((c: { id: number; name: string; displayName?: string; depositEnabled?: boolean; disabled?: boolean }) => ({
-    id: c.id,
-    name: c.name,
-    displayName: c.displayName ?? c.name,
-    depositEnabled: c.depositEnabled,
-    disabled: c.disabled,
-  }));
-  chainsCache = chains;
-  return chains;
-}
-
-/**
- * Get chain ID for a network (Base, BNB, Solana). Uses cache or fallback constants.
- */
-export async function getChainId(network: RelayNetwork): Promise<number> {
-  const chains = await getChains();
-  const byName = chains.find((c) => c.name.toLowerCase() === network.toLowerCase());
-  if (byName) return byName.id;
-  return (RELAY_CHAIN_IDS as Record<string, number>)[network] ?? 0;
+/** Get chain ID for a network (hardcoded; no API call). */
+export function getChainId(network: RelayNetwork): number {
+  return RELAY_CHAIN_IDS[network];
 }
 
 /**

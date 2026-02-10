@@ -1,32 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { getAuth } from "firebase-admin/auth";
-import { getFirestore } from "firebase-admin/firestore";
-import { getApps, initializeApp, cert } from "firebase-admin/app";
 import { Keypair, VersionedTransaction, Connection } from "@solana/web3.js";
 import { decryptWalletCredentials } from "./decrypt";
-
-function initFirebase() {
-  if (getApps().length > 0) return;
-  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
-  let projectId: string | undefined;
-  let clientEmail: string | undefined;
-  let privateKey: string | undefined;
-  if (raw) {
-    const sa = JSON.parse(raw);
-    projectId = sa.project_id;
-    clientEmail = sa.client_email;
-    privateKey = sa.private_key?.replace(/\\n/g, "\n");
-  }
-  projectId = projectId || process.env.FIREBASE_ADMIN_PROJECT_ID;
-  clientEmail = clientEmail || process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
-  privateKey = privateKey || process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, "\n");
-  if (!projectId || !clientEmail || !privateKey) {
-    throw new Error("Firebase admin credentials not configured");
-  }
-  initializeApp({
-    credential: cert({ projectId, clientEmail, privateKey }),
-  });
-}
+import { ensureFirebase, getAdminAuth, getAdminDb } from "../../lib/firebase-admin";
 
 function getRpcUrl(): string {
   if (process.env.SOLANA_RPC_URL) return process.env.SOLANA_RPC_URL;
@@ -41,13 +16,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    initFirebase();
+    ensureFirebase();
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith("Bearer ")) {
       return res.status(401).json({ error: "Unauthorized" });
     }
     const token = authHeader.slice(7);
-    const decoded = await getAuth().verifyIdToken(token);
+    const decoded = await getAdminAuth().verifyIdToken(token);
     const userId = decoded.uid;
 
     const body = req.body as {
@@ -81,7 +56,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(503).json({ error: "ENCRYPTION_SECRET not configured" });
     }
 
-    const db = getFirestore();
+    const db = getAdminDb();
     const userSnap = await db.collection("users").doc(userId).get();
     const userData = userSnap.data();
     const encryptedSecretKey = userData?.encryptedSecretKey;

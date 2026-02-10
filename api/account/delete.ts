@@ -1,10 +1,10 @@
 // DELETE /api/account/delete – Permanently delete user account and all platform data.
 // Requires Authorization: Bearer <idToken>. Double confirmation is done in the client (modal).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { createHash } from "crypto";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
+import { pushTokenDocId } from "../lib/tokenHash";
 
 if (getApps().length === 0) {
   const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
@@ -41,10 +41,6 @@ if (getApps().length === 0) {
 const adminAuth = getAuth();
 const db = getFirestore();
 const PUSH_TOKEN_INDEX = "pushTokenIndex";
-
-function pushTokenDocId(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
 
 async function getUidFromHeader(req: VercelRequest): Promise<string | null> {
   const authorization = req.headers.authorization;

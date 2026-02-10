@@ -20,6 +20,7 @@ import {
   removeUserWallet,
   getFirebaseCallbackUrl,
 } from "@/lib/auth";
+import { getApiBase } from "@/lib/utils";
 import { toast } from "sonner";
 
 interface AuthContextType {
@@ -354,7 +355,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) throw new Error("User not authenticated");
     try {
       const token = await user.getIdToken();
-      const base = import.meta.env.VITE_API_BASE_URL || "";
+      const base = getApiBase();
       const res = await fetch(`${base}/api/watchlist/add`, {
         method: "POST",
         headers: {
@@ -387,7 +388,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) throw new Error("User not authenticated");
     try {
       const token = await user.getIdToken();
-      const base = import.meta.env.VITE_API_BASE_URL || "";
+      const base = getApiBase();
       const res = await fetch(`${base}/api/watchlist/remove`, {
         method: "POST",
         headers: {
@@ -427,7 +428,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) throw new Error("User not authenticated");
     try {
       const token = await user.getIdToken();
-      const base = import.meta.env.VITE_API_BASE_URL || "";
+      const base = getApiBase();
       const res = await fetch(`${base}/api/account/delete`, {
         method: "POST",
         headers: {

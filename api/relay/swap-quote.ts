@@ -1,39 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { getAuth } from "firebase-admin/auth";
-import { getApps, initializeApp, cert } from "firebase-admin/app";
-
-const RELAY_API_BASE = process.env.RELAY_API_BASE || "https://api.relay.link";
-
-const SOLANA_CHAIN_ID = 792703809;
-const CHAIN_IDS: Record<string, number> = {
-  solana: 792703809,
-  base: 8453,
-  bnb: 56,
-};
-const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-
-function initFirebase() {
-  if (getApps().length > 0) return;
-  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
-  let projectId: string | undefined;
-  let clientEmail: string | undefined;
-  let privateKey: string | undefined;
-  if (raw) {
-    const sa = JSON.parse(raw);
-    projectId = sa.project_id;
-    clientEmail = sa.client_email;
-    privateKey = sa.private_key?.replace(/\\n/g, "\n");
-  }
-  projectId = projectId || process.env.FIREBASE_ADMIN_PROJECT_ID;
-  clientEmail = clientEmail || process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
-  privateKey = privateKey || process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, "\n");
-  if (!projectId || !clientEmail || !privateKey) {
-    throw new Error("Firebase admin credentials not configured");
-  }
-  initializeApp({
-    credential: cert({ projectId, clientEmail, privateKey }),
-  });
-}
+import { RELAY_API_BASE, CHAIN_IDS } from "./constants";
+import { ensureFirebase, getAdminAuth } from "../../lib/firebase-admin";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -41,12 +8,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    initFirebase();
+    ensureFirebase();
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith("Bearer ")) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-    await getAuth().verifyIdToken(authHeader.slice(7));
+    await getAdminAuth().verifyIdToken(authHeader.slice(7));
 
     const body = req.body as {
       inputMint?: string;
@@ -64,7 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const slippageBps = typeof body?.slippageBps === "number" ? body.slippageBps : 100;
     const userWallet = (body?.userWallet || "").trim();
     const tradeType = body?.tradeType || "buy";
-    let destinationChainId = SOLANA_CHAIN_ID;
+    let destinationChainId = CHAIN_IDS.solana;
     if (typeof body?.outputChainId === "number") {
       destinationChainId = body.outputChainId;
     } else if (body?.outputChain) {
@@ -77,7 +44,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const apiKey = process.env.RELAY_API_KEY;
-    const originChainId = SOLANA_CHAIN_ID;
+    const originChainId = CHAIN_IDS.solana;
 
     const recipient = (body as { recipient?: string }).recipient?.trim() || userWallet;
     const quoteBody = {

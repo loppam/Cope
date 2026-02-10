@@ -5,10 +5,7 @@ import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import webpush from "web-push";
-
-function pushTokenDocId(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
+import { pushTokenDocId } from "../lib/tokenHash";
 
 // Initialize Firebase Admin (only once)
 if (getApps().length === 0) {

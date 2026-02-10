@@ -8,7 +8,7 @@ import {
   RefreshCw,
   Loader2,
 } from "lucide-react";
-import { formatCurrency, formatPercentage, shortenAddress } from "@/lib/utils";
+import { formatCurrency, formatPercentage, shortenAddress, getApiBase } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   getWalletPnLSummary,
@@ -19,6 +19,7 @@ import {
 } from "@/lib/solanatracker";
 import { getSolBalance, getTokenAccounts } from "@/lib/rpc";
 import { apiCache } from "@/lib/cache";
+import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
 import { toast } from "sonner";
 
 type ChainTag = "solana" | "base" | "bnb";
@@ -59,9 +60,6 @@ export function Positions() {
 
   const walletAddress = userProfile?.walletAddress;
 
-  // Mainnet USDC mint (Circle)
-  const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-
   const fetchPositions = async (forceRefresh: boolean = false) => {
     if (!walletAddress) {
       setLoading(false);
@@ -90,7 +88,7 @@ export function Positions() {
         currentSolPrice = price;
         setSolBalance(balance);
         setSolPrice(price);
-        const usdcAccount = tokenAccounts.find((a) => a.mint === USDC_MINT);
+        const usdcAccount = tokenAccounts.find((a) => a.mint === SOLANA_USDC_MINT);
         currentUsdcBalance = usdcAccount?.uiAmount ?? 0;
         setUsdcBalance(currentUsdcBalance);
       } catch (error) {
@@ -104,9 +102,9 @@ export function Positions() {
       for (const positionToken of positionsResponse.tokens) {
         const mint = positionToken.token.mint;
         const isSOL =
-          mint === "So11111111111111111111111111111111111111112" ||
+          mint === SOL_MINT ||
           mint === "So11111111111111111111111111111111111111111";
-        const isUSDC = mint === USDC_MINT;
+        const isUSDC = mint === SOLANA_USDC_MINT;
 
         let tokenValue = positionToken.value || 0;
         let tokenAmount = positionToken.balance || 0;
@@ -153,7 +151,7 @@ export function Positions() {
       if (user) {
         try {
           const token = await user.getIdToken();
-          const base = import.meta.env.VITE_API_BASE_URL || "";
+          const base = getApiBase();
           const res = await fetch(`${base}/api/relay/evm-balances`, {
             headers: { Authorization: `Bearer ${token}` },
           });
@@ -404,9 +402,9 @@ export function Positions() {
         {positions.length > 0 ? (
           positions.map((position) => {
             const isSOL =
-              position.mint === "So11111111111111111111111111111111111111112" ||
+              position.mint === SOL_MINT ||
               position.mint === "So11111111111111111111111111111111111111111";
-            const isUSDC = position.mint === USDC_MINT;
+            const isUSDC = position.mint === SOLANA_USDC_MINT;
             const isSolanaPosition = !position.chain || position.chain === "solana";
             const chainLabel = position.chain === "base" ? "Base" : position.chain === "bnb" ? "BNB" : "Solana";
 

@@ -5,7 +5,7 @@ import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import webpush from "web-push";
-import { pushTokenDocId } from "../../lib/tokenHash";
+import { pushTokenDocId } from "../lib/tokenHash";
 
 // Initialize Firebase Admin (only once)
 if (getApps().length === 0) {

@@ -4,7 +4,7 @@
 //           /api/push/status → /api/push-handler?action=status
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
-import { pushTokenDocId } from "../lib/tokenHash";
+import { pushTokenDocId } from "./lib/tokenHash";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";

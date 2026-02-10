@@ -5,7 +5,7 @@ import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import webpush from "web-push";
-import { pushTokenDocId } from "../lib/tokenHash";
+import { pushTokenDocId } from "../../lib/tokenHash";
 
 // Initialize Firebase Admin (only once)
 if (getApps().length === 0) {
@@ -350,7 +350,7 @@ function getPrimaryTokenMint(tx: HeliusWebhookPayload): string | undefined {
   return byAmount[0]?.mint;
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export async function transactionHandler(req: VercelRequest, res: VercelResponse) {
   // Only allow POST requests
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });

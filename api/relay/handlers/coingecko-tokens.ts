@@ -24,7 +24,7 @@ export async function coingeckoTokensHandler(req: VercelRequest, res: VercelResp
     const networkParam = (query.network ?? "").toString().trim().toLowerCase();
     const addressesParam = (query.addresses ?? "").toString().trim();
 
-    const network = CHAIN_TO_NETWORK[networkParam] ?? networkParam || "solana";
+    const network = (CHAIN_TO_NETWORK[networkParam] ?? networkParam) || "solana";
     if (!addressesParam) {
       return res.status(400).json({ error: "Missing addresses (comma-separated token addresses)" });
     }

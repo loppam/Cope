@@ -1,10 +1,7 @@
-// Vercel Serverless Function: Sync all watched wallets to Helius webhook
-// This should be called when a wallet is added/removed from watchlist
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore, type DocumentReference, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 
-// Initialize Firebase Admin (only once)
 if (getApps().length === 0) {
   const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
   let projectId: string | undefined;
@@ -38,24 +35,16 @@ if (getApps().length === 0) {
 }
 
 const db = getFirestore();
-// Helius webhook API (documented: https://docs.helius.dev/api-reference/webhooks)
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const HELIUS_API_URL = "https://api-mainnet.helius-rpc.com/v0/webhooks";
-const WEBHOOK_ID = process.env.HELIUS_WEBHOOK_ID; // Store this in .env after creating first webhook
-
-/** Transaction types we subscribe to: SWAP only (buy/sell inferred from SOL↔token direction in handler). */
+const WEBHOOK_ID = process.env.HELIUS_WEBHOOK_ID;
 const WEBHOOK_TRANSACTION_TYPES = ["SWAP"] as const;
 
 function isUserPublic(data: { isPublic?: boolean }): boolean {
   return data.isPublic !== false;
 }
 
-/**
- * Sync all watched wallets across all users to Helius webhook.
- * - onPlatform entries: resolve uid → current walletAddress; skip if user is private.
- * - Rebuilds watchedWallets reverse index from watchlists.
- */
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export async function syncHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -88,7 +77,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // Build user lookup: uid -> { walletAddress, isPublic }
     const userByUid = new Map<
       string,
       { walletAddress: string | null; isPublic: boolean }
@@ -101,7 +89,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     });
 
-    // address -> { [watcherUid]: { nickname?, addedAt? } }
     const addressToWatchers = new Map<
       string,
       Record<string, { nickname?: string; addedAt?: string }>
@@ -126,7 +113,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (w.onPlatform && w.uid) {
           const target = userByUid.get(w.uid);
           if (!target || !target.isPublic || !target.walletAddress) {
-            // Private or no wallet: exclude from webhook (no notifications)
             continue;
           }
           effectiveAddress = target.walletAddress;
@@ -152,10 +138,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const accountAddresses = Array.from(addressToWatchers.keys());
-
     const batch = db.batch();
 
-    // Build followers reverse index: targetUid -> followerUids[] (who has this user in watchlist with onPlatform)
     const followersMap = new Map<string, string[]>();
     const allTargetUids = new Set<string>();
     for (const doc of usersSnapshot.docs) {
@@ -181,7 +165,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       batch.set(ref, { followerUids }, { merge: true });
     }
 
-    // Rebuild watchedWallets reverse index
     const allWatchedRefs = await db.collection("watchedWallets").get();
     const toDelete: DocumentReference[] = [];
     const toWrite = new Set<string>();
@@ -204,27 +187,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     await batch.commit();
 
-    // Update lastSyncAt for lazy sync timer (transaction handler checks every 5h)
     const configRef = db.collection("config").doc("webhookSync");
     await configRef.set(
       { lastSyncAt: Date.now(), updatedAt: new Date() },
       { merge: true },
     );
 
-    // Get webhook URL
     const webhookURL =
       process.env.WEBHOOK_URL ||
       `${req.headers.origin || "https://your-domain.vercel.app"}/api/webhook/transaction`;
 
-    // If we have an existing webhook, update it (PUT /v0/webhooks/{webhookID} per Helius docs)
     if (WEBHOOK_ID) {
       const updateResponse = await fetch(
         `${HELIUS_API_URL}/${WEBHOOK_ID}?api-key=${HELIUS_API_KEY}`,
         {
           method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             webhookURL:
               process.env.WEBHOOK_URL ||
@@ -252,14 +230,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // Create new webhook if it doesn't exist
     const createResponse = await fetch(
       `${HELIUS_API_URL}?api-key=${HELIUS_API_KEY}`,
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           webhookURL,
           transactionTypes: WEBHOOK_TRANSACTION_TYPES,
@@ -278,8 +253,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const data = await createResponse.json();
-
-    // Store webhook ID (you should save this to your .env or database)
     console.log(
       `New webhook created: ${data.webhookID}. Add this to HELIUS_WEBHOOK_ID in .env`,
     );

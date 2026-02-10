@@ -1,17 +1,10 @@
-// Vercel Serverless Function: Create/Update Helius webhook for watched wallets
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-// Helius webhook API (documented: https://docs.helius.dev/api-reference/webhooks)
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const HELIUS_API_URL = "https://api-mainnet.helius-rpc.com/v0/webhooks";
-
-/** Transaction types we subscribe to: SWAP only (buy/sell inferred from SOL↔token direction in handler). */
 const WEBHOOK_TRANSACTION_TYPES = ["SWAP"] as const;
 
-/**
- * Create or update a Helius webhook for monitoring wallet addresses
- */
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export async function createHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -33,20 +26,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: "HELIUS_API_KEY not configured" });
     }
 
-    // Get webhook URL (your Vercel function URL)
     const webhookURL =
       process.env.WEBHOOK_URL ||
       `${req.headers.origin || "https://your-domain.vercel.app"}/api/webhook/transaction`;
 
-    // If webhookId is provided, update existing webhook (PUT /v0/webhooks/{webhookID} per Helius docs)
     if (webhookId) {
       const updateResponse = await fetch(
         `${HELIUS_API_URL}/${webhookId}?api-key=${HELIUS_API_KEY}`,
         {
           method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             webhookURL:
               process.env.WEBHOOK_URL ||
@@ -70,14 +59,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ success: true, webhookId: data.webhookID });
     }
 
-    // Create new webhook
     const createResponse = await fetch(
       `${HELIUS_API_URL}?api-key=${HELIUS_API_KEY}`,
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           webhookURL,
           transactionTypes: WEBHOOK_TRANSACTION_TYPES,

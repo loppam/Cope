@@ -47,7 +47,7 @@ import {
 import { updatePublicWalletStatus } from "@/lib/auth";
 import { syncWebhook } from "@/lib/webhook";
 import { getFollowersCount } from "@/lib/profile";
-import { getWalletPositions } from "@/lib/solanatracker";
+import { getWalletPositions, getWalletPnL } from "@/lib/solanatracker";
 import { getIntentStatus } from "@/lib/relay";
 import { toast } from "sonner";
 import type { WatchedWallet } from "@/lib/auth";
@@ -62,6 +62,8 @@ interface TokenPosition {
   image?: string;
   amount: number;
   value: number;
+  pnl?: number;
+  pnlPercent?: number;
 }
 
 export function Profile() {
@@ -131,7 +133,7 @@ export function Profile() {
     }
   }, [walletAddress]);
 
-  // Fetch open token positions (exclude SOL and USDC)
+  // Fetch open token positions (exclude SOL and USDC), then merge PnL
   useEffect(() => {
     if (!walletAddress) {
       setOpenPositions([]);
@@ -155,7 +157,24 @@ export function Profile() {
             value,
           });
         }
-        setOpenPositions(tokens);
+        return getWalletPnL(walletAddress, false)
+          .then((pnlRes) => {
+            const pnlByMint = pnlRes.tokens || {};
+            return tokens.map((pos) => {
+              const p = pnlByMint[pos.mint];
+              const pnl = p?.total ?? 0;
+              const totalInvested = p?.total_invested ?? 0;
+              const costBasis = p?.cost_basis ?? 0;
+              let pnlPercent: number | undefined;
+              if (totalInvested > 0) pnlPercent = (pnl / totalInvested) * 100;
+              else if (costBasis > 0) pnlPercent = (pnl / costBasis) * 100;
+              return { ...pos, pnl, pnlPercent };
+            });
+          })
+          .catch(() => tokens);
+      })
+      .then((merged) => {
+        setOpenPositions(merged);
         setClosedPositions([]); // TODO: closed positions from history when available
       })
       .catch(() => {
@@ -524,7 +543,7 @@ export function Profile() {
                     <p className="text-2xl sm:text-3xl font-bold">
                       ${usdcBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
-                  </div>
+                </div>
                   <div className="mt-4 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center">
@@ -580,7 +599,7 @@ export function Profile() {
                             key={pos.mint}
                             className="flex items-center gap-3 py-3 px-2 rounded-lg min-h-[44px] hover:bg-white/5 active:bg-white/10 touch-manipulation"
                             role="button"
-                            onClick={() => navigate(`/token/${pos.mint}`)}
+                            onClick={() => navigate(`/app/trade?mint=${encodeURIComponent(pos.mint)}`)}
                           >
                             {pos.image ? (
                               <img src={pos.image} alt="" className="w-8 h-8 rounded-full object-cover" />
@@ -590,6 +609,14 @@ export function Profile() {
                             <div className="flex-1 min-w-0">
                               <p className="font-medium truncate">{pos.symbol}</p>
                               <p className="text-xs text-white/50">${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2 })}</p>
+                              {pos.pnl != null && pos.pnl !== 0 && (
+                                <p className={`text-xs mt-0.5 ${pos.pnl >= 0 ? "text-[#12d585]" : "text-red-400"}`}>
+                                  {pos.pnl >= 0 ? "+" : ""}${pos.pnl.toFixed(2)}
+                                  {pos.pnlPercent != null && !Number.isNaN(pos.pnlPercent) && (
+                                    <span className="ml-1 opacity-90">({pos.pnlPercent >= 0 ? "+" : ""}{pos.pnlPercent.toFixed(1)}%)</span>
+                                  )}
+                                </p>
+                              )}
                             </div>
                           </li>
                         ))}

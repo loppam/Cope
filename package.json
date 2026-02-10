@@ -87,6 +87,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.1.12",
+    "@types/node": "^22.10.0",
     "@types/web-push": "^3.6.4",
     "@vercel/node": "^5.5.27",
     "@vitejs/plugin-react": "4.7.0",

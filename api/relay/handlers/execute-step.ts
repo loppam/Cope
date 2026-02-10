@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { Keypair, VersionedTransaction, Connection } from "@solana/web3.js";
-import { decryptWalletCredentials } from "./decrypt";
-import { ensureFirebase, getAdminAuth, getAdminDb } from "../../lib/firebase-admin";
+import { decryptWalletCredentials } from "../decrypt";
+import { ensureFirebase, getAdminAuth, getAdminDb } from "../../../lib/firebase-admin";
 
 function getRpcUrl(): string {
   if (process.env.SOLANA_RPC_URL) return process.env.SOLANA_RPC_URL;
@@ -10,11 +10,10 @@ function getRpcUrl(): string {
   return "https://api.mainnet-beta.solana.com";
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
-
   try {
     ensureFirebase();
     const authHeader = req.headers.authorization;

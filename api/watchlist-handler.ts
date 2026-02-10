@@ -5,7 +5,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 
 // Initialize Firebase Admin (only once, same pattern as api/webhook/transaction.ts)
 if (getApps().length === 0) {
@@ -341,7 +341,7 @@ async function handleSyncIndex(req: VercelRequest, res: VercelResponse) {
     Record<string, { nickname?: string; addedAt?: string }>
   > = {};
 
-  usersSnapshot.docs.forEach((doc) => {
+  usersSnapshot.docs.forEach((doc: QueryDocumentSnapshot) => {
     const uid = doc.id;
     const userData = doc.data();
     const watchlist = userData.watchlist || [];

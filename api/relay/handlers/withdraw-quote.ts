@@ -4,14 +4,13 @@ import {
   CHAIN_IDS,
   SOLANA_USDC_MINT,
   DESTINATION_USDC,
-} from "./constants";
-import { ensureFirebase, getAdminAuth } from "../../lib/firebase-admin";
+} from "../constants";
+import { ensureFirebase, getAdminAuth } from "../../../lib/firebase-admin";
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export async function withdrawQuoteHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
-
   try {
     ensureFirebase();
     const authHeader = req.headers.authorization;

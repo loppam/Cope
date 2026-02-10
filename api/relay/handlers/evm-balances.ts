@@ -1,9 +1,9 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { HDNodeWallet } from "ethers";
 import { JsonRpcProvider, Contract } from "ethers";
-import { decryptWalletCredentials } from "./decrypt";
-import { BASE_USDC, BNB_USDC } from "./constants";
-import { ensureFirebase, getAdminAuth, getAdminDb } from "../../lib/firebase-admin";
+import { decryptWalletCredentials } from "../decrypt";
+import { BASE_USDC, BNB_USDC } from "../constants";
+import { ensureFirebase, getAdminAuth, getAdminDb } from "../../../lib/firebase-admin";
 
 const ETH_DERIVATION_PATH = "m/44'/60'/0'/0/0";
 
@@ -48,11 +48,10 @@ async function getBalances(address: string): Promise<{
   return result;
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export async function evmBalancesHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
-
   try {
     ensureFirebase();
     const authHeader = req.headers.authorization;

@@ -4,8 +4,6 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
-import { pushTokenDocId } from "../lib/tokenHash";
-
 if (getApps().length === 0) {
   const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
   let projectId: string | undefined;

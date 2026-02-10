@@ -1,12 +1,11 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { RELAY_API_BASE, CHAIN_IDS } from "./constants";
-import { ensureFirebase, getAdminAuth } from "../../lib/firebase-admin";
+import { RELAY_API_BASE, CHAIN_IDS } from "../constants";
+import { ensureFirebase, getAdminAuth } from "../../../lib/firebase-admin";
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
-
   try {
     ensureFirebase();
     const authHeader = req.headers.authorization;
@@ -30,7 +29,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const amount = body?.amount ?? "";
     const slippageBps = typeof body?.slippageBps === "number" ? body.slippageBps : 100;
     const userWallet = (body?.userWallet || "").trim();
-    const tradeType = body?.tradeType || "buy";
     let destinationChainId = CHAIN_IDS.solana;
     if (typeof body?.outputChainId === "number") {
       destinationChainId = body.outputChainId;

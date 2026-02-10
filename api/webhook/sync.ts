@@ -2,7 +2,7 @@
 // This should be called when a wallet is added/removed from watchlist
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
-import { getFirestore, type DocumentReference } from "firebase-admin/firestore";
+import { getFirestore, type DocumentReference, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 
 // Initialize Firebase Admin (only once)
 if (getApps().length === 0) {
@@ -93,7 +93,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       string,
       { walletAddress: string | null; isPublic: boolean }
     >();
-    usersSnapshot.docs.forEach((doc) => {
+    usersSnapshot.docs.forEach((doc: QueryDocumentSnapshot) => {
       const d = doc.data();
       userByUid.set(doc.id, {
         walletAddress: d.walletAddress || null,

@@ -2,7 +2,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createHash } from "crypto";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import webpush from "web-push";
 import { pushTokenDocId } from "../lib/tokenHash";
@@ -658,7 +658,7 @@ async function getUserTokens(uid: string): Promise<PushToken[]> {
     .collection("pushTokens")
     .get();
   const tokens: PushToken[] = [];
-  snapshot.forEach((doc) => {
+  snapshot.forEach((doc: QueryDocumentSnapshot) => {
     const data = doc.data();
     if (data.token) {
       tokens.push({

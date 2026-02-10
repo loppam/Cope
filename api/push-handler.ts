@@ -6,7 +6,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { pushTokenDocId } from "./lib/tokenHash";
 import { getAuth } from "firebase-admin/auth";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import webpush from "web-push";
 
@@ -121,7 +121,7 @@ function initWebPush() {
 async function getAllUserTokens(): Promise<PushTokenWithUid[]> {
   const snap = await adminDb.collection(PUSH_TOKEN_INDEX).get();
   const result: PushTokenWithUid[] = [];
-  snap.forEach((doc) => {
+  snap.forEach((doc: QueryDocumentSnapshot) => {
     const data = doc.data();
     if (data.token && data.uid) {
       result.push({

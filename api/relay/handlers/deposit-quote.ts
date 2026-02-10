@@ -1,12 +1,11 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { RELAY_API_BASE, CHAIN_IDS, ORIGIN_USDC, SOLANA_USDC_MINT } from "./constants";
-import { ensureFirebase, getAdminAuth } from "../../lib/firebase-admin";
+import { RELAY_API_BASE, CHAIN_IDS, ORIGIN_USDC, SOLANA_USDC_MINT } from "../constants";
+import { ensureFirebase, getAdminAuth } from "../../../lib/firebase-admin";
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export async function depositQuoteHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
-
   try {
     ensureFirebase();
     const authHeader = req.headers.authorization;
@@ -14,12 +13,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ error: "Unauthorized" });
     }
     const token = authHeader.slice(7);
-    const decoded = await getAdminAuth().verifyIdToken(token);
-    const uid = decoded.uid;
+    await getAdminAuth().verifyIdToken(token);
 
     const body = req.body as { network?: string; amountUsd?: number; recipientSolAddress?: string };
     const network = (body?.network || "").toLowerCase();
-    const amountUsd = typeof body?.amountUsd === "number" ? body.amountUsd : parseFloat(body?.amountUsd);
+    const amountUsd = typeof body?.amountUsd === "number" ? body.amountUsd : parseFloat(String(body?.amountUsd ?? ""));
     const recipientSolAddress = typeof body?.recipientSolAddress === "string" ? body.recipientSolAddress.trim() : "";
 
     if (network !== "base" && network !== "bnb") {

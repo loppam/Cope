@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation, useSearchParams } from "react-router";
 import { Button } from "@/components/Button";
 import { Input } from "@/components/Input";
@@ -73,6 +73,7 @@ export function Trade() {
   const quickAmounts = [10, 50, 100];
   const slippagePresets = [50, 100, 200]; // 0.5%, 1%, 2%
   const REFRESH_COOLDOWN_MS = 15000; // 15 seconds
+  const fetchDetailsMintRef = useRef<string | null>(null);
 
   // Check if mint was passed from navigation state (e.g., from Positions page or feed)
   useEffect(() => {
@@ -174,6 +175,7 @@ export function Trade() {
     mintAddress: string,
     currentToken: TokenSearchResult | null
   ) => {
+    fetchDetailsMintRef.current = mintAddress;
     setLoading(true);
     const base: TokenSearchResult =
       currentToken?.mint === mintAddress
@@ -188,8 +190,10 @@ export function Trade() {
             chain: "solana",
             chainId: 792703809,
           };
+    const isStale = () => fetchDetailsMintRef.current !== mintAddress;
     try {
       const coingecko = await fetchCoinGeckoTokenDetails("solana", [mintAddress]);
+      if (isStale()) return;
       const first = coingecko.data?.[0]?.attributes;
       if (first) {
         const fields = coingeckoAttributesToTokenFields(first);
@@ -205,16 +209,20 @@ export function Trade() {
           volume_24h: fields.volume_24h,
           launchpad: fields.launchpad ?? base.launchpad,
         });
+        setLoading(false);
         return;
       }
     } catch (e) {
+      if (isStale()) return;
       console.warn("CoinGecko token details failed, using fallback:", e);
     }
     try {
       const tokenInfo = await getTokenInfo(mintAddress);
+      if (isStale()) return;
       const tokenData = convertTokenInfoToSearchResult(tokenInfo);
       setToken({ ...tokenData, chain: "solana", chainId: 792703809 });
     } catch (error) {
+      if (isStale()) return;
       console.error("Error fetching token details:", error);
       try {
         const response = await searchTokens(mintAddress, 1, 1);
@@ -232,7 +240,7 @@ export function Trade() {
         setToken(base);
       }
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
   };
 

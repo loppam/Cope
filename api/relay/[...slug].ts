@@ -589,6 +589,7 @@ async function bridgeFromEvmQuoteHandler(req: VercelRequest, res: VercelResponse
         tradeType: "EXACT_INPUT",
         recipient: recipientSolAddress,
         useDepositAddress: false,
+        usePermit: true,
       }),
     });
     if (!quoteRes.ok) {

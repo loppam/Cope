@@ -3,6 +3,7 @@ import { Splash } from "@/pages/Splash";
 import { ConnectX } from "@/pages/onboarding/ConnectX";
 import { WalletSetup } from "@/pages/onboarding/WalletSetup";
 import { FundWallet } from "@/pages/onboarding/FundWallet";
+import { Withdraw } from "@/pages/Withdraw";
 import { MainLayout } from "@/layouts/MainLayout";
 import { AppLayout } from "@/layouts/AppLayout";
 import { Home } from "@/pages/Home";
@@ -45,6 +46,14 @@ export const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <FundWallet />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/wallet/withdraw",
+    element: (
+      <ProtectedRoute>
+        <Withdraw />
       </ProtectedRoute>
     ),
   },

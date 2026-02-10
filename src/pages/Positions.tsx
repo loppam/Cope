@@ -21,6 +21,8 @@ import { getSolBalance, getTokenAccounts } from "@/lib/rpc";
 import { apiCache } from "@/lib/cache";
 import { toast } from "sonner";
 
+type ChainTag = "solana" | "base" | "bnb";
+
 interface Position {
   mint: string;
   symbol: string;
@@ -38,10 +40,14 @@ interface Position {
   sells?: number;
   txns?: number;
   holders?: number;
+  chain?: ChainTag;
 }
 
+const APPROX_ETH_PRICE = 3000;
+const APPROX_BNB_PRICE = 600;
+
 export function Positions() {
-  const { userProfile } = useAuth();
+  const { user, userProfile } = useAuth();
   const navigate = useNavigate();
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
@@ -139,7 +145,85 @@ export function Positions() {
             sells: positionToken.sells,
             txns: positionToken.txns,
             holders: positionToken.holders,
+            chain: "solana",
           });
+        }
+      }
+
+      if (user) {
+        try {
+          const token = await user.getIdToken();
+          const base = import.meta.env.VITE_API_BASE_URL || "";
+          const res = await fetch(`${base}/api/relay/evm-balances`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const data = await res.json();
+          if (res.ok && data.evmAddress) {
+            if (data.base?.usdc > 0) {
+              positionsData.push({
+                mint: "base-usdc",
+                symbol: "USDC",
+                name: "USD Coin (Base)",
+                amount: data.base.usdc,
+                value: data.base.usdc,
+                pnl: 0,
+                pnlPercent: 0,
+                realized: 0,
+                unrealized: 0,
+                costBasis: 0,
+                chain: "base",
+              });
+            }
+            if (data.base?.native > 0) {
+              const value = data.base.native * APPROX_ETH_PRICE;
+              positionsData.push({
+                mint: "base-eth",
+                symbol: "ETH",
+                name: "Ethereum (Base)",
+                amount: data.base.native,
+                value,
+                pnl: 0,
+                pnlPercent: 0,
+                realized: 0,
+                unrealized: 0,
+                costBasis: 0,
+                chain: "base",
+              });
+            }
+            if (data.bnb?.usdc > 0) {
+              positionsData.push({
+                mint: "bnb-usdc",
+                symbol: "USDC",
+                name: "USD Coin (BNB)",
+                amount: data.bnb.usdc,
+                value: data.bnb.usdc,
+                pnl: 0,
+                pnlPercent: 0,
+                realized: 0,
+                unrealized: 0,
+                costBasis: 0,
+                chain: "bnb",
+              });
+            }
+            if (data.bnb?.native > 0) {
+              const value = data.bnb.native * APPROX_BNB_PRICE;
+              positionsData.push({
+                mint: "bnb-bnb",
+                symbol: "BNB",
+                name: "BNB",
+                amount: data.bnb.native,
+                value,
+                pnl: 0,
+                pnlPercent: 0,
+                realized: 0,
+                unrealized: 0,
+                costBasis: 0,
+                chain: "bnb",
+              });
+            }
+          }
+        } catch (err) {
+          console.warn("EVM balances fetch failed:", err);
         }
       }
 
@@ -197,7 +281,7 @@ export function Positions() {
 
   useEffect(() => {
     fetchPositions();
-  }, [walletAddress]);
+  }, [walletAddress, user]);
 
   // Calculate total value
   // Since SOL is included in the positions list, tokensValue already includes SOL
@@ -323,19 +407,22 @@ export function Positions() {
               position.mint === "So11111111111111111111111111111111111111112" ||
               position.mint === "So11111111111111111111111111111111111111111";
             const isUSDC = position.mint === USDC_MINT;
+            const isSolanaPosition = !position.chain || position.chain === "solana";
+            const chainLabel = position.chain === "base" ? "Base" : position.chain === "bnb" ? "BNB" : "Solana";
 
             return (
               <Card
-                key={position.mint}
+                key={`${position.chain ?? "solana"}-${position.mint}`}
                 glass
                 className="cursor-pointer hover:border-white/20 transition-colors overflow-hidden active:scale-[0.99]"
                 onClick={() => {
-                  // Only pass the mint address - Trade screen will fetch full data
-                  navigate("/app/trade", {
-                    state: {
-                      mint: position.mint,
-                    },
-                  });
+                  if (isSolanaPosition) {
+                    navigate("/app/trade", {
+                      state: { mint: position.mint },
+                    });
+                  } else {
+                    navigate("/wallet/withdraw");
+                  }
                 }}
               >
                 <div className="h-0.5 bg-gradient-to-r from-[#12d585]/20 via-transparent to-transparent" />
@@ -360,9 +447,24 @@ export function Positions() {
                         className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-[#12d585] to-[#08b16b] flex-shrink-0 ${position.image ? "hidden" : ""}`}
                       />
                       <div className="min-w-0">
-                        <h3 className="font-semibold text-sm sm:text-base truncate">
-                          {position.name}
-                        </h3>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-semibold text-sm sm:text-base truncate">
+                            {position.name}
+                          </h3>
+                          {position.chain && (
+                            <span
+                              className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                                position.chain === "base"
+                                  ? "bg-blue-500/20 text-blue-300"
+                                  : position.chain === "bnb"
+                                    ? "bg-amber-500/20 text-amber-300"
+                                    : "bg-[#12d585]/20 text-[#12d585]"
+                              }`}
+                            >
+                              {chainLabel}
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs sm:text-sm text-white/50 truncate">
                           {position.symbol} • {position.amount.toLocaleString()}
                         </p>

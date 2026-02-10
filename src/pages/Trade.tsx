@@ -11,10 +11,8 @@ import {
   convertTokenInfoToSearchResult,
   getWalletPositions,
 } from "@/lib/solanatracker";
+import type { SwapQuote } from "@/lib/jupiter-swap";
 import {
-  getSwapQuote,
-  executeSwap,
-  type SwapQuote,
   formatTokenAmount,
   getPriceImpactColor,
   formatPriceImpact,
@@ -37,7 +35,20 @@ import { shortenAddress } from "@/lib/utils";
 import { toast } from "sonner";
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const USDC_DECIMALS = 6;
+
+type TradeChain = "solana" | "base" | "bnb";
+const CROSS_CHAIN_TOKENS: Record<TradeChain, { symbol: string; address: string; name: string }[]> = {
+  solana: [],
+  base: [
+    { symbol: "ETH", address: "0x4200000000000000000000000000000000000006", name: "Wrapped Ether" },
+    { symbol: "USDC", address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", name: "USD Coin" },
+  ],
+  bnb: [
+    { symbol: "BNB", address: "0x0000000000000000000000000000000000000000", name: "BNB" },
+    { symbol: "USDC", address: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", name: "USD Coin" },
+  ],
+};
+const CHAIN_IDS: Record<TradeChain, number> = { solana: 792703809, base: 8453, bnb: 56 };
 
 export function Trade() {
   const location = useLocation();
@@ -53,10 +64,14 @@ export function Trade() {
   // Swap state
   const [swapping, setSwapping] = useState(false);
   const [swapQuote, setSwapQuote] = useState<SwapQuote | null>(null);
+  const [relayQuote, setRelayQuote] = useState<unknown>(null);
   const [showQuoteModal, setShowQuoteModal] = useState(false);
   const [swapDirection, setSwapDirection] = useState<"buy" | "sell">("buy");
   const [slippage, setSlippage] = useState(100); // 1% in basis points
   const [showSlippageSettings, setShowSlippageSettings] = useState(false);
+  const [tradeChain, setTradeChain] = useState<TradeChain>("solana");
+  const [crossChainToken, setCrossChainToken] = useState<{ symbol: string; address: string; name: string } | null>(null);
+  const [evmAddress, setEvmAddress] = useState<string | null>(null);
 
   // Sell state: user's token balance (UI units) and sell amount (UI units)
   const [tokenBalance, setTokenBalance] = useState<number>(0);
@@ -107,6 +122,27 @@ export function Trade() {
 
     return () => clearInterval(interval);
   }, [lastRefresh]);
+
+  // Fetch EVM address when trading on Base/BNB (for cross-chain recipient)
+  useEffect(() => {
+    if (tradeChain === "solana" || !user) {
+      setEvmAddress(null);
+      return;
+    }
+    let cancelled = false;
+    user.getIdToken().then((token) => {
+      const base = import.meta.env.VITE_API_BASE_URL || "";
+      return fetch(`${base}/api/relay/evm-address`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    }).then((res) => res.json()).then((data) => {
+      if (!cancelled && data.evmAddress) setEvmAddress(data.evmAddress);
+      else if (!cancelled) setEvmAddress(null);
+    }).catch(() => {
+      if (!cancelled) setEvmAddress(null);
+    });
+    return () => { cancelled = true; };
+  }, [tradeChain, user]);
 
   // Fetch user's token balance for the selected token (for Sell section)
   useEffect(() => {
@@ -216,10 +252,23 @@ export function Trade() {
   };
 
   const handleBuy = async () => {
-    if (!amount || !token || !userProfile?.walletAddress || !user) {
+    const isCrossChain = tradeChain !== "solana" && crossChainToken;
+    if (!amount || !userProfile?.walletAddress || !user) {
       toast.error("Missing required information", {
         description: "Please connect your wallet and enter an amount",
       });
+      return;
+    }
+    if (!isCrossChain && !token) {
+      toast.error("Select a token", { description: "Search or paste a token address" });
+      return;
+    }
+    if (isCrossChain && !crossChainToken) {
+      toast.error("Select a token", { description: `Choose a token on ${tradeChain === "base" ? "Base" : "BNB"}` });
+      return;
+    }
+    if (isCrossChain && !evmAddress) {
+      toast.error("Loading wallet", { description: "Wait for cross-chain address" });
       return;
     }
 
@@ -233,24 +282,66 @@ export function Trade() {
 
     setSwapping(true);
     try {
-      // Get quote (buy: USDC -> token)
-      const quote = await getSwapQuote(
-        USDC_MINT,
-        token.mint,
-        Math.floor(amountNum * 1e6),
-        userProfile.walletAddress,
-        slippage,
-        USDC_DECIMALS,
-        token.decimals,
-      );
+      const tokenId = await user.getIdToken();
+      const base = import.meta.env.VITE_API_BASE_URL || "";
+      const outputMint = isCrossChain ? crossChainToken!.address : token!.mint;
+      const body: Record<string, unknown> = {
+        inputMint: USDC_MINT,
+        outputMint,
+        amount: Math.floor(amountNum * 1e6).toString(),
+        slippageBps: slippage,
+        userWallet: userProfile.walletAddress,
+        tradeType: "buy",
+      };
+      if (isCrossChain) {
+        body.outputChainId = CHAIN_IDS[tradeChain];
+        body.recipient = evmAddress;
+      }
+      const res = await fetch(`${base}/api/relay/swap-quote`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${tokenId}`,
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to get quote");
 
-      setSwapQuote(quote);
+      setRelayQuote(data);
+      const details = data?.details || {};
+      const currencyIn = details.currencyIn || {};
+      const currencyOut = details.currencyOut || {};
+      const inputAmount = parseInt(currencyIn.amount || "0", 10) || Math.floor(amountNum * 1e6);
+      const outputAmount = parseInt(currencyOut.amount || "0", 10);
+      const inputAmountUi = parseFloat(currencyIn.amountFormatted || "0") || amountNum;
+      const outputAmountUi = parseFloat(currencyOut.amountFormatted || "0");
+      const inUsd = currencyIn.amountUsd != null ? parseFloat(currencyIn.amountUsd) : undefined;
+      const outUsd = currencyOut.amountUsd != null ? parseFloat(currencyOut.amountUsd) : undefined;
+      const impact = details.totalImpact?.percent != null ? parseFloat(details.totalImpact.percent) : 0;
+
+      setSwapQuote({
+        inputMint: USDC_MINT,
+        outputMint: outputMint,
+        inputAmount,
+        outputAmount,
+        inputAmountUi,
+        outputAmountUi,
+        inUsdValue: inUsd,
+        outUsdValue: outUsd,
+        priceImpact: impact,
+        feeBps: 0,
+        feeMint: USDC_MINT,
+        requestId: data?.steps?.[0]?.requestId || "",
+        transaction: "",
+        slippage,
+      } as SwapQuote);
       setSwapDirection("buy");
       setShowQuoteModal(true);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error getting swap quote:", error);
       toast.error("Failed to get quote", {
-        description: error.message || "Please try again",
+        description: error instanceof Error ? error.message : "Please try again",
       });
     } finally {
       setSwapping(false);
@@ -282,23 +373,60 @@ export function Trade() {
     setSwapping(true);
     try {
       const amountRaw = Math.floor(amountNum * Math.pow(10, token.decimals));
-      const quote = await getSwapQuote(
-        token.mint,
-        USDC_MINT,
-        amountRaw,
-        userProfile.walletAddress,
-        slippage,
-        token.decimals,
-        USDC_DECIMALS,
-      );
+      const tokenId = await user.getIdToken();
+      const base = import.meta.env.VITE_API_BASE_URL || "";
+      const res = await fetch(`${base}/api/relay/swap-quote`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${tokenId}`,
+        },
+        body: JSON.stringify({
+          inputMint: token.mint,
+          outputMint: USDC_MINT,
+          amount: amountRaw.toString(),
+          slippageBps: slippage,
+          userWallet: userProfile.walletAddress,
+          tradeType: "sell",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to get quote");
 
-      setSwapQuote(quote);
+      setRelayQuote(data);
+      const details = data?.details || {};
+      const currencyIn = details.currencyIn || {};
+      const currencyOut = details.currencyOut || {};
+      const inputAmount = parseInt(currencyIn.amount || "0", 10) || amountRaw;
+      const outputAmount = parseInt(currencyOut.amount || "0", 10);
+      const inputAmountUi = parseFloat(currencyIn.amountFormatted || "0") || amountNum;
+      const outputAmountUi = parseFloat(currencyOut.amountFormatted || "0");
+      const inUsd = currencyIn.amountUsd != null ? parseFloat(currencyIn.amountUsd) : undefined;
+      const outUsd = currencyOut.amountUsd != null ? parseFloat(currencyOut.amountUsd) : undefined;
+      const impact = details.totalImpact?.percent != null ? parseFloat(details.totalImpact.percent) : 0;
+
+      setSwapQuote({
+        inputMint: token.mint,
+        outputMint: USDC_MINT,
+        inputAmount,
+        outputAmount,
+        inputAmountUi,
+        outputAmountUi,
+        inUsdValue: inUsd,
+        outUsdValue: outUsd,
+        priceImpact: impact,
+        feeBps: 0,
+        feeMint: token.mint,
+        requestId: data?.steps?.[0]?.requestId || "",
+        transaction: "",
+        slippage,
+      });
       setSwapDirection("sell");
       setShowQuoteModal(true);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error getting sell quote:", error);
       toast.error("Failed to get quote", {
-        description: error.message || "Please try again",
+        description: error instanceof Error ? error.message : "Please try again",
       });
     } finally {
       setSwapping(false);
@@ -306,15 +434,28 @@ export function Trade() {
   };
 
   const handleConfirmSwap = async () => {
-    if (!swapQuote || !user) return;
+    if (!relayQuote || !user) return;
 
     setSwapping(true);
     setShowQuoteModal(false);
 
     try {
-      const result = await executeSwap(swapQuote, user.uid);
+      const tokenId = await user.getIdToken();
+      const base = import.meta.env.VITE_API_BASE_URL || "";
+      const res = await fetch(`${base}/api/relay/execute-step`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${tokenId}`,
+        },
+        body: JSON.stringify({
+          quoteResponse: relayQuote,
+          stepIndex: 0,
+        }),
+      });
+      const result = await res.json();
 
-      if (result.status === "Success") {
+      if (result.status === "Success" && result.signature) {
         toast.success("Swap successful!", {
           description: "Your transaction has been confirmed",
           action: {
@@ -327,11 +468,9 @@ export function Trade() {
           },
         });
 
-        // Refresh balance
         if (userProfile?.walletAddress) {
           const newBalance = await getSolBalance(userProfile.walletAddress);
           await updateBalance(newBalance);
-          // If sell, refresh token balance for this token
           if (swapDirection === "sell" && token?.mint) {
             try {
               const positions = await getWalletPositions(
@@ -348,17 +487,17 @@ export function Trade() {
           }
         }
 
-        // Clear amounts and quote
         setAmount("");
         setSellAmount("");
         setSwapQuote(null);
+        setRelayQuote(null);
       } else {
         throw new Error(result.error || "Swap failed");
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error executing swap:", error);
       toast.error("Swap failed", {
-        description: error.message || "Please try again",
+        description: error instanceof Error ? error.message : "Please try again",
       });
     } finally {
       setSwapping(false);
@@ -392,17 +531,63 @@ export function Trade() {
           </Card>
         )}
 
-        {/* Token Input - no overflow-hidden so dropdown can show below */}
-        <div className="min-w-0">
-          <label className="block text-sm font-medium mb-2">Token</label>
-          <TokenSearch
-            onSelect={(selectedToken) => {
-              setToken(selectedToken);
-              setMint(selectedToken.mint);
-              setSearchParams({ mint: selectedToken.mint }, { replace: true });
-            }}
-            placeholder="Search or paste token address..."
-          />
+        {/* Chain + Token */}
+        <div className="min-w-0 space-y-3">
+          <div>
+            <label className="block text-sm font-medium mb-2">Network</label>
+            <div className="flex rounded-[12px] bg-white/5 p-1 gap-1">
+              {(["solana", "base", "bnb"] as const).map((chain) => (
+                <button
+                  key={chain}
+                  type="button"
+                  onClick={() => {
+                    setTradeChain(chain);
+                    setCrossChainToken(null);
+                    if (chain === "solana") {
+                      setToken(null);
+                      setMint("");
+                    }
+                  }}
+                  className={`flex-1 min-h-[44px] rounded-[10px] text-sm font-medium transition-colors touch-manipulation ${
+                    tradeChain === chain ? "bg-accent-primary text-white" : "bg-transparent text-white/70 hover:text-white"
+                  }`}
+                >
+                  {chain === "solana" ? "Solana" : chain === "base" ? "Base" : "BNB"}
+                </button>
+              ))}
+            </div>
+          </div>
+          {tradeChain === "solana" ? (
+            <div>
+              <label className="block text-sm font-medium mb-2">Token</label>
+              <TokenSearch
+                onSelect={(selectedToken) => {
+                  setToken(selectedToken);
+                  setMint(selectedToken.mint);
+                  setSearchParams({ mint: selectedToken.mint }, { replace: true });
+                }}
+                placeholder="Search or paste token address..."
+              />
+            </div>
+          ) : (
+            <div>
+              <label className="block text-sm font-medium mb-2">Token ({tradeChain === "base" ? "Base" : "BNB"})</label>
+              <div className="flex flex-wrap gap-2">
+                {CROSS_CHAIN_TOKENS[tradeChain].map((t) => (
+                  <button
+                    key={t.address}
+                    type="button"
+                    onClick={() => setCrossChainToken(crossChainToken?.address === t.address ? null : t)}
+                    className={`min-h-[44px] px-4 rounded-[10px] text-sm font-medium transition-colors touch-manipulation ${
+                      crossChainToken?.address === t.address ? "bg-accent-primary text-white" : "bg-white/5 text-white/80 hover:bg-white/10"
+                    }`}
+                  >
+                    {t.symbol}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {loading && (
@@ -413,9 +598,19 @@ export function Trade() {
           </Card>
         )}
 
-        {token && !loading && (
+        {((token) || (tradeChain !== "solana" && crossChainToken)) && !loading && (
           <Card glass>
-            {/* Token Header */}
+            {/* Cross-chain: minimal header */}
+            {crossChainToken && !token && (
+              <div className="mb-4">
+                <h3 className="font-bold text-base sm:text-lg">
+                  {crossChainToken.name} ({crossChainToken.symbol})
+                </h3>
+                <p className="text-xs text-white/50 font-mono truncate">{crossChainToken.address}</p>
+              </div>
+            )}
+            {/* Token Header (Solana only) */}
+            {token && (
             <div className="mb-4 sm:mb-6">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
                 <div className="flex items-start gap-3 sm:gap-4 flex-1 min-w-0">
@@ -647,6 +842,7 @@ export function Trade() {
                 )}
               </div>
             </div>
+            )}
 
             {/* Buy Section */}
             <div className="mb-4 sm:mb-6">
@@ -736,7 +932,8 @@ export function Trade() {
               </div>
             )}
 
-            {/* Sell Section */}
+            {/* Sell Section (Solana only) */}
+            {token && (
             <div className="pt-4 border-t border-white/6">
               <p className="text-sm text-white/60 mb-2 truncate">
                 Your Position:{" "}
@@ -802,6 +999,7 @@ export function Trade() {
                 )}
               </Button>
             </div>
+            )}
           </Card>
         )}
 
@@ -816,7 +1014,10 @@ export function Trade() {
       </div>
 
       {/* Quote Preview Modal */}
-      {showQuoteModal && swapQuote && token && (
+      {showQuoteModal && swapQuote && (token || crossChainToken) && (() => {
+        const displaySymbol = token?.symbol ?? crossChainToken?.symbol ?? "";
+        const displayDecimals = token?.decimals ?? (crossChainToken?.symbol === "USDC" ? 6 : 18);
+        return (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
           <Card className="max-w-md w-full my-4 max-h-[90vh] overflow-y-auto">
             <div className="mb-3 sm:mb-4">
@@ -838,7 +1039,7 @@ export function Trade() {
                   <div className="font-bold text-sm sm:text-base truncate">
                     {swapDirection === "buy"
                       ? `${swapQuote.inputAmountUi.toFixed(2)} USDC`
-                      : `${formatTokenAmount(swapQuote.inputAmount, token.decimals)} ${token.symbol}`}
+                      : `${formatTokenAmount(swapQuote.inputAmount, displayDecimals)} ${displaySymbol}`}
                   </div>
                 </div>
                 <div className="text-right shrink-0">
@@ -847,7 +1048,7 @@ export function Trade() {
                       ? `~$${swapQuote.inUsdValue.toFixed(2)}`
                       : swapDirection === "buy"
                         ? `~$${swapQuote.inputAmountUi.toFixed(2)}`
-                        : `~$${((swapQuote.inputAmount / Math.pow(10, token.decimals)) * (token.priceUsd || 0)).toFixed(2)}`}
+                        : `~$${((swapQuote.inputAmount / Math.pow(10, displayDecimals)) * (token?.priceUsd || 0)).toFixed(2)}`}
                   </div>
                 </div>
               </div>
@@ -863,7 +1064,7 @@ export function Trade() {
                   </div>
                   <div className="font-bold text-sm sm:text-base truncate">
                     {swapDirection === "buy"
-                      ? `${formatTokenAmount(swapQuote.outputAmount, token.decimals)} ${token.symbol}`
+                      ? `${formatTokenAmount(swapQuote.outputAmount, displayDecimals)} ${displaySymbol}`
                       : `${swapQuote.outputAmountUi.toFixed(2)} USDC`}
                   </div>
                 </div>
@@ -872,7 +1073,7 @@ export function Trade() {
                     {swapQuote.outUsdValue != null
                       ? `~$${swapQuote.outUsdValue.toFixed(2)}`
                       : swapDirection === "buy"
-                        ? `~$${((swapQuote.outputAmount / Math.pow(10, token.decimals)) * (token.priceUsd || 0)).toFixed(2)}`
+                        ? `~$${((swapQuote.outputAmount / Math.pow(10, displayDecimals)) * (token?.priceUsd || 0)).toFixed(2)}`
                         : `~$${swapQuote.outputAmountUi.toFixed(2)}`}
                   </div>
                 </div>
@@ -905,6 +1106,7 @@ export function Trade() {
                 onClick={() => {
                   setShowQuoteModal(false);
                   setSwapQuote(null);
+                  setRelayQuote(null);
                 }}
                 disabled={swapping}
               >
@@ -927,7 +1129,8 @@ export function Trade() {
             </div>
           </Card>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

@@ -399,11 +399,16 @@ export function Profile() {
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => navigate("/wallet/fund")}
-                        className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center text-lg font-medium"
+                        className="w-9 h-9 min-w-[44px] min-h-[44px] rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center text-lg font-medium touch-manipulation"
+                        aria-label="Deposit"
                       >
                         +
                       </button>
-                      <button className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center text-white/70">
+                      <button
+                        onClick={() => navigate("/wallet/withdraw")}
+                        className="w-9 h-9 min-w-[44px] min-h-[44px] rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center text-white/70 touch-manipulation"
+                        aria-label="Withdraw"
+                      >
                         …
                       </button>
                     </div>

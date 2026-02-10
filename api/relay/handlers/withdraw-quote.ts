@@ -5,7 +5,7 @@ import {
   SOLANA_USDC_MINT,
   DESTINATION_USDC,
 } from "../constants";
-import { ensureFirebase, getAdminAuth } from "../../firebase-admin";
+import { ensureFirebase, getAdminAuth } from "../firebase-admin";
 
 export async function withdrawQuoteHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {

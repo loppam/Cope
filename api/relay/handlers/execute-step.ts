@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { Keypair, VersionedTransaction, Connection } from "@solana/web3.js";
 import { decryptWalletCredentials } from "../decrypt";
-import { ensureFirebase, getAdminAuth, getAdminDb } from "../../firebase-admin";
+import { ensureFirebase, getAdminAuth, getAdminDb } from "../firebase-admin";
 
 function getRpcUrl(): string {
   if (process.env.SOLANA_RPC_URL) return process.env.SOLANA_RPC_URL;

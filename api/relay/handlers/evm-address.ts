@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { HDNodeWallet } from "ethers";
 import { decryptWalletCredentials } from "../decrypt";
-import { ensureFirebase, getAdminAuth, getAdminDb } from "../../firebase-admin";
+import { ensureFirebase, getAdminAuth, getAdminDb } from "../firebase-admin";
 
 const ETH_DERIVATION_PATH = "m/44'/60'/0'/0/0";
 

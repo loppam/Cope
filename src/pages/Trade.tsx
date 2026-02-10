@@ -33,21 +33,10 @@ import {
 } from "lucide-react";
 import { shortenAddress, getApiBase } from "@/lib/utils";
 import { getChainId } from "@/lib/relay";
-import { SOLANA_USDC_MINT, BASE_USDC_ADDRESS, BNB_USDC_ADDRESS } from "@/lib/constants";
+import { SOLANA_USDC_MINT } from "@/lib/constants";
 import { toast } from "sonner";
 
 type TradeChain = "solana" | "base" | "bnb";
-const CROSS_CHAIN_TOKENS: Record<TradeChain, { symbol: string; address: string; name: string }[]> = {
-  solana: [],
-  base: [
-    { symbol: "ETH", address: "0x4200000000000000000000000000000000000006", name: "Wrapped Ether" },
-    { symbol: "USDC", address: BASE_USDC_ADDRESS, name: "USD Coin" },
-  ],
-  bnb: [
-    { symbol: "BNB", address: "0x0000000000000000000000000000000000000000", name: "BNB" },
-    { symbol: "USDC", address: BNB_USDC_ADDRESS, name: "USD Coin" },
-  ],
-};
 
 export function Trade() {
   const location = useLocation();
@@ -531,7 +520,7 @@ export function Trade() {
           </Card>
         )}
 
-        {/* Token search first (one for all chains); token metadata shows chain */}
+        {/* Token search only — chain comes from selected token (Relay metadata) */}
         <div className="min-w-0 space-y-3">
           <div>
             <label className="block text-sm font-medium mb-2">Token</label>
@@ -558,49 +547,6 @@ export function Trade() {
               placeholder="Search token by name, symbol, or address..."
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-2">Network</label>
-            <div className="flex rounded-[12px] bg-white/5 p-1 gap-1">
-              {(["solana", "base", "bnb"] as const).map((chain) => (
-                <button
-                  key={chain}
-                  type="button"
-                  onClick={() => {
-                    setTradeChain(chain);
-                    setCrossChainToken(null);
-                    if (chain === "solana") {
-                      setToken(null);
-                      setMint("");
-                    }
-                  }}
-                  className={`flex-1 min-h-[44px] rounded-[10px] text-sm font-medium transition-colors touch-manipulation ${
-                    tradeChain === chain ? "bg-accent-primary text-white" : "bg-transparent text-white/70 hover:text-white"
-                  }`}
-                >
-                  {chain === "solana" ? "Solana" : chain === "base" ? "Base" : "BNB"}
-                </button>
-              ))}
-            </div>
-          </div>
-          {tradeChain !== "solana" && (
-            <div>
-              <p className="text-xs text-white/50 mb-2">Or pick a token on {tradeChain === "base" ? "Base" : "BNB"}</p>
-              <div className="flex flex-wrap gap-2">
-                {CROSS_CHAIN_TOKENS[tradeChain].map((t) => (
-                  <button
-                    key={t.address}
-                    type="button"
-                    onClick={() => setCrossChainToken(crossChainToken?.address === t.address ? null : t)}
-                    className={`min-h-[44px] px-4 rounded-[10px] text-sm font-medium transition-colors touch-manipulation ${
-                      crossChainToken?.address === t.address ? "bg-accent-primary text-white" : "bg-white/5 text-white/80 hover:bg-white/10"
-                    }`}
-                  >
-                    {t.symbol}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         {loading && (

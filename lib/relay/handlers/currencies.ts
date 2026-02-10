@@ -30,7 +30,10 @@ export async function currenciesHandler(req: VercelRequest, res: VercelResponse)
     );
     const verified = body.verified ?? query.verified;
 
-    const relayParams: Record<string, unknown> = { limit };
+    const relayParams: Record<string, unknown> = {
+      limit,
+      useExternalSearch: true,
+    };
     if (term) relayParams.term = term;
     if (Array.isArray(tokensParam) && tokensParam.length > 0) relayParams.tokens = tokensParam;
     else if (typeof tokensParam === "string" && tokensParam) {
@@ -87,18 +90,29 @@ export async function currenciesHandler(req: VercelRequest, res: VercelResponse)
       : (data as { currencies?: unknown[]; data?: unknown[] })?.currencies
         ?? (data as { currencies?: unknown[]; data?: unknown[] })?.data
         ?? [];
-    const normalized = (list as { chainId?: number; address?: string; symbol?: string; name?: string; decimals?: number; logoURI?: string; verified?: boolean }[]).map(
-      (c) => ({
-        chainId: c.chainId,
-        chain: c.chainId != null ? RELAY_CHAIN_IDS[c.chainId] ?? "solana" : "solana",
+
+    const SUPPORTED_CHAIN_IDS = new Set([792703809, 8453, 56]);
+    type RelayItem = {
+      chainId?: number;
+      address?: string;
+      symbol?: string;
+      name?: string;
+      decimals?: number;
+      vmType?: string;
+      metadata?: { logoURI?: string; verified?: boolean; isNative?: boolean };
+    };
+    const normalized = (list as RelayItem[])
+      .filter((c) => c.chainId != null && SUPPORTED_CHAIN_IDS.has(c.chainId))
+      .map((c) => ({
+        chainId: c.chainId!,
+        chain: RELAY_CHAIN_IDS[c.chainId!] ?? "solana",
         address: c.address ?? "",
         symbol: c.symbol ?? "",
         name: c.name ?? "",
         decimals: typeof c.decimals === "number" ? c.decimals : 6,
-        logoURI: c.logoURI,
-        verified: c.verified,
-      }),
-    );
+        logoURI: c.metadata?.logoURI,
+        verified: c.metadata?.verified,
+      }));
 
     return res.status(200).json({
       raw: data,

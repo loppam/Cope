@@ -7,6 +7,7 @@ import { executeStepHandler } from "../../lib/relay/handlers/execute-step";
 import { evmAddressHandler } from "../../lib/relay/handlers/evm-address";
 import { evmBalancesHandler } from "../../lib/relay/handlers/evm-balances";
 import { currenciesHandler } from "../../lib/relay/handlers/currencies";
+import { coingeckoTokensHandler } from "../../lib/relay/handlers/coingecko-tokens";
 
 const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promise<void | VercelResponse>> = {
   "deposit-quote": depositQuoteHandler,
@@ -16,6 +17,7 @@ const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promis
   "evm-address": evmAddressHandler,
   "evm-balances": evmBalancesHandler,
   "currencies": currenciesHandler,
+  "coingecko-tokens": coingeckoTokensHandler,
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {

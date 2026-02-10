@@ -1,11 +1,11 @@
 // Single entrypoint for relay routes (no Firebase reads here; each handler does its own if needed).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { depositQuoteHandler } from "./handlers/deposit-quote";
-import { swapQuoteHandler } from "./handlers/swap-quote";
-import { withdrawQuoteHandler } from "./handlers/withdraw-quote";
-import { executeStepHandler } from "./handlers/execute-step";
-import { evmAddressHandler } from "./handlers/evm-address";
-import { evmBalancesHandler } from "./handlers/evm-balances";
+import { depositQuoteHandler } from "../../lib/relay/handlers/deposit-quote";
+import { swapQuoteHandler } from "../../lib/relay/handlers/swap-quote";
+import { withdrawQuoteHandler } from "../../lib/relay/handlers/withdraw-quote";
+import { executeStepHandler } from "../../lib/relay/handlers/execute-step";
+import { evmAddressHandler } from "../../lib/relay/handlers/evm-address";
+import { evmBalancesHandler } from "../../lib/relay/handlers/evm-balances";
 
 const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promise<void | VercelResponse>> = {
   "deposit-quote": depositQuoteHandler,

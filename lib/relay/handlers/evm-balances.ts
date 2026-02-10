@@ -3,7 +3,7 @@ import { HDNodeWallet } from "ethers";
 import { JsonRpcProvider, Contract } from "ethers";
 import { decryptWalletCredentials } from "../decrypt";
 import { BASE_USDC, BNB_USDC } from "../constants";
-import { ensureFirebase, getAdminAuth, getAdminDb } from "../../../lib/firebase-admin";
+import { ensureFirebase, getAdminAuth, getAdminDb } from "../../firebase-admin";
 
 const ETH_DERIVATION_PATH = "m/44'/60'/0'/0/0";
 

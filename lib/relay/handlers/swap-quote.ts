@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { RELAY_API_BASE, CHAIN_IDS } from "../constants";
-import { ensureFirebase, getAdminAuth } from "../../../lib/firebase-admin";
+import { ensureFirebase, getAdminAuth } from "../../firebase-admin";
 
 export async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {

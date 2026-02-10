@@ -4,7 +4,7 @@ import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import { Keypair, VersionedTransaction, Connection } from "@solana/web3.js";
-import { HDNodeWallet, JsonRpcProvider, Contract } from "ethers";
+import { HDNodeWallet, JsonRpcProvider, Contract, type TransactionRequest } from "ethers";
 
 // --- constants ---
 const RELAY_API_BASE = process.env.RELAY_API_BASE || "https://api.relay.link";
@@ -380,6 +380,12 @@ async function evmAddressHandler(req: VercelRequest, res: VercelResponse) {
     const { mnemonic } = await decryptWalletCredentials(userId, encryptedMnemonic, encryptedSecretKey, encryptionSecret);
     if (!mnemonic || !mnemonic.trim()) return res.status(200).json({ evmAddress: null });
     const wallet = HDNodeWallet.fromPhrase(mnemonic.trim(), undefined, ETH_DERIVATION_PATH);
+    const addr = wallet.address.toLowerCase();
+    try {
+      await userSnap.ref.update({ evmAddress: addr });
+    } catch {
+      // best-effort persist for webhook lookup
+    }
     return res.status(200).json({ evmAddress: wallet.address });
   } catch (e: unknown) {
     console.error("evm-address error:", e);
@@ -406,6 +412,12 @@ async function evmBalancesHandler(req: VercelRequest, res: VercelResponse) {
     const { mnemonic } = await decryptWalletCredentials(userId, encryptedMnemonic, encryptedSecretKey, encryptionSecret);
     if (!mnemonic || !mnemonic.trim()) return res.status(200).json({ evmAddress: null, base: { usdc: 0, native: 0 }, bnb: { usdc: 0, native: 0 } });
     const wallet = HDNodeWallet.fromPhrase(mnemonic.trim(), undefined, ETH_DERIVATION_PATH);
+    const addr = wallet.address.toLowerCase();
+    try {
+      await userSnap.ref.update({ evmAddress: addr });
+    } catch {
+      // best-effort persist for webhook lookup
+    }
     const balances = await getEvmBalances(wallet.address);
     return res.status(200).json({ evmAddress: wallet.address, base: balances.base, bnb: balances.bnb });
   } catch (e: unknown) {
@@ -540,11 +552,216 @@ async function coingeckoTokensHandler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+function getEvmProvider(chainId: number): JsonRpcProvider {
+  if (chainId === 8453) return new JsonRpcProvider(process.env.BASE_RPC_URL || "https://mainnet.base.org");
+  if (chainId === 56) return new JsonRpcProvider(process.env.BNB_RPC_URL || "https://bsc-dataseed.binance.org");
+  throw new Error(`Unsupported EVM chainId: ${chainId}`);
+}
+
+async function bridgeFromEvmQuoteHandler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  const secret = process.env.WEBHOOK_EVM_DEPOSIT_SECRET || process.env.RELAY_INTERNAL_SECRET;
+  if (secret && req.headers["x-webhook-secret"] !== secret && req.headers.authorization !== `Bearer ${secret}`) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  try {
+    const body = req.body as { evmAddress?: string; network?: string; amountRaw?: string; recipientSolAddress?: string };
+    const evmAddress = (body?.evmAddress ?? "").trim();
+    const network = (body?.network ?? "").toLowerCase();
+    const amountRaw = body?.amountRaw ?? "";
+    const recipientSolAddress = (body?.recipientSolAddress ?? "").trim();
+    if (!evmAddress || evmAddress.length < 40) return res.status(400).json({ error: "Invalid evmAddress" });
+    if (network !== "base" && network !== "bnb") return res.status(400).json({ error: "Invalid network; use base or bnb" });
+    if (!amountRaw || BigInt(amountRaw) <= 0n) return res.status(400).json({ error: "Invalid amountRaw" });
+    if (!recipientSolAddress || recipientSolAddress.length < 32) return res.status(400).json({ error: "Invalid recipientSolAddress" });
+    const apiKey = process.env.RELAY_API_KEY;
+    const originChainId = CHAIN_IDS[network] ?? (network === "base" ? 8453 : 56);
+    const quoteRes = await fetch(`${RELAY_API_BASE}/quote/v2`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(apiKey && { "x-api-key": apiKey }) },
+      body: JSON.stringify({
+        user: evmAddress,
+        originChainId,
+        destinationChainId: CHAIN_IDS.solana,
+        originCurrency: ORIGIN_USDC[network],
+        destinationCurrency: SOLANA_USDC_MINT,
+        amount: amountRaw,
+        tradeType: "EXACT_INPUT",
+        recipient: recipientSolAddress,
+        useDepositAddress: false,
+      }),
+    });
+    if (!quoteRes.ok) {
+      const errBody = await quoteRes.text();
+      let message = `Relay quote failed: ${quoteRes.status}`;
+      try {
+        const j = JSON.parse(errBody);
+        if (j.message) message = j.message;
+        else if (j.error) message = j.error;
+      } catch {
+        if (errBody) message = errBody.slice(0, 200);
+      }
+      return res.status(quoteRes.status >= 500 ? 502 : 400).json({ error: message });
+    }
+    const quote = await quoteRes.json();
+    return res.status(200).json(quote);
+  } catch (e: unknown) {
+    console.error("bridge-from-evm-quote error:", e);
+    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+  }
+}
+
+async function executeBridgeCustodialHandler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  const secret = process.env.WEBHOOK_EVM_DEPOSIT_SECRET || process.env.RELAY_INTERNAL_SECRET;
+  if (secret && req.headers["x-webhook-secret"] !== secret && req.headers.authorization !== `Bearer ${secret}`) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  try {
+    ensureFirebase();
+    const body = req.body as { userId?: string; quoteResponse?: unknown };
+    const userId = (body?.userId ?? "").trim();
+    const quoteResponse = body?.quoteResponse;
+    if (!userId || !quoteResponse || typeof quoteResponse !== "object") {
+      return res.status(400).json({ error: "Missing userId or quoteResponse" });
+    }
+    const quote = quoteResponse as { steps?: Array<{ id?: string; kind?: string; items?: Array<{ data?: unknown; check?: { endpoint?: string; method?: string } }> }> };
+    const steps = quote?.steps;
+    if (!Array.isArray(steps) || steps.length === 0) {
+      return res.status(400).json({ error: "Invalid quote: no steps" });
+    }
+    const encryptionSecret = process.env.ENCRYPTION_SECRET;
+    if (!encryptionSecret) return res.status(503).json({ error: "ENCRYPTION_SECRET not configured" });
+    const db = getAdminDb();
+    const userSnap = await db.collection("users").doc(userId).get();
+    const userData = userSnap.data();
+    const encryptedSecretKey = userData?.encryptedSecretKey;
+    const encryptedMnemonic = userData?.encryptedMnemonic;
+    const walletAddress = userData?.walletAddress as string | undefined;
+    if (!encryptedSecretKey || !walletAddress) {
+      return res.status(400).json({ error: "User wallet not found" });
+    }
+    const { secretKey, mnemonic } = await decryptWalletCredentials(userId, encryptedMnemonic, encryptedSecretKey, encryptionSecret);
+    const solanaKeypair = Keypair.fromSecretKey(secretKey);
+    let evmWallet: HDNodeWallet | null = null;
+    if (mnemonic?.trim()) {
+      evmWallet = HDNodeWallet.fromPhrase(mnemonic.trim(), undefined, ETH_DERIVATION_PATH);
+    }
+    const apiKey = process.env.RELAY_API_KEY;
+    const relayHeaders: Record<string, string> = { "Content-Type": "application/json", ...(apiKey && { "x-api-key": apiKey }) };
+
+    for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
+      const step = steps[stepIndex];
+      const kind = step?.kind ?? "transaction";
+      const items = step?.items ?? [];
+      if (items.length === 0) continue;
+
+      const firstItem = items[0];
+      const data = firstItem?.data;
+      if (!data || typeof data !== "object") continue;
+
+      const d = data as Record<string, unknown>;
+
+      if (kind === "signature") {
+        const signData = d.sign as Record<string, unknown> | undefined;
+        const postData = d.post as { endpoint?: string; method?: string; body?: unknown } | undefined;
+        if (!signData || !postData?.endpoint || !evmWallet) {
+          console.warn("execute-bridge-custodial: skip signature step, missing sign/post or evmWallet");
+          continue;
+        }
+        const signatureKind = (signData.signatureKind as string) ?? "eip191";
+        let signature: string;
+        if (signatureKind === "eip712") {
+          const domain = signData.domain as Record<string, unknown>;
+          const types = signData.types as Record<string, Array<{ name: string; type: string }>>;
+          const value = signData.value as Record<string, unknown>;
+          signature = await evmWallet.signTypedData(
+            domain as object,
+            types as Record<string, Array<{ name: string; type: string }>>,
+            value as Record<string, unknown>
+          );
+        } else {
+          const message = (signData.message as string) ?? "";
+          signature = await evmWallet.signMessage(message.startsWith("0x") ? Buffer.from(message.slice(2), "hex") : message);
+        }
+        const postBody = typeof postData.body === "object" && postData.body !== null ? { ...postData.body, signature } : { ...(postData.body as object), signature };
+        const postUrl = postData.endpoint.startsWith("http") ? postData.endpoint : `${RELAY_API_BASE}${postData.endpoint.startsWith("/") ? "" : "/"}${postData.endpoint}`;
+        const postRes = await fetch(postUrl, {
+          method: (postData.method as string) ?? "POST",
+          headers: relayHeaders,
+          body: JSON.stringify(postBody),
+        });
+        if (!postRes.ok) {
+          console.error("execute-bridge-custodial: permit post failed", await postRes.text());
+          return res.status(502).json({ error: "Relay permit post failed" });
+        }
+      } else if (kind === "transaction") {
+        const chainId = d.chainId as number | undefined;
+        if (chainId === 8453 || chainId === 56) {
+          if (!evmWallet) {
+            return res.status(400).json({ error: "EVM step but no mnemonic" });
+          }
+          const txRequest: TransactionRequest = {
+            from: d.from as string,
+            to: d.to as string,
+            data: d.data as string,
+            value: typeof d.value === "string" ? BigInt(d.value) : undefined,
+            gasLimit: typeof d.gas === "string" ? BigInt(d.gas) : typeof d.gas === "number" ? BigInt(d.gas) : undefined,
+            maxFeePerGas: typeof d.maxFeePerGas === "string" ? BigInt(d.maxFeePerGas) : undefined,
+            maxPriorityFeePerGas: typeof d.maxPriorityFeePerGas === "string" ? BigInt(d.maxPriorityFeePerGas) : undefined,
+            chainId,
+          };
+          const provider = getEvmProvider(chainId);
+          const connected = evmWallet.connect(provider);
+          const tx = await connected.sendTransaction(txRequest);
+          await tx.wait();
+        } else {
+          let serializedTx: string | null = null;
+          if (typeof d.serializedTransaction === "string") serializedTx = d.serializedTransaction;
+          else if (typeof d.transaction === "string") serializedTx = d.transaction;
+          else if (typeof d.payload === "string") serializedTx = d.payload;
+          else if (typeof d.transactionBytes === "string") serializedTx = d.transactionBytes;
+          if (!serializedTx) {
+            return res.status(400).json({ error: "Step data does not contain Solana transaction" });
+          }
+          const txBuffer = Buffer.from(serializedTx, "base64");
+          const transaction = VersionedTransaction.deserialize(txBuffer);
+          transaction.sign([solanaKeypair]);
+          const signedSerialized = Buffer.from(transaction.serialize()).toString("base64");
+          const connection = new Connection(getRpcUrl());
+          await connection.sendRawTransaction(Buffer.from(signedSerialized, "base64"), { skipPreflight: false, preflightCommitment: "confirmed" });
+        }
+      }
+
+      const check = firstItem?.check;
+      if (check?.endpoint && (check.method === "GET" || !check.method)) {
+        const statusUrl = check.endpoint.startsWith("http") ? check.endpoint : `${RELAY_API_BASE}${check.endpoint.startsWith("/") ? "" : "/"}${check.endpoint}`;
+        for (let i = 0; i < 60; i++) {
+          await new Promise((r) => setTimeout(r, 2000));
+          const statusRes = await fetch(statusUrl, { headers: apiKey ? { "x-api-key": apiKey } : {} });
+          const statusJson = (await statusRes.json()) as { status?: string };
+          if (statusJson?.status === "success" || statusJson?.status === "completed") break;
+          if (statusJson?.status === "failed" || statusJson?.status === "reverted") {
+            return res.status(502).json({ error: "Bridge step failed" });
+          }
+        }
+      }
+    }
+
+    return res.status(200).json({ status: "Success" });
+  } catch (e: unknown) {
+    console.error("execute-bridge-custodial error:", e);
+    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+  }
+}
+
 const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promise<void | VercelResponse>> = {
   "deposit-quote": depositQuoteHandler,
   "swap-quote": swapQuoteHandler,
   "withdraw-quote": withdrawQuoteHandler,
   "execute-step": executeStepHandler,
+  "bridge-from-evm-quote": bridgeFromEvmQuoteHandler,
+  "execute-bridge-custodial": executeBridgeCustodialHandler,
   "evm-address": evmAddressHandler,
   "evm-balances": evmBalancesHandler,
   currencies: currenciesHandler,

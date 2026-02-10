@@ -12,7 +12,8 @@
     "migrate-xhandle-lower": "node scripts/migrate-xhandle-lower.mjs",
     "sync-collections": "node scripts/sync-collections.mjs",
     "migrate-push-token-index": "node scripts/migrate-push-token-index.mjs",
-    "reset-all": "node scripts/reset-all.mjs"
+    "reset-all": "node scripts/reset-all.mjs",
+    "bridge-evm-usdc-to-sol": "node scripts/bridge-evm-usdc-to-sol.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

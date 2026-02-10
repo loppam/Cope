@@ -553,10 +553,112 @@ async function transactionHandler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913".toLowerCase();
+const BNB_USDC = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d".toLowerCase();
+
+async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  const secret = process.env.WEBHOOK_EVM_DEPOSIT_SECRET;
+  if (secret) {
+    const headerSecret = req.headers["x-webhook-secret"] ?? req.headers.authorization?.replace(/^Bearer\s+/i, "");
+    if (headerSecret !== secret) return res.status(401).json({ error: "Unauthorized" });
+  }
+  try {
+    const body = req.body as Record<string, unknown>;
+    let to: string;
+    let amountRaw: string;
+    let tokenAddress: string;
+    let network: "base" | "bnb";
+
+    if (body.to != null && body.value != null) {
+      to = String(body.to).trim().toLowerCase();
+      amountRaw = String(body.value).trim();
+      tokenAddress = (body.token ?? body.tokenAddress ?? "").toString().trim().toLowerCase();
+      const chainId = body.chainId ?? body.chain;
+      if (chainId === 8453 || chainId === "base") network = "base";
+      else if (chainId === 56 || chainId === "bnb" || chainId === "bsc") network = "bnb";
+      else {
+        return res.status(200).json({ received: true, skipped: "unsupported chain" });
+      }
+    } else if (Array.isArray(body.activity)) {
+      const first = body.activity[0] as Record<string, unknown> | undefined;
+      if (!first) return res.status(200).json({ received: true });
+      to = String(first.to ?? first.toAddress ?? "").trim().toLowerCase();
+      const val = first.value ?? first.rawContract?.value ?? first.tokenAmount;
+      amountRaw = typeof val === "string" ? val : typeof val === "number" ? String(val) : "";
+      tokenAddress = String(first.asset ?? first.contract ?? first.tokenAddress ?? "").trim().toLowerCase();
+      const chain = first.chain ?? first.network ?? body.network;
+      if (chain === "BASE" || chain === "base" || chain === 8453) network = "base";
+      else if (chain === "BSC" || chain === "bnb" || chain === 56) network = "bnb";
+      else return res.status(200).json({ received: true, skipped: "unsupported chain" });
+    } else {
+      return res.status(400).json({ error: "Expected body: { to, value, token?, chainId? } or { activity: [...] }" });
+    }
+
+    if (!to || to.length < 40) return res.status(200).json({ received: true, skipped: "invalid to" });
+    const token = tokenAddress || "";
+    if (network === "base" && token !== BASE_USDC) return res.status(200).json({ received: true, skipped: "not USDC" });
+    if (network === "bnb" && token !== BNB_USDC) return res.status(200).json({ received: true, skipped: "not USDC" });
+    const amount = amountRaw ? BigInt(amountRaw) : 0n;
+    if (amount <= 0n) return res.status(200).json({ received: true, skipped: "zero amount" });
+
+    const usersSnap = await db.collection("users").where("evmAddress", "==", to).limit(1).get();
+    if (usersSnap.empty) return res.status(200).json({ received: true, skipped: "unknown address" });
+    const userDoc = usersSnap.docs[0];
+    const userId = userDoc.id;
+    const walletAddress = userDoc.get("walletAddress") as string | undefined;
+    if (!walletAddress) return res.status(200).json({ received: true, skipped: "no solana wallet" });
+
+    const apiBase = process.env.API_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+    if (!apiBase) {
+      console.error("evm-deposit webhook: API_BASE_URL or VERCEL_URL not set");
+      return res.status(500).json({ error: "Server misconfiguration" });
+    }
+    const relaySecret = process.env.WEBHOOK_EVM_DEPOSIT_SECRET || process.env.RELAY_INTERNAL_SECRET;
+    const relayHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(relaySecret && { "x-webhook-secret": relaySecret }),
+    };
+
+    const quoteRes = await fetch(`${apiBase}/api/relay/bridge-from-evm-quote`, {
+      method: "POST",
+      headers: relayHeaders,
+      body: JSON.stringify({
+        evmAddress: to,
+        network,
+        amountRaw: amount.toString(),
+        recipientSolAddress: walletAddress,
+      }),
+    });
+    if (!quoteRes.ok) {
+      const errText = await quoteRes.text();
+      console.error("evm-deposit: bridge-from-evm-quote failed", quoteRes.status, errText);
+      return res.status(502).json({ error: "Bridge quote failed" });
+    }
+    const quote = await quoteRes.json();
+
+    const execRes = await fetch(`${apiBase}/api/relay/execute-bridge-custodial`, {
+      method: "POST",
+      headers: relayHeaders,
+      body: JSON.stringify({ userId, quoteResponse: quote }),
+    });
+    if (!execRes.ok) {
+      const errText = await execRes.text();
+      console.error("evm-deposit: execute-bridge-custodial failed", execRes.status, errText);
+      return res.status(502).json({ error: "Bridge execution failed" });
+    }
+    return res.status(200).json({ received: true, bridged: true });
+  } catch (e: unknown) {
+    console.error("evm-deposit webhook error:", e);
+    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+  }
+}
+
 const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promise<void | VercelResponse>> = {
   create: createHandler,
   sync: syncHandler,
   transaction: transactionHandler,
+  "evm-deposit": evmDepositHandler,
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {

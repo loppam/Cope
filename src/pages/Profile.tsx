@@ -536,13 +536,14 @@ export function Profile() {
                 </div>
               </div>
 
-              {/* Cash balance + performance placeholder - when connected */}
+              {/* Total wallet balance (USDC + positions) + cash row - when connected */}
               {walletConnected && walletAddress && (
                 <>
                   <div className="mt-4 pt-4 border-t border-white/10">
                     <p className="text-2xl sm:text-3xl font-bold">
-                      ${usdcBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ${(usdcBalance + openPositions.reduce((s, p) => s + p.value, 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
+                    <p className="text-xs text-white/50 mt-0.5">Total wallet balance</p>
                 </div>
                   <div className="mt-4 flex items-center justify-between">
                     <div className="flex items-center gap-2">

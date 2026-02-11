@@ -481,7 +481,14 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
     }
     const { secretKey } = await decryptWalletCredentials(userId, encryptedMnemonic, encryptedSecretKey, encryptionSecret);
     const wallet = Keypair.fromSecretKey(secretKey);
-    console.log("[execute-step] wallet loaded, signing", { userId, stepIndex });
+    const storedWalletAddress = userData?.walletAddress as string | undefined;
+    console.log("[execute-step] wallet loaded, signing", {
+      userId,
+      stepIndex,
+      signerPublicKey: wallet.publicKey.toBase58(),
+      storedWalletAddress: storedWalletAddress ?? null,
+      signerMatchesStored: storedWalletAddress ? wallet.publicKey.toBase58() === storedWalletAddress : "no stored address",
+    });
     const connection = new Connection(getRpcUrl());
 
     let transaction: VersionedTransaction | null = null;
@@ -508,12 +515,25 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: "Step data does not contain Solana transaction" });
     }
 
+    const txAccountKeys = transaction.message.staticAccountKeys.map((pk) => pk.toBase58());
+    console.log("[execute-step] tx accounts (static)", {
+      userId,
+      stepIndex,
+      accountCount: txAccountKeys.length,
+      accountKeys: txAccountKeys,
+    });
+
     transaction.sign([wallet]);
     const sig = await connection.sendRawTransaction(transaction.serialize(), { skipPreflight: false, preflightCommitment: "confirmed" });
     console.log("[execute-step] success", { userId, stepIndex, signature: sig });
     return res.status(200).json({ signature: sig, status: "Success" });
   } catch (e: unknown) {
-    console.error("[execute-step] error", { error: e instanceof Error ? e.message : String(e) });
+    const err = e as Error & { logs?: string[]; getLogs?: () => string[] };
+    const logs = err.logs ?? (typeof err.getLogs === "function" ? err.getLogs() : undefined);
+    console.error("[execute-step] error", {
+      error: e instanceof Error ? e.message : String(e),
+      logs: logs ?? null,
+    });
     return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error", signature: "", status: "Failed" });
   }
 }

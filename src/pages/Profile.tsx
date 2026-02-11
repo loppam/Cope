@@ -183,7 +183,9 @@ export function Profile() {
         const pnlByMint = pnlRes?.tokens ?? {};
         for (const t of positionsRes.tokens) {
           const mint = t.token.mint;
+          const symbol = (t.token.symbol || "").toUpperCase();
           if (mint === SOL_MINT || mint === SOLANA_USDC_MINT) continue;
+          if (symbol === "SOL") continue; // avoid duplicate SOL (tracker may use different mint)
           const value = t.value || 0;
           if (value <= 0) continue;
           const p = pnlByMint[mint];

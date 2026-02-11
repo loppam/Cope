@@ -97,6 +97,26 @@ async function byHandleHandler(req: VercelRequest, res: VercelResponse) {
       : [];
     const followersCount = followerUids.length;
 
+    // Fetch wallet stats (win rate, trades) from walletStats if synced by cron
+    let winRate: number | undefined;
+    let totalTrades: number | undefined;
+    let realizedPnL: number | undefined;
+    const walletAddress = userData.walletAddress as string;
+    try {
+      const statsSnap = await adminDb
+        .collection("walletStats")
+        .doc(walletAddress)
+        .get();
+      if (statsSnap.exists) {
+        const stats = statsSnap.data();
+        winRate = stats?.winRate;
+        totalTrades = stats?.totalTrades;
+        realizedPnL = stats?.realizedPnL;
+      }
+    } catch {
+      // ignore - stats are optional
+    }
+
     return res.status(200).json({
       uid,
       xHandle: userData.xHandle || null,
@@ -107,6 +127,9 @@ async function byHandleHandler(req: VercelRequest, res: VercelResponse) {
       followersCount,
       followingCount,
       watchlistCount,
+      ...(winRate != null && { winRate }),
+      ...(totalTrades != null && { totalTrades }),
+      ...(realizedPnL != null && { realizedPnL }),
     });
   } catch (error: unknown) {
     console.error("[profile-handler] by-handle error:", error);

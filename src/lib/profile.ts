@@ -33,6 +33,10 @@ export interface PublicProfileByHandle {
   followersCount: number;
   followingCount: number;
   watchlistCount: number;
+  /** From walletStats (synced by cron). All-time win rate 0-100. */
+  winRate?: number;
+  totalTrades?: number;
+  realizedPnL?: number;
 }
 
 export async function getPublicProfileByHandle(

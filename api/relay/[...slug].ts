@@ -437,16 +437,71 @@ function isBase64Like(s: string): boolean {
   return /^[A-Za-z0-9+/]+={0,2}$/.test(s);
 }
 
+/** Base58 uses [1-9A-HJ-NP-Za-km-z] - no 0, O, I, l */
+function isBase58Like(s: string): boolean {
+  if (!s || s.length === 0) return false;
+  return /^[1-9A-HJ-NP-Za-km-z]+$/.test(s);
+}
+
+/** Max reasonable instruction data size (Solana tx limit ~1232 bytes total) */
+const MAX_INSTRUCTION_DATA_BYTES = 2048;
+
+/**
+ * Decode Relay instruction data. Relay may send base64, hex, or base58.
+ * Try decodings in order; use the one that produces valid output to avoid
+ * "encoding overruns Uint8Array" from corrupt instruction data.
+ */
 function decodeRelayInstructionData(data: string): Buffer {
-  if (isHexLike(data)) {
-    const hex = data.startsWith("0x") ? data.slice(2) : data;
+  if (!data || typeof data !== "string") return Buffer.alloc(0);
+  const s = data.trim();
+  if (s.length === 0) return Buffer.alloc(0);
+
+  // 1. Hex (0x-prefix or plain) - unambiguous
+  if (isHexLike(s)) {
+    const hex = s.startsWith("0x") ? s.slice(2) : s;
     return Buffer.from(hex, "hex");
   }
-  if (isBase64Like(data)) {
-    return Buffer.from(data, "base64");
+
+  // 2. Base64 - most common for raw bytes from APIs; try first
+  if (isBase64Like(s)) {
+    try {
+      const buf = Buffer.from(s, "base64");
+      if (buf.length > 0 && buf.length <= MAX_INSTRUCTION_DATA_BYTES) return buf;
+    } catch {
+      // fall through
+    }
   }
-  // Relay sometimes uses base58 for Solana payloads; fall back to bs58
-  return Buffer.from(bs58.decode(data));
+
+  // 3. Base58 - Solana/Relay sometimes use this; only if no base64-specific chars
+  if (isBase58Like(s)) {
+    try {
+      const decoded = bs58.decode(s);
+      const buf = Buffer.from(decoded);
+      if (buf.length > 0 && buf.length <= MAX_INSTRUCTION_DATA_BYTES) return buf;
+    } catch {
+      // fall through
+    }
+  }
+
+  // 4. Fallback: try base64 even if heuristic failed (e.g. padding quirks)
+  try {
+    const buf = Buffer.from(s, "base64");
+    if (buf.length > 0 && buf.length <= MAX_INSTRUCTION_DATA_BYTES) return buf;
+  } catch {
+    // fall through
+  }
+
+  // 5. Last resort: base58
+  try {
+    const buf = Buffer.from(bs58.decode(s));
+    if (buf.length <= MAX_INSTRUCTION_DATA_BYTES) return buf;
+  } catch {
+    // fall through
+  }
+
+  throw new Error(
+    `[relay] Failed to decode instruction data (encoding overruns). Len=${s.length} preview=${s.slice(0, 24)}. Tried base64, hex, base58.`,
+  );
 }
 
 async function buildVersionedTxFromRelayInstructions(
@@ -491,6 +546,7 @@ async function buildVersionedTxFromRelayInstructions(
 async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   let userId: string | undefined;
+  let stepIndex = 0;
   try {
     ensureFirebase();
     const authHeader = req.headers.authorization;
@@ -499,7 +555,7 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
     userId = decoded.uid;
     const body = req.body as { quoteResponse?: unknown; stepIndex?: number };
     const quoteResponse = body?.quoteResponse;
-    const stepIndex = typeof body?.stepIndex === "number" ? body.stepIndex : 0;
+    stepIndex = typeof body?.stepIndex === "number" ? body.stepIndex : 0;
     console.log("[execute-step] start", { userId, stepIndex });
     if (!quoteResponse || typeof quoteResponse !== "object") {
       console.warn("[execute-step] missing quoteResponse", { userId });
@@ -587,7 +643,23 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
     } else {
       transaction.sign([wallet]);
     }
-    const sig = await connection.sendRawTransaction(transaction.serialize(), { skipPreflight: false, preflightCommitment: "confirmed" });
+
+    let serialized: Uint8Array;
+    try {
+      serialized = transaction.serialize();
+    } catch (serErr) {
+      const msg = serErr instanceof Error ? serErr.message : String(serErr);
+      console.error("[execute-step] serialize failed", {
+        userId,
+        stepIndex,
+        error: msg,
+        hasSerializedTx: !!serializedTx,
+        builtFromInstructions: !serializedTx && isRelaySolanaTxData(data),
+      });
+      throw serErr;
+    }
+
+    const sig = await connection.sendRawTransaction(serialized, { skipPreflight: false, preflightCommitment: "confirmed" });
     console.log("[execute-step] success", { userId, stepIndex, signature: sig });
     return res.status(200).json({ signature: sig, status: "Success" });
   } catch (e: unknown) {
@@ -595,6 +667,15 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
     const logs = err.logs ?? (typeof err.getLogs === "function" ? err.getLogs() : undefined);
     const errMsg = e instanceof Error ? e.message : String(e);
     console.error("[execute-step] error", { error: errMsg, logs: logs ?? null });
+
+    const isEncodingOverrun = /encoding overruns Uint8Array/i.test(errMsg);
+    if (isEncodingOverrun) {
+      console.error("[execute-step] encoding overrun - possible Relay instruction data format mismatch", {
+        userId,
+        stepIndex,
+        errMsg,
+      });
+    }
 
     const isInsufficientSol =
       /insufficient lamports|Transfer: insufficient/i.test(errMsg) ||
@@ -623,8 +704,11 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    const userMessage = isEncodingOverrun
+      ? "Transaction encoding error. Try again with different slippage or amount."
+      : "Transaction failed. Please try again.";
     return res.status(500).json({
-      error: "Transaction failed. Please try again.",
+      error: userMessage,
       signature: "",
       status: "Failed",
     });

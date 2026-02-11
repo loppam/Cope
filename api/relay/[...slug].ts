@@ -835,6 +835,7 @@ async function bridgeFromEvmQuoteHandler(req: VercelRequest, res: VercelResponse
 
     const apiKey = process.env.RELAY_API_KEY;
     const originChainId = CHAIN_IDS[network] ?? (network === "base" ? 8453 : 56);
+    const useTopup = parseInt(amountRaw, 10) > 5_000_000; // > $5 USDC
     const relayBody = {
       user: evmAddress,
       originChainId,
@@ -846,8 +847,8 @@ async function bridgeFromEvmQuoteHandler(req: VercelRequest, res: VercelResponse
       recipient: recipientSolAddress,
       useDepositAddress: false,
       usePermit: true,
-      topupGas: true,
-      topupGasAmount: "1000000", // 0.001 SOL
+      topupGas: useTopup,
+      ...(useTopup && { topupGasAmount: "2000000" }), // 0.002 SOL
       appFees: getAppFees(),
     };
     console.log("[bridge-from-evm-quote] relay quote/v2 body", {

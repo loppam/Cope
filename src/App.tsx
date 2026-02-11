@@ -24,6 +24,13 @@ export default function App() {
               "0 4px 12px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(18, 213, 133, 0.1)",
             marginTop: "var(--safe-area-inset-top)",
           },
+          classNames: {
+            title: "!text-white",
+            description: "!text-white",
+            content: "!text-white",
+            actionButton: "!text-white",
+            cancelButton: "!text-white",
+          },
         }}
         className="cope-toaster"
       />

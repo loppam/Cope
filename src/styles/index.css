@@ -165,6 +165,12 @@ html {
   top: calc(var(--safe-area-inset-top) + 1rem) !important;
 }
 
+/* Force toast title and description to white for readability on dark green background */
+.cope-toaster [data-sonner-toast] [data-title],
+.cope-toaster [data-sonner-toast] [data-description] {
+  color: #ffffff !important;
+}
+
 .cope-notification-toast {
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);

@@ -644,6 +644,43 @@ function isBase58Like(s: string): boolean {
 /** Max reasonable instruction data size (Solana tx limit ~1232 bytes total) */
 const MAX_INSTRUCTION_DATA_BYTES = 2048;
 
+/** Fetch address lookup tables in parallel; report successes and failures. */
+async function fetchLuts(
+  connection: Connection,
+  addrs: string[],
+): Promise<{
+  ok: AddressLookupTableAccount[];
+  fail: Array<{ addr: string; reason: string }>;
+}> {
+  if (addrs.length === 0) return { ok: [], fail: [] };
+  const settled = await Promise.allSettled(
+    addrs.map(async (a) => {
+      const pk = new PublicKey(a);
+      const res = await connection.getAddressLookupTable(pk);
+      if (!res.value) throw new Error("LUT_NOT_FOUND");
+      return res.value as AddressLookupTableAccount;
+    }),
+  );
+  const ok: AddressLookupTableAccount[] = [];
+  const fail: Array<{ addr: string; reason: string }> = [];
+  settled.forEach((r, i) => {
+    const addr = addrs[i];
+    if (r.status === "fulfilled") ok.push(r.value);
+    else fail.push({ addr, reason: String(r.reason) });
+  });
+  return { ok, fail };
+}
+
+/** Measure raw and base64 serialized size of a transaction. */
+function measureTransaction(tx: VersionedTransaction): {
+  rawLen: number;
+  b64Len: number;
+} {
+  const raw = tx.serialize();
+  const b64 = Buffer.from(raw).toString("base64");
+  return { rawLen: raw.length, b64Len: b64.length };
+}
+
 /**
  * Decode Relay instruction data for Solana.
  * Relay's official Solana adapter uses hex exclusively (Buffer.from(i.data, 'hex')).
@@ -718,15 +755,13 @@ async function buildVersionedTxFromRelayInstructions(
   const lookupAddrs = Array.isArray(data.addressLookupTableAddresses)
     ? data.addressLookupTableAddresses
     : [];
-  const lookupAccounts: AddressLookupTableAccount[] = [];
-  for (const addr of lookupAddrs) {
-    try {
-      const res = await connection.getAddressLookupTable(new PublicKey(addr));
-      if (res.value) lookupAccounts.push(res.value);
-    } catch {
-      // if a lookup table is missing/unavailable, compilation may fail; ignore here and let send fail with a clear error
-    }
-  }
+  const { ok: lookupAccounts, fail: lutFails } = await fetchLuts(
+    connection,
+    lookupAddrs,
+  );
+
+  console.log("[ALT] relaySent", lookupAddrs.length, "loaded", lookupAccounts.length);
+  if (lutFails.length) console.warn("[ALT] loadFails", lutFails);
 
   const { blockhash } = await connection.getLatestBlockhash("confirmed");
   const messageV0 = new TransactionMessage({
@@ -734,6 +769,18 @@ async function buildVersionedTxFromRelayInstructions(
     recentBlockhash: blockhash,
     instructions: ixs,
   }).compileToV0Message(lookupAccounts);
+
+  console.log("[ALT] lookupsUsed", messageV0.addressTableLookups.length);
+  messageV0.addressTableLookups.forEach((l, i) => {
+    console.log(
+      `[ALT] LUT#${i}`,
+      l.accountKey.toBase58(),
+      "writableIdx",
+      l.writableIndexes.length,
+      "readonlyIdx",
+      l.readonlyIndexes.length,
+    );
+  });
 
   return new VersionedTransaction(messageV0);
 }
@@ -911,6 +958,18 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
 
     transaction.sign([wallet]);
 
+    const { rawLen, b64Len } = measureTransaction(transaction);
+    const msg = transaction.message;
+    const staticCount =
+      "staticAccountKeys" in msg ? msg.staticAccountKeys.length : 0;
+    const lookupCount =
+      "addressTableLookups" in msg ? msg.addressTableLookups.length : 0;
+    console.log("[TX] staticKeys", staticCount, "lookupsUsed", lookupCount, "rawLen", rawLen, "b64Len", b64Len);
+
+    if (rawLen > 1232) {
+      throw new Error(`SOL_TX_TOO_LARGE:${rawLen}`);
+    }
+
     let serialized: Uint8Array;
     try {
       serialized = transaction.serialize();
@@ -937,10 +996,8 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
     });
     return res.status(200).json({ signature: sig, status: "Success" });
   } catch (e: unknown) {
-    const err = e as Error & { logs?: string[]; getLogs?: () => string[] };
-    const logs =
-      err.logs ??
-      (typeof err.getLogs === "function" ? err.getLogs() : undefined);
+    const err = e as Error & { logs?: string[] };
+    const logs = err.logs ?? undefined;
     const errMsg = e instanceof Error ? e.message : String(e);
     console.error("[execute-step] error", {
       error: errMsg,

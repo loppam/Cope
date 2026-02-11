@@ -698,6 +698,21 @@ async function evmBalancesHandler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+async function evmBalancesPublicHandler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  const address = (req.query.address as string)?.trim();
+  if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
+    return res.status(400).json({ error: "Invalid address; provide 0x-prefixed 40-char hex" });
+  }
+  try {
+    const balances = await getEvmBalances(address);
+    return res.status(200).json({ base: balances.base, bnb: balances.bnb });
+  } catch (e: unknown) {
+    console.error("evm-balances-public error:", e);
+    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+  }
+}
+
 async function evmAddressRemoveHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST" && req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
   try {
@@ -1149,6 +1164,7 @@ const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promis
   "evm-address": evmAddressHandler,
   "evm-address-remove": evmAddressRemoveHandler,
   "evm-balances": evmBalancesHandler,
+  "evm-balances-public": evmBalancesPublicHandler,
   "fund-new-wallet": fundNewWalletHandler,
   "notify-withdrawal-complete": notifyWithdrawalCompleteHandler,
   currencies: currenciesHandler,

@@ -58,6 +58,7 @@ interface BirdeyeOverviewData {
   symbol?: string;
   name?: string;
   decimals?: number;
+  supply?: number;
   price?: number;
   marketCap?: number;
   mc?: number;
@@ -79,11 +80,42 @@ interface BirdeyeOverviewData {
   };
 }
 
+interface BirdeyeSecurityData {
+  ownerAddress?: string | null;
+  freezeAuthority?: string | boolean | null;
+  freezeable?: boolean | null;
+  totalSupply?: number;
+  top10HolderPercent?: number;
+  top10UserPercent?: number;
+  mutableMetadata?: boolean;
+  metaplexUpdateAuthority?: string | null;
+}
+
 interface BirdeyeHolderItem {
   owner?: string;
   balance?: number;
   percentage?: number;
   rank?: number;
+}
+
+async function fetchTokenSecurity(
+  address: string,
+  chain: string
+): Promise<BirdeyeSecurityData | null> {
+  try {
+    const res = await birdeyeFetch<{
+      success?: boolean;
+      data?: BirdeyeSecurityData;
+    }>("/defi/token_security", { address }, chain);
+    return res?.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function extractHolderItems(res: unknown): BirdeyeHolderItem[] {
+  const d = res as { data?: { items?: BirdeyeHolderItem[]; data?: { items?: BirdeyeHolderItem[] } } };
+  return d?.data?.items ?? d?.data?.data?.items ?? [];
 }
 
 async function fetchTokenData(
@@ -93,6 +125,7 @@ async function fetchTokenData(
   chain: string;
   metadata: Record<string, unknown>;
   marketData: BirdeyeOverviewData | null;
+  securityData: BirdeyeSecurityData | null;
   holders: BirdeyeHolderItem[];
 }> {
   const chainsToTry = chain ? [toBirdeyeChain(chain)] : inferChain(address).map(toBirdeyeChain);
@@ -100,7 +133,7 @@ async function fetchTokenData(
   let lastError: Error | null = null;
   for (const c of chainsToTry) {
     try {
-      const [overviewRes, holderRes] = await Promise.all([
+      const [overviewRes, holderRes, securityRes] = await Promise.all([
         birdeyeFetch<{ success?: boolean; data?: BirdeyeOverviewData }>(
           "/defi/token_overview",
           { address, ui_amount_mode: "scaled" },
@@ -111,18 +144,30 @@ async function fetchTokenData(
           { address, limit: "20" },
           c
         ).catch(() => ({ success: false, data: { items: [] } })),
+        fetchTokenSecurity(address, c),
       ]);
 
       const data = overviewRes?.data;
-      const holderItems = holderRes?.data?.items ?? [];
+      const holderItems = extractHolderItems(holderRes);
+      const security = securityRes;
+
+      const supply =
+        security?.totalSupply ?? data?.supply ?? 0;
+      const mintAuthority = security?.ownerAddress ?? null;
+      const freezeAuthority =
+        security?.freezeAuthority != null && security.freezeAuthority !== false
+          ? String(security.freezeAuthority)
+          : security?.freezeable === true
+            ? "Active"
+            : "None";
 
       const metadata = {
         name: data?.name ?? "Unknown",
         symbol: data?.symbol ?? "N/A",
-        supply: 0,
+        supply,
         decimals: data?.decimals ?? 9,
-        mintAuthority: null,
-        freezeAuthority: "Unknown",
+        mintAuthority,
+        freezeAuthority,
         website: data?.extensions?.website ?? null,
         twitter: data?.extensions?.twitter ?? null,
         telegram: data?.extensions?.telegram ?? null,
@@ -132,6 +177,7 @@ async function fetchTokenData(
         chain: c === "bsc" ? "bnb" : c,
         metadata,
         marketData: data ?? null,
+        securityData: security,
         holders: holderItems,
       };
     } catch (e) {
@@ -143,13 +189,33 @@ async function fetchTokenData(
   throw lastError ?? new Error("Failed to fetch token from Birdeye");
 }
 
+function normalizeHolderPercentage(p: number): number {
+  return p < 1 ? p * 100 : p;
+}
+
 function calculateMetrics(
   marketData: BirdeyeOverviewData | null,
-  holders: BirdeyeHolderItem[]
+  holders: BirdeyeHolderItem[],
+  securityData: BirdeyeSecurityData | null
 ): Record<string, unknown> {
-  const top10Pct = holders
-    .slice(0, 10)
-    .reduce((sum, h) => sum + (h.percentage ?? 0), 0);
+  let top10Concentration: number;
+  const holderBased = holders.length >= 2;
+  if (holderBased) {
+    const top10ExclPool = holders
+      .slice(1, 11)
+      .reduce((sum, h) => sum + normalizeHolderPercentage(h.percentage ?? 0), 0);
+    top10Concentration = Math.round(top10ExclPool * 100) / 100;
+  } else {
+    const securityPct =
+      securityData?.top10HolderPercent ?? securityData?.top10UserPercent;
+    top10Concentration =
+      securityPct != null
+        ? securityPct < 1
+          ? securityPct * 100
+          : securityPct
+        : 0;
+  }
+
   const holderCount = marketData?.holder ?? holders.length;
 
   const liquidityUSD = marketData?.liquidity ?? 0;
@@ -164,8 +230,15 @@ function calculateMetrics(
   const sell24h = marketData?.sell24h ?? 0;
   const devSold = sell24h > buy24h * 1.5 ? "Yes" : "No";
 
+  const totalSupply =
+    securityData?.totalSupply ?? marketData?.supply ?? 0;
+  const hasMintAuthority = securityData?.ownerAddress != null;
+  const hasFreeze =
+    securityData?.freezeable === true ||
+    (securityData?.freezeAuthority != null && securityData?.freezeAuthority !== false);
+
   return {
-    top10Concentration: Math.round(top10Pct * 100) / 100,
+    top10Concentration,
     holderCount,
     bundleCount: 0,
     freshWalletPercent: 15,
@@ -175,9 +248,9 @@ function calculateMetrics(
     marketCap,
     price,
     priceChange24h,
-    totalSupply: 0,
-    hasFreeze: false,
-    hasMintAuthority: false,
+    totalSupply,
+    hasFreeze,
+    hasMintAuthority,
     extensions: marketData?.extensions ?? {},
     trade24h: marketData?.trade24h ?? 0,
   };
@@ -279,6 +352,9 @@ TOKEN:
 - Chain: ${chain}
 - Name: ${metadata.name}
 - Symbol: ${metadata.symbol}
+- Mint Authority: ${metadata.mintAuthority ? "Active" : "Revoked"}
+- Freeze Authority: ${metadata.freezeAuthority}
+- Total Supply: ${(metrics.totalSupply as number)?.toLocaleString?.() ?? metrics.totalSupply}
 
 HOLDERS:
 - Total Holders: ${metrics.holderCount}
@@ -452,12 +528,10 @@ export default async function handler(
       return;
     }
 
-    const { chain, metadata, marketData, holders } = await fetchTokenData(
-      addr,
-      body.chain
-    );
+    const { chain, metadata, marketData, securityData, holders } =
+      await fetchTokenData(addr, body.chain);
 
-    const metrics = calculateMetrics(marketData, holders);
+    const metrics = calculateMetrics(marketData, holders, securityData);
 
     const analysis = await analyzeWithClaude({
       tokenAddress: addr,

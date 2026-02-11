@@ -21,6 +21,10 @@
       "destination": "/api/profile-handler?action=followers-list"
     },
     {
+      "source": "/api/profile/by-handle",
+      "destination": "/api/profile-handler?action=by-handle"
+    },
+    {
       "source": "/api/watchlist/add",
       "destination": "/api/watchlist-handler?action=add"
     },

@@ -1,6 +1,7 @@
-// Consolidated: followers-count, followers-list
+// Consolidated: followers-count, followers-list, by-handle (public)
 // Rewrites: /api/profile/followers-count → /api/profile-handler?action=followers-count
 //           /api/profile/followers-list → /api/profile-handler?action=followers-list
+//           /api/profile/by-handle → /api/profile-handler?action=by-handle
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
@@ -54,12 +55,78 @@ async function getUid(req: VercelRequest): Promise<string | null> {
   }
 }
 
+function isUserPublic(data: { isPublic?: boolean }): boolean {
+  return data.isPublic !== false;
+}
+
+async function byHandleHandler(req: VercelRequest, res: VercelResponse) {
+  const rawHandle = (req.query.handle as string) || "";
+  const handle = rawHandle.trim().replace(/^@/, "").toLowerCase();
+  if (!handle) {
+    return res.status(400).json({ error: "Missing handle" });
+  }
+  const normalizedHandle = `@${handle}`;
+
+  try {
+    const usersRef = adminDb.collection("users");
+    const snapshot = await usersRef
+      .where("xHandleLower", "==", normalizedHandle)
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) {
+      return res.status(404).json({ error: "Profile not found or private" });
+    }
+
+    const userDoc = snapshot.docs[0];
+    const userData = userDoc.data();
+    const uid = userDoc.id;
+
+    if (!userData.walletAddress || !isUserPublic(userData)) {
+      return res.status(404).json({ error: "Profile not found or private" });
+    }
+
+    const watchlist = (userData.watchlist || []) as Array<{ onPlatform?: boolean }>;
+    const followingCount = watchlist.filter((w) => w.onPlatform === true).length;
+    const watchlistCount = watchlist.length;
+
+    const followersRef = adminDb.collection("followers").doc(uid);
+    const followersSnap = await followersRef.get();
+    const followerUids: string[] = followersSnap.exists
+      ? (followersSnap.data()?.followerUids as string[]) || []
+      : [];
+    const followersCount = followerUids.length;
+
+    return res.status(200).json({
+      uid,
+      xHandle: userData.xHandle || null,
+      displayName: userData.displayName || userData.xHandle || null,
+      avatar: userData.avatar || userData.photoURL || null,
+      walletAddress: userData.walletAddress,
+      evmAddress: userData.evmAddress || null,
+      followersCount,
+      followingCount,
+      watchlistCount,
+    });
+  } catch (error: unknown) {
+    console.error("[profile-handler] by-handle error:", error);
+    return res
+      .status(500)
+      .json({ error: error instanceof Error ? error.message : "Failed to fetch profile" });
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   const action = (req.query.action as string) || "";
+
+  if (action === "by-handle") {
+    return byHandleHandler(req, res);
+  }
+
   if (action !== "followers-count" && action !== "followers-list") {
     return res.status(400).json({ error: "Invalid action" });
   }
@@ -70,7 +137,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // Use followers reverse index: one doc read instead of full users scan
     const followersRef = adminDb.collection("followers").doc(uid);
     const followersSnap = await followersRef.get();
 
@@ -81,16 +147,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ count: followerUids.length });
     }
 
-    // followers-list
     const followerUids: string[] = followersSnap.exists
       ? (followersSnap.data()?.followerUids as string[]) || []
       : [];
     const followers = followerUids.map((followerUid) => ({ uid: followerUid }));
     return res.status(200).json({ followers });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("[profile-handler] Error:", error);
     return res
       .status(500)
-      .json({ error: error.message || "Failed to get followers" });
+      .json({ error: error instanceof Error ? error.message : "Failed to get followers" });
   }
 }

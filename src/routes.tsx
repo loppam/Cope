@@ -20,6 +20,7 @@ import { ScannerLoading } from "@/pages/scanner/ScannerLoading";
 import { ScannerResults } from "@/pages/scanner/ScannerResults";
 import { ScannerWalletDetail } from "@/pages/scanner/ScannerWalletDetail";
 import { TokenDetail } from "@/pages/TokenDetail";
+import { PublicProfile } from "@/pages/PublicProfile";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 // import { PublicRoute } from "@/components/PublicRoute";
 import { AdminPush } from "@/pages/lopam/AdminPush";
@@ -172,5 +173,9 @@ export const router = createBrowserRouter([
         </AppLayout>
       </ProtectedRoute>
     ),
+  },
+  {
+    path: "/:handle",
+    element: <PublicProfile />,
   },
 ]);

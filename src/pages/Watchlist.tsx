@@ -328,7 +328,9 @@ export function Watchlist() {
                     <Button
                       variant="ghost"
                       className="mt-4 text-accent-primary min-h-[44px]"
-                      onClick={() => navigate("/app/home")}
+                      onClick={() =>
+                        navigate("/app/tscanner", { state: { tab: "discover" } })
+                      }
                     >
                       Discover traders
                     </Button>

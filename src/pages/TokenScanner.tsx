@@ -1,9 +1,10 @@
 /**
- * Token Scanner – minified token analysis based on Premium Web App Interface.
- * Uses /api/analyze-token with BIRDEYE_API_KEY (same as platform).
- * No artificial delays – full scan completes in one request.
+ * Token Scanner – token analysis based on Premium Web App Interface.
+ * Uses /api/analyze-token: real bundle detection, stepped reveal, predictions.
+ * Tabs: Token (scan) | Discover (accounts + top traders)
  */
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { useNavigate, useLocation } from "react-router";
 import { motion } from "motion/react";
 import {
   Search,
@@ -28,7 +29,14 @@ import {
   Twitter,
   MessageCircle,
 } from "lucide-react";
-import { getApiBase } from "@/lib/utils";
+import { getApiBase, shortenAddress } from "@/lib/utils";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  searchUsersByHandle,
+  findUserByWalletAddress,
+  findUserByXHandle,
+  type UserSearchResult,
+} from "@/lib/auth";
 
 function formatMarketCap(value: number): string {
   if (!value || isNaN(value)) return "$0";
@@ -48,7 +56,7 @@ const ANALYSIS_STEPS = [
   { key: "socials", icon: Globe, label: "Socials" },
 ] as const;
 
-type StatusKind = "safe" | "warning" | "danger" | "info";
+type StatusKind = "safe" | "warning" | "danger" | "info" | "neutral";
 
 interface TokenData {
   name: string;
@@ -97,16 +105,38 @@ interface AnalysisResult {
   recommendation?: string;
 }
 
+type ScannerTab = "token" | "discover";
+
+interface TopTrader {
+  uid: string;
+  xHandle: string | null;
+  avatar: string | null;
+  walletAddress: string;
+  winRate: number;
+  totalTrades: number;
+  realizedPnL?: number;
+}
+
+interface DiscoverAccount {
+  uid: string;
+  xHandle?: string | null;
+  displayName?: string | null;
+  avatar?: string | null;
+  walletAddress: string;
+}
+
 function AnalysisRow({
   data,
   icon: Icon,
   label,
+  isAnalyzing = false,
 }: {
   data: AnalysisItem;
   icon: React.ComponentType<{ className?: string }>;
   label: string;
+  isAnalyzing?: boolean;
 }) {
-  const status = data?.status || "info";
+  const status = (data?.status || "info") as StatusKind;
   const StatusIcon =
     status === "safe"
       ? CheckCircle2
@@ -120,28 +150,47 @@ function AnalysisRow({
     warning: "text-amber-500 border-amber-500/40 bg-amber-500/10",
     danger: "text-red-500 border-red-500/40 bg-red-500/10",
     info: "text-white/60 border-white/20 bg-white/5",
+    neutral: "text-white/50 border-white/15 bg-white/5",
   };
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="rounded-xl border border-white/10 bg-white/5 p-4"
+      initial={{ opacity: 0, y: 20, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
+      className={`rounded-xl border p-4 shadow-[0_4px_12px_rgba(0,0,0,0.2)] min-h-[44px] ${
+        isAnalyzing
+          ? "border-[#12d585]/60 bg-white/10 animate-pulse"
+          : "border-white/10 bg-white/5"
+      }`}
     >
       <div className="flex items-start gap-3">
-        <Icon className="mt-0.5 h-5 w-5 shrink-0 text-[#12d585]" />
+        {isAnalyzing ? (
+          <Loader2 className="mt-0.5 h-5 w-5 shrink-0 text-[#12d585] animate-spin" />
+        ) : (
+          <Icon className="mt-0.5 h-5 w-5 shrink-0 text-[#12d585]" />
+        )}
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium text-white/80">{label}</div>
-          <p className="mt-1 text-xs leading-relaxed text-white/60">
-            {data?.reason || data?.value || "—"}
-          </p>
-          {data?.value && (
-            <div
-              className={`mt-2 inline-flex min-h-[44px] min-w-[44px] items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium ${statusColors[status]}`}
-            >
-              {StatusIcon && <StatusIcon className="h-3.5 w-3.5" />}
-              {data.value}
-            </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-medium text-white/80">{label}</span>
+            {isAnalyzing && (
+              <span className="text-xs text-white/40 italic">Analyzing…</span>
+            )}
+          </div>
+          {!isAnalyzing && (
+            <>
+              <p className="mt-1 text-xs leading-relaxed text-white/60">
+                {data?.reason || data?.value || "—"}
+              </p>
+              {data?.value && (
+                <div
+                  className={`mt-2 inline-flex min-h-[44px] min-w-[44px] items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium ${statusColors[status]}`}
+                >
+                  {StatusIcon && <StatusIcon className="h-3.5 w-3.5" />}
+                  {data.value}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -149,13 +198,327 @@ function AnalysisRow({
   );
 }
 
+function DiscoverTabContent() {
+  const navigate = useNavigate();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<UserSearchResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [topTraders, setTopTraders] = useState<TopTrader[]>([]);
+  const [accounts, setAccounts] = useState<DiscoverAccount[]>([]);
+  const [discoverLoading, setDiscoverLoading] = useState(true);
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const detectSearchType = (input: string): "wallet" | "xhandle" => {
+    const trimmed = input.trim();
+    if (
+      trimmed.startsWith("@") ||
+      (!trimmed.includes(" ") &&
+        trimmed.length < 20 &&
+        !trimmed.match(/^[A-Za-z0-9]{32,44}$/))
+    ) {
+      return "xhandle";
+    }
+    return "wallet";
+  };
+
+  const isUsernameMode = detectSearchType(searchQuery) === "xhandle";
+
+  useEffect(() => {
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    if (!searchQuery.trim() || !isUsernameMode || searchQuery.trim().length < 2) {
+      setSearchResults([]);
+      setShowDropdown(false);
+      return;
+    }
+    setSearchLoading(true);
+    searchTimeoutRef.current = setTimeout(async () => {
+      try {
+        const results = await searchUsersByHandle(searchQuery.trim(), 20);
+        setSearchResults(results);
+        setShowDropdown(results.length > 0 || searchQuery.trim().length >= 1);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 300);
+    return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    };
+  }, [searchQuery, isUsernameMode]);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchDiscover() {
+      try {
+        const base = getApiBase() || window.location.origin;
+        const res = await fetch(`${base}/api/discover`);
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        setTopTraders(data.topTraders ?? []);
+        setAccounts(
+          (data.accounts ?? []).map((a: DiscoverAccount) => ({
+            uid: a.uid,
+            xHandle: a.xHandle ?? null,
+            displayName: a.displayName ?? null,
+            avatar: a.avatar ?? null,
+            walletAddress: a.walletAddress,
+          })),
+        );
+      } catch {
+        if (!cancelled) {
+          setTopTraders([]);
+          setAccounts([]);
+        }
+      } finally {
+        if (!cancelled) setDiscoverLoading(false);
+      }
+    }
+    fetchDiscover();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleSelectUser = (user: UserSearchResult) => {
+    setSearchQuery(user.xHandle || user.displayName || "");
+    setSearchResults([]);
+    setShowDropdown(false);
+    navigate("/scanner/wallet/" + user.walletAddress);
+  };
+
+  const handleSearchSubmit = async () => {
+    const q = searchQuery.trim();
+    if (!q) return;
+    try {
+      const type = detectSearchType(q);
+      if (type === "xhandle") {
+        const user = await findUserByXHandle(q);
+        if (user?.walletAddress) {
+          navigate("/scanner/wallet/" + user.walletAddress);
+        }
+      } else {
+        const user = await findUserByWalletAddress(q, true);
+        if (user?.walletAddress) {
+          navigate("/scanner/wallet/" + user.walletAddress);
+        } else {
+          navigate("/scanner/wallet/" + q);
+        }
+      }
+    } catch {
+      navigate("/scanner/wallet/" + q);
+    }
+  };
+
+  const goToWallet = (address: string) => {
+    navigate("/scanner/wallet/" + address);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div ref={containerRef} className="relative">
+        <label className="block text-sm font-medium text-white/80 mb-2">
+          Search by X handle or wallet
+        </label>
+        <div className="relative">
+          {isUsernameMode && (
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40 pointer-events-none z-10" />
+          )}
+          <input
+            type="text"
+            placeholder="Enter @username or wallet address"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onFocus={() => isUsernameMode && searchResults.length > 0 && setShowDropdown(true)}
+            onKeyDown={(e) => e.key === "Enter" && handleSearchSubmit()}
+            className={`min-h-[44px] w-full rounded-lg bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-[#12d585] ${isUsernameMode ? "pl-10" : ""}`}
+          />
+          {isUsernameMode && searchLoading && (
+            <div className="absolute right-3 top-1/2 -translate-y-1/2">
+              <Loader2 className="w-4 h-4 text-white/40 animate-spin" />
+            </div>
+          )}
+        </div>
+        {showDropdown && searchResults.length > 0 && (
+          <div className="absolute z-50 w-full mt-2 max-h-[320px] overflow-y-auto rounded-xl border border-white/10 bg-[#0a0a0a] shadow-xl">
+            <div className="p-2">
+              {searchResults.map((user) => (
+                <button
+                  key={user.uid}
+                  type="button"
+                  onClick={() => handleSelectUser(user)}
+                  className="w-full p-3 rounded-lg hover:bg-white/5 transition-colors text-left flex items-center gap-3 min-h-[44px]"
+                >
+                  {user.avatar ? (
+                    <img
+                      src={user.avatar}
+                      alt=""
+                      className="w-10 h-10 rounded-full flex-shrink-0 object-cover"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-full flex-shrink-0 bg-white/10 flex items-center justify-center text-white/60 text-sm">
+                      {(user.xHandle || user.displayName || "?")[1]?.toUpperCase() ?? "?"}
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-white truncate">
+                      {user.displayName || user.xHandle || "—"}
+                    </div>
+                    <div className="text-xs text-white/50 font-mono truncate">
+                      {user.xHandle}
+                    </div>
+                  </div>
+                  <div className="text-xs text-white/40 font-mono flex-shrink-0">
+                    {shortenAddress(user.walletAddress)}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {isUsernameMode && !searchLoading && searchQuery.trim().length >= 1 && searchResults.length === 0 && showDropdown && (
+          <div className="absolute z-50 w-full mt-2 p-4 rounded-xl border border-white/10 bg-[#0a0a0a] text-center text-white/60 text-sm">
+            No users found
+          </div>
+        )}
+      </div>
+
+      <button
+        type="button"
+        onClick={handleSearchSubmit}
+        disabled={!searchQuery.trim()}
+        className="w-full min-h-[44px] flex items-center justify-center gap-2 rounded-xl bg-[#12d585] font-semibold text-black px-4 py-3 disabled:opacity-50"
+      >
+        <Search className="w-4 h-4" />
+        Search
+      </button>
+
+      {discoverLoading ? (
+        <div className="flex items-center justify-center gap-3 py-12 text-[#12d585]">
+          <Loader2 className="h-6 w-6 animate-spin" />
+          <span>Loading discover…</span>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {topTraders.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-white/80 mb-3">Top traders</h3>
+              <div className="space-y-2">
+                {topTraders.map((t) => (
+                  <button
+                    key={t.uid}
+                    type="button"
+                    onClick={() => goToWallet(t.walletAddress)}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-colors text-left min-h-[56px]"
+                  >
+                    {t.avatar ? (
+                      <img
+                        src={t.avatar}
+                        alt=""
+                        className="w-10 h-10 rounded-xl object-cover flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-xl bg-[#12d585]/20 flex items-center justify-center flex-shrink-0">
+                        <Users className="w-5 h-5 text-[#12d585]" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-white truncate">
+                        {t.xHandle || shortenAddress(t.walletAddress)}
+                      </div>
+                      <div className="text-xs text-white/50">
+                        {t.totalTrades} trades
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className="text-sm font-semibold text-[#12d585]">
+                        {Number(t.winRate).toFixed(0)}% win
+                      </div>
+                      {t.realizedPnL != null && (
+                        <div className={`text-xs ${t.realizedPnL >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          {t.realizedPnL >= 0 ? "+" : ""}{t.realizedPnL.toFixed(0)}%
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div>
+            <h3 className="text-sm font-semibold text-white/80 mb-3">All accounts</h3>
+            <div className="space-y-2">
+              {accounts.length === 0 ? (
+                <div className="py-8 text-center text-white/50 text-sm">
+                  No public accounts yet
+                </div>
+              ) : (
+                accounts.map((a) => (
+                  <button
+                    key={a.uid}
+                    type="button"
+                    onClick={() => goToWallet(a.walletAddress)}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-colors text-left min-h-[56px]"
+                  >
+                    {a.avatar ? (
+                      <img
+                        src={a.avatar}
+                        alt=""
+                        className="w-10 h-10 rounded-xl object-cover flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center flex-shrink-0">
+                        <Users className="w-5 h-5 text-white/50" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-white truncate">
+                        {a.xHandle || a.displayName || shortenAddress(a.walletAddress)}
+                      </div>
+                      <div className="text-xs text-white/50 font-mono truncate">
+                        {shortenAddress(a.walletAddress)}
+                      </div>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TokenScanner() {
+  const location = useLocation();
+  const initialState = (location.state as { tab?: ScannerTab })?.tab;
+  const searchParams = new URLSearchParams(location.search);
+  const tabParam = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState<ScannerTab>(
+    tabParam === "discover" || initialState === "discover" ? "discover" : "token",
+  );
   const [tokenAddress, setTokenAddress] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tokenData, setTokenData] = useState<TokenData | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [copied, setCopied] = useState(false);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [showPredictions, setShowPredictions] = useState(false);
+  const [showVerdict, setShowVerdict] = useState(false);
 
   const analyzeToken = useCallback(async () => {
     const addr = tokenAddress.trim();
@@ -165,6 +528,9 @@ export function TokenScanner() {
     setError(null);
     setTokenData(null);
     setAnalysis(null);
+    setCurrentStep(0);
+    setShowPredictions(false);
+    setShowVerdict(false);
 
     try {
       const base = getApiBase() || window.location.origin;
@@ -208,6 +574,24 @@ export function TokenScanner() {
     }
   }, [tokenAddress]);
 
+  useEffect(() => {
+    if (!analysis || loading) return;
+    setCurrentStep(0);
+    const id = setInterval(() => {
+      setCurrentStep((prev) => {
+        const next = prev + 1;
+        if (next >= ANALYSIS_STEPS.length) {
+          clearInterval(id);
+          setShowPredictions(true);
+          setTimeout(() => setShowVerdict(true), 1800);
+          return ANALYSIS_STEPS.length;
+        }
+        return next;
+      });
+    }, 650);
+    return () => clearInterval(id);
+  }, [analysis, loading]);
+
   const handleCopy = () => {
     if (!tokenData?.contractAddress) return;
     navigator.clipboard.writeText(tokenData.contractAddress);
@@ -221,10 +605,36 @@ export function TokenScanner() {
   const riskLevel = (analysis?.riskLevel || "Medium").toLowerCase();
   const isLowRisk = riskLevel === "low";
 
+  const getAnalysisItem = (key: string): AnalysisItem => {
+    const item = analysis?.[key as keyof AnalysisResult] as AnalysisItem | undefined;
+    return item ?? { value: "—", status: "info", reason: "Analysis pending" };
+  };
+
+  const isRevealing = analysis && !loading && currentStep > 0;
+
   return (
     <div className="min-h-[50vh] p-4 sm:p-6 max-w-[720px] mx-auto">
       <h1 className="mb-4 text-xl font-bold text-white">Token Scanner</h1>
 
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ScannerTab)} className="w-full">
+        <TabsList className="w-full grid grid-cols-2 mb-4 bg-white/5 border border-white/10 p-1 rounded-xl min-w-0 overflow-hidden">
+          <TabsTrigger
+            value="token"
+            className="data-[state=active]:bg-accent-primary/20 data-[state=active]:text-accent-primary data-[state=active]:border-accent-primary/30 rounded-lg py-2.5 px-2 min-w-0 max-w-full text-xs sm:text-sm overflow-hidden justify-center gap-1 sm:gap-2 min-h-[44px]"
+          >
+            <Target className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+            <span className="truncate">Token</span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="discover"
+            className="data-[state=active]:bg-accent-primary/20 data-[state=active]:text-accent-primary data-[state=active]:border-accent-primary/30 rounded-lg py-2.5 px-2 min-w-0 max-w-full text-xs sm:text-sm overflow-hidden justify-center gap-1 sm:gap-2 min-h-[44px]"
+          >
+            <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+            <span className="truncate">Discover</span>
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="token" className="mt-0">
       <div className="mb-6 rounded-xl border border-white/10 bg-white/5 p-2">
         <div className="flex flex-col gap-2 sm:flex-row">
           <input
@@ -283,8 +693,13 @@ export function TokenScanner() {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-6"
         >
-          {/* Token overview */}
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4 sm:p-6">
+          {/* Token overview – Premium-style card */}
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
+            className="rounded-xl border border-white/10 bg-white/5 p-4 sm:p-6 shadow-[0_8px_16px_rgba(0,0,0,0.2)]"
+          >
             <div className="mb-4 flex flex-wrap items-center gap-4 gap-y-3">
               <div>
                 <div className="text-xs uppercase tracking-wider text-white/50">
@@ -369,33 +784,53 @@ export function TokenScanner() {
                 )}
               </button>
             </div>
-          </div>
+          </motion.div>
 
-          {/* Analysis rows */}
-          <div>
-            <h2 className="mb-3 text-base font-semibold text-white">
-              Analysis
-            </h2>
-            <div className="space-y-3">
-              {ANALYSIS_STEPS.map(({ key, icon, label }) => {
-                const data = analysis[key as keyof AnalysisResult] as
-                  | AnalysisItem
-                  | undefined;
-                if (!data) return null;
-                return (
-                  <AnalysisRow
-                    key={key}
-                    data={data}
-                    icon={icon}
-                    label={label}
-                  />
-                );
-              })}
+          {/* Analysis rows – stepped reveal with progress */}
+          {isRevealing && (
+            <div>
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-base font-semibold text-white">
+                  {currentStep >= ANALYSIS_STEPS.length
+                    ? "Analysis Complete"
+                    : "AI Analysis in Progress…"}
+                </h2>
+                {currentStep < ANALYSIS_STEPS.length && (
+                  <span className="text-xs text-white/50">
+                    {currentStep}/{ANALYSIS_STEPS.length}
+                  </span>
+                )}
+              </div>
+              <div className="mb-6 rounded-full h-1.5 overflow-hidden bg-white/10">
+                <motion.div
+                  className="h-full bg-[#12d585]"
+                  initial={{ width: "0%" }}
+                  animate={{
+                    width: `${Math.min((currentStep / ANALYSIS_STEPS.length) * 100, 100)}%`,
+                  }}
+                  transition={{ duration: 0.4 }}
+                />
+              </div>
+              <div className="space-y-3">
+                {ANALYSIS_STEPS.map(({ key, icon, label }, index) => {
+                  if (index >= currentStep) return null;
+                  const data = getAnalysisItem(key);
+                  return (
+                    <AnalysisRow
+                      key={key}
+                      data={data}
+                      icon={icon}
+                      label={label}
+                      isAnalyzing={index === currentStep - 1 && currentStep < ANALYSIS_STEPS.length}
+                    />
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Predictions */}
-          {predictions && (
+          {/* Predictions – shown after analysis steps complete */}
+          {showPredictions && predictions && (
             <div>
               <h2 className="mb-3 text-base font-semibold text-[#12d585]">
                 Market Cap Predictions
@@ -407,12 +842,14 @@ export function TokenScanner() {
                   ["moderate", predictions.moderate, "BALANCED", "text-amber-400"],
                   ["aggressive", predictions.aggressive, "HIGH RISK", "text-red-400"],
                 ] as const
-              ).map(([key, p, badge, color]) => (
+              ).map(([key, p, badge, color], idx) => (
                   <motion.div
                     key={key}
-                    initial={{ opacity: 0, scale: 0.96 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="rounded-xl border border-white/10 bg-white/5 p-4"
+                    initial={{ opacity: 0, y: 24, scale: 0.94 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ delay: idx * 0.12, duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
+                    whileHover={{ y: -4 }}
+                    className="rounded-xl border border-white/10 bg-white/5 p-4 shadow-[0_4px_12px_rgba(0,0,0,0.2)] transition-shadow hover:shadow-[0_8px_20px_rgba(0,0,0,0.3)]"
                   >
                     <div
                       className={`mb-2 text-xs font-bold uppercase ${color}`}
@@ -438,8 +875,8 @@ export function TokenScanner() {
             </div>
           )}
 
-          {/* Verdict */}
-          {(analysis.overallProbability != null || analysis.recommendation) && (
+          {/* Verdict – shown after predictions */}
+          {showVerdict && (analysis.overallProbability != null || analysis.recommendation) && (
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
@@ -496,6 +933,12 @@ export function TokenScanner() {
           Enter a token address (Solana, Base, or BNB) and tap Scan.
         </div>
       )}
+        </TabsContent>
+
+        <TabsContent value="discover" className="mt-0">
+          <DiscoverTabContent />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

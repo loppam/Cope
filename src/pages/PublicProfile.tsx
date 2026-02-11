@@ -3,13 +3,26 @@ import { useParams, useNavigate } from "react-router";
 import { motion } from "motion/react";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
-import { Twitter, ExternalLink, DollarSign, ArrowUpDown, ArrowLeft } from "lucide-react";
+import {
+  Twitter,
+  ExternalLink,
+  DollarSign,
+  ArrowUpDown,
+  ArrowLeft,
+} from "lucide-react";
 import { getApiBase } from "@/lib/utils";
 import { shortenAddress } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
-import { getPublicProfileByHandle, type PublicProfileByHandle } from "@/lib/profile";
+import {
+  getPublicProfileByHandle,
+  type PublicProfileByHandle,
+} from "@/lib/profile";
 import { getUsdcBalance } from "@/lib/rpc";
-import { getWalletPositions, getWalletPnL, getSolPrice } from "@/lib/solanatracker";
+import {
+  getWalletPositions,
+  getWalletPnL,
+  getSolPrice,
+} from "@/lib/solanatracker";
 import { getSolBalance } from "@/lib/rpc";
 import { getWalletProfitability } from "@/lib/moralis";
 import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
@@ -57,7 +70,9 @@ export function PublicProfile() {
       .catch((e) => {
         if (!cancelled) {
           setProfile(null);
-          setError(e instanceof Error ? e.message : "Profile not found or private");
+          setError(
+            e instanceof Error ? e.message : "Profile not found or private",
+          );
         }
       })
       .finally(() => {
@@ -91,16 +106,20 @@ export function PublicProfile() {
 
     (async () => {
       try {
-        const [positionsRes, solBalance, solPrice, evmData] = await Promise.all([
-          getWalletPositions(profile!.walletAddress, true),
-          getSolBalance(profile!.walletAddress),
-          getSolPrice(),
-          profile!.evmAddress
-            ? fetch(`${base}/api/relay/evm-balances-public?address=${encodeURIComponent(profile!.evmAddress)}`)
-                .then((r) => r.json())
-                .catch(() => null)
-            : Promise.resolve(null),
-        ]);
+        const [positionsRes, solBalance, solPrice, evmData] = await Promise.all(
+          [
+            getWalletPositions(profile!.walletAddress, true),
+            getSolBalance(profile!.walletAddress),
+            getSolPrice(),
+            profile!.evmAddress
+              ? fetch(
+                  `${base}/api/relay/evm-balances-public?address=${encodeURIComponent(profile!.evmAddress)}`,
+                )
+                  .then((r) => r.json())
+                  .catch(() => null)
+              : Promise.resolve(null),
+          ],
+        );
 
         if (cancelled) return;
 
@@ -110,15 +129,25 @@ export function PublicProfile() {
         const evmAddress = profile!.evmAddress;
         const [pnlRes, evmPnlBase, evmPnlBnb] = await Promise.all([
           getWalletPnL(profile!.walletAddress, true),
-          evmAddress ? getWalletProfitability(evmAddress, "base") : Promise.resolve([]),
-          evmAddress ? getWalletProfitability(evmAddress, "bsc") : Promise.resolve([]),
+          evmAddress
+            ? getWalletProfitability(evmAddress, "base")
+            : Promise.resolve([]),
+          evmAddress
+            ? getWalletProfitability(evmAddress, "bsc")
+            : Promise.resolve([]),
         ]);
 
         if (cancelled) return;
 
-        const evmPnlByMint = new Map<string, { pnl: number; pnlPercent?: number }>();
+        const evmPnlByMint = new Map<
+          string,
+          { pnl: number; pnlPercent?: number }
+        >();
         for (const item of [...evmPnlBase, ...evmPnlBnb]) {
-          evmPnlByMint.set(item.mint, { pnl: item.pnl, pnlPercent: item.pnlPercent });
+          evmPnlByMint.set(item.mint, {
+            pnl: item.pnl,
+            pnlPercent: item.pnlPercent,
+          });
         }
 
         const combined: TokenPosition[] = [];
@@ -258,7 +287,10 @@ export function PublicProfile() {
     return (
       <div
         className="min-h-screen flex items-center justify-center bg-gradient-to-b from-[#000000] to-[#0B3D2E]"
-        style={{ paddingTop: "var(--safe-area-inset-top)", paddingBottom: "var(--safe-area-inset-bottom)" }}
+        style={{
+          paddingTop: "var(--safe-area-inset-top)",
+          paddingBottom: "var(--safe-area-inset-bottom)",
+        }}
       >
         <p className="text-white/60">Loading profile…</p>
       </div>
@@ -269,9 +301,14 @@ export function PublicProfile() {
     return (
       <div
         className="min-h-screen flex flex-col items-center justify-center gap-4 p-4 bg-gradient-to-b from-[#000000] to-[#0B3D2E]"
-        style={{ paddingTop: "var(--safe-area-inset-top)", paddingBottom: "var(--safe-area-inset-bottom)" }}
+        style={{
+          paddingTop: "var(--safe-area-inset-top)",
+          paddingBottom: "var(--safe-area-inset-bottom)",
+        }}
       >
-        <p className="text-white/80 text-center">{error || "Profile not found or private"}</p>
+        <p className="text-white/80 text-center">
+          {error || "Profile not found or private"}
+        </p>
         <Button
           variant="ghost"
           onClick={() => navigate("/")}
@@ -305,14 +342,19 @@ export function PublicProfile() {
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h1 className="text-xl sm:text-2xl font-bold flex-1 truncate">Profile</h1>
+          <h1 className="text-xl sm:text-2xl font-bold flex-1 truncate">
+            Profile
+          </h1>
           {user && (
             <Button
               variant="ghost"
               size="sm"
               onClick={() =>
                 navigate("/app/watchlist", {
-                  state: { addTargetUid: profile.uid, addTargetHandle: profile.xHandle },
+                  state: {
+                    addTargetUid: profile.uid,
+                    addTargetHandle: profile.xHandle,
+                  },
                 })
               }
               className="text-accent-primary hover:text-accent-hover min-h-[44px] min-w-[44px] touch-manipulation"
@@ -343,7 +385,9 @@ export function PublicProfile() {
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
-                      <h3 className="font-bold text-base sm:text-lg truncate">{xHandle}</h3>
+                      <h3 className="font-bold text-base sm:text-lg truncate">
+                        {xHandle}
+                      </h3>
                       <div className="flex items-center gap-2 text-sm text-white/60 mt-0.5">
                         <Twitter className="w-4 h-4" />
                         <span>Public profile</span>
@@ -360,16 +404,28 @@ export function PublicProfile() {
 
                   <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-6 pl-0 sm:pl-4 border-l-0 sm:border-l border-white/10 mt-2 sm:mt-0">
                     <div className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial py-1">
-                      <span className="text-lg sm:text-2xl font-bold">{profile.followingCount}</span>
-                      <span className="text-[10px] sm:text-xs text-white/60">Following</span>
+                      <span className="text-lg sm:text-2xl font-bold">
+                        {profile.followingCount}
+                      </span>
+                      <span className="text-[10px] sm:text-xs text-white/60">
+                        Following
+                      </span>
                     </div>
                     <div className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial py-1">
-                      <span className="text-lg sm:text-2xl font-bold">{profile.followersCount}</span>
-                      <span className="text-[10px] sm:text-xs text-white/60">Followers</span>
+                      <span className="text-lg sm:text-2xl font-bold">
+                        {profile.followersCount}
+                      </span>
+                      <span className="text-[10px] sm:text-xs text-white/60">
+                        Followers
+                      </span>
                     </div>
                     <div className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial py-1">
-                      <span className="text-lg sm:text-2xl font-bold">{profile.watchlistCount}</span>
-                      <span className="text-[10px] sm:text-xs text-white/60">Watchlist</span>
+                      <span className="text-lg sm:text-2xl font-bold">
+                        {profile.watchlistCount}
+                      </span>
+                      <span className="text-[10px] sm:text-xs text-white/60">
+                        Watchlist
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -380,12 +436,17 @@ export function PublicProfile() {
                       <p className="text-2xl sm:text-3xl font-bold">
                         {usdcBalanceLoading
                           ? "—"
-                          : `$${(usdcBalance + openPositions.reduce((s, p) => s + p.value, 0)).toLocaleString(
-                              "en-US",
-                              { minimumFractionDigits: 2, maximumFractionDigits: 2 }
-                            )}`}
+                          : `$${(
+                              usdcBalance +
+                              openPositions.reduce((s, p) => s + p.value, 0)
+                            ).toLocaleString("en-US", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}`}
                       </p>
-                      <p className="text-xs text-white/50 mt-0.5">Total wallet balance</p>
+                      <p className="text-xs text-white/50 mt-0.5">
+                        Total wallet balance
+                      </p>
                     </div>
                     <div className="mt-4 flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -408,7 +469,9 @@ export function PublicProfile() {
                     <div className="mt-4 pt-4 border-t border-white/10">
                       <p className="text-sm font-medium mb-2">Open positions</p>
                       {displayedOpenPositions.length === 0 ? (
-                        <p className="text-sm text-white/50">No open positions</p>
+                        <p className="text-sm text-white/50">
+                          No open positions
+                        </p>
                       ) : (
                         <ul className="space-y-2">
                           {displayedOpenPositions.map((pos) => (
@@ -416,7 +479,11 @@ export function PublicProfile() {
                               key={pos.mint}
                               className="flex items-center gap-3 py-3 px-2 rounded-lg min-h-[44px] hover:bg-white/5 active:bg-white/10 touch-manipulation cursor-pointer"
                               role="button"
-                              onClick={() => navigate(`/token/${pos.mint}`)}
+                              onClick={() =>
+                                navigate(
+                                  `/app/trade?mint=${encodeURIComponent(pos.mint)}`,
+                                )
+                              }
                             >
                               {pos.image ? (
                                 <img
@@ -428,17 +495,25 @@ export function PublicProfile() {
                                 <div className="w-8 h-8 rounded-full bg-white/10" />
                               )}
                               <div className="flex-1 min-w-0">
-                                <p className="font-medium truncate">{pos.symbol}</p>
+                                <p className="font-medium truncate">
+                                  {pos.symbol}
+                                </p>
                                 <p className="text-xs text-white/50">
-                                  ${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                                  $
+                                  {pos.value.toLocaleString("en-US", {
+                                    minimumFractionDigits: 2,
+                                  })}
                                 </p>
                                 {pos.pnl != null && pos.pnl !== 0 && (
                                   <p
                                     className={`text-xs mt-0.5 ${
-                                      pos.pnl >= 0 ? "text-[#12d585]" : "text-red-400"
+                                      pos.pnl >= 0
+                                        ? "text-[#12d585]"
+                                        : "text-red-400"
                                     }`}
                                   >
-                                    {pos.pnl >= 0 ? "+" : ""}${pos.pnl.toFixed(2)}
+                                    {pos.pnl >= 0 ? "+" : ""}$
+                                    {pos.pnl.toFixed(2)}
                                     {pos.pnlPercent != null &&
                                       !Number.isNaN(pos.pnlPercent) && (
                                         <span className="ml-1 opacity-90">
@@ -462,7 +537,9 @@ export function PublicProfile() {
                         </span>
                       </div>
                       {closedPositions.length === 0 ? (
-                        <p className="text-sm text-white/50">No closed positions</p>
+                        <p className="text-sm text-white/50">
+                          No closed positions
+                        </p>
                       ) : (
                         <ul className="space-y-2">
                           {closedPositions.map((pos) => (
@@ -480,10 +557,14 @@ export function PublicProfile() {
                                 <div className="w-8 h-8 rounded-full bg-white/10" />
                               )}
                               <div className="flex-1 min-w-0">
-                                <p className="font-medium truncate">{pos.symbol}</p>
+                                <p className="font-medium truncate">
+                                  {pos.symbol}
+                                </p>
                                 <p className="text-xs text-white/50">Closed</p>
                               </div>
-                              <p className="text-sm text-[#12d585]">+${pos.value.toFixed(2)}</p>
+                              <p className="text-sm text-[#12d585]">
+                                +${pos.value.toFixed(2)}
+                              </p>
                             </li>
                           ))}
                         </ul>

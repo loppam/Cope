@@ -118,6 +118,51 @@ function extractHolderItems(res: unknown): BirdeyeHolderItem[] {
   return d?.data?.items ?? d?.data?.data?.items ?? [];
 }
 
+interface BirdeyeTxItem {
+  block_number?: number;
+  block_unix_time?: number;
+  tx_type?: string;
+  [key: string]: unknown;
+}
+
+async function fetchTokenTransactions(
+  address: string,
+  chain: string,
+  limit = 150
+): Promise<BirdeyeTxItem[]> {
+  try {
+    const res = await birdeyeFetch<unknown>(
+      "/defi/v3/token/txs",
+      {
+        address,
+        limit: String(Math.min(limit, 150)),
+        offset: "0",
+        sort_by: "block_unix_time",
+        sort_type: "desc",
+        tx_type: "all",
+      },
+      chain
+    );
+    const d = res as { data?: { items?: BirdeyeTxItem[] } };
+    const items = d?.data?.items ?? [];
+    return Array.isArray(items) ? items : [];
+  } catch {
+    return [];
+  }
+}
+
+function detectBundles(txs: BirdeyeTxItem[], threshold = 3): number {
+  if (!txs?.length) return 0;
+  const byBlock: Record<number, number> = {};
+  for (const tx of txs) {
+    const block = tx.block_number;
+    if (typeof block === "number") {
+      byBlock[block] = (byBlock[block] ?? 0) + 1;
+    }
+  }
+  return Object.values(byBlock).filter((c) => c > threshold).length;
+}
+
 async function fetchTokenData(
   address: string,
   chain?: string
@@ -196,7 +241,8 @@ function normalizeHolderPercentage(p: number): number {
 function calculateMetrics(
   marketData: BirdeyeOverviewData | null,
   holders: BirdeyeHolderItem[],
-  securityData: BirdeyeSecurityData | null
+  securityData: BirdeyeSecurityData | null,
+  bundleCountOverride?: number
 ): Record<string, unknown> {
   let top10Concentration: number;
   const holderBased = holders.length >= 2;
@@ -240,7 +286,7 @@ function calculateMetrics(
   return {
     top10Concentration,
     holderCount,
-    bundleCount: 0,
+    bundleCount: bundleCountOverride ?? 0,
     freshWalletPercent: 15,
     devSold,
     liquidityUSD,
@@ -360,6 +406,9 @@ HOLDERS:
 - Total Holders: ${metrics.holderCount}
 - Top 10 Concentration: ${metrics.top10Concentration}%
 
+SECURITY:
+- Bundle Buys Detected: ${metrics.bundleCount} (blocks/slots with >3 tx in same block = suspicious)
+
 MARKET:
 - Liquidity: $${(metrics.liquidityUSD as number)?.toLocaleString?.() ?? metrics.liquidityUSD}
 - 24h Volume: $${(metrics.volume24h as number)?.toLocaleString?.() ?? metrics.volume24h}
@@ -367,7 +416,7 @@ MARKET:
 - 24h Trades: ${metrics.trade24h}
 - Dev Selling Signal: ${metrics.devSold}
 
-Respond with VALID JSON only (no markdown, no backticks):
+Use Bundle Buys Detected count: 0 = likely Safe, 1-2 = review, 3+ = Not Safe. Respond with VALID JSON only (no markdown, no backticks):
 
 {
   "bundles": {"value":"Safe"|"Not Safe"|"Unknown","status":"safe"|"danger"|"info","reason":"..."},
@@ -531,7 +580,16 @@ export default async function handler(
     const { chain, metadata, marketData, securityData, holders } =
       await fetchTokenData(addr, body.chain);
 
-    const metrics = calculateMetrics(marketData, holders, securityData);
+    const birdeyeChain = toBirdeyeChain(chain);
+    const txs = await fetchTokenTransactions(addr, birdeyeChain, 150);
+    const bundleCount = detectBundles(txs);
+
+    const metrics = calculateMetrics(
+      marketData,
+      holders,
+      securityData,
+      bundleCount
+    );
 
     const analysis = await analyzeWithClaude({
       tokenAddress: addr,

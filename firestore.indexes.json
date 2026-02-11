@@ -3,7 +3,12 @@
     {
       "collectionGroup": "users",
       "queryScope": "COLLECTION",
-      "fields": [{ "fieldPath": "xHandleLower", "order": "ASCENDING" }]
+      "fields": [{"fieldPath": "xHandleLower", "order": "ASCENDING"}]
+    },
+    {
+      "collectionGroup": "walletStats",
+      "queryScope": "COLLECTION",
+      "fields": [{"fieldPath": "winRate", "order": "DESCENDING"}]
     }
   ],
   "fieldOverrides": []

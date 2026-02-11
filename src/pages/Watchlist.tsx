@@ -12,6 +12,9 @@ import {
   Twitter,
   Eye,
   UserPlus,
+  Pencil,
+  Check,
+  X,
 } from "lucide-react";
 import { shortenAddress } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -35,6 +38,7 @@ export function Watchlist() {
   const {
     user,
     watchlist,
+    addToWatchlist,
     removeFromWatchlist,
     isAuthenticated,
     loading: authLoading,
@@ -43,6 +47,9 @@ export function Watchlist() {
     new Set(),
   );
   const [removingUids, setRemovingUids] = useState<Set<string>>(new Set());
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const [savingNickname, setSavingNickname] = useState(false);
   const [followingProfiles, setFollowingProfiles] = useState<
     Record<
       string,
@@ -182,6 +189,52 @@ export function Watchlist() {
         next.delete(uid);
         return next;
       });
+    }
+  };
+
+  const handleStartEdit = (
+    key: string,
+    currentName: string,
+    e?: React.MouseEvent,
+  ) => {
+    e?.stopPropagation();
+    setEditingKey(key);
+    setEditingValue(currentName || "");
+  };
+
+  const handleCancelEdit = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setEditingKey(null);
+    setEditingValue("");
+  };
+
+  const handleSaveNickname = async (
+    walletAddress: string,
+    options?: { onPlatform?: boolean; uid?: string },
+  ) => {
+    if (!isAuthenticated) {
+      toast.error("Please sign in");
+      return;
+    }
+    if (!walletAddress?.trim()) {
+      toast.error("Cannot update: wallet address missing");
+      return;
+    }
+    const trimmed = editingValue.trim();
+    setSavingNickname(true);
+    try {
+      await addToWatchlist(
+        walletAddress,
+        { nickname: trimmed || undefined, ...options },
+        { suppressToast: true },
+      );
+      setEditingKey(null);
+      setEditingValue("");
+      toast.success("Name updated");
+    } catch {
+      toast.error("Failed to update name");
+    } finally {
+      setSavingNickname(false);
     }
   };
 
@@ -338,20 +391,103 @@ export function Watchlist() {
                             )}
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2 min-w-0">
-                                <span className="font-medium text-white truncate">
-                                  {entry.nickname || xHandle}
-                                </span>
-                                {xUrl && (
-                                  <a
-                                    href={xUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
+                                {editingKey === `follow:${entry.uid}` ? (
+                                  <div
+                                    className="flex items-center gap-1 min-w-0"
                                     onClick={(e) => e.stopPropagation()}
-                                    className="text-accent-primary hover:text-accent-hover"
-                                    title="View on X"
                                   >
-                                    <Twitter className="w-4 h-4" />
-                                  </a>
+                                    <input
+                                      type="text"
+                                      value={editingValue}
+                                      onChange={(e) =>
+                                        setEditingValue(e.target.value)
+                                      }
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter")
+                                          handleSaveNickname(
+                                            displayAddress || entry.address,
+                                            {
+                                              onPlatform: true,
+                                              uid: entry.uid,
+                                            },
+                                          );
+                                        if (e.key === "Escape")
+                                          handleCancelEdit();
+                                      }}
+                                      onBlur={() => {
+                                        if (displayAddress || entry.address)
+                                          handleSaveNickname(
+                                            displayAddress || entry.address,
+                                            {
+                                              onPlatform: true,
+                                              uid: entry.uid,
+                                            },
+                                          );
+                                      }}
+                                      autoFocus
+                                      className="flex-1 min-w-0 px-2 py-1 rounded bg-white/10 text-white text-sm border border-white/20 focus:outline-none focus:border-accent-primary"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleSaveNickname(
+                                          displayAddress || entry.address,
+                                          {
+                                            onPlatform: true,
+                                            uid: entry.uid,
+                                          },
+                                        );
+                                      }}
+                                      disabled={
+                                        savingNickname || !displayAddress
+                                      }
+                                      className="p-1 text-accent-primary hover:bg-accent-primary/20 rounded"
+                                    >
+                                      <Check className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleCancelEdit(e)}
+                                      className="p-1 text-white/60 hover:bg-white/10 rounded"
+                                    >
+                                      <X className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <span className="font-medium text-white truncate">
+                                      {entry.nickname || xHandle}
+                                    </span>
+                                    {(displayAddress || entry.address) && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) =>
+                                          handleStartEdit(
+                                            `follow:${entry.uid}`,
+                                            entry.nickname || xHandle,
+                                            e,
+                                          )
+                                        }
+                                        className="p-1 text-white/40 hover:text-accent-primary hover:bg-white/5 rounded shrink-0"
+                                        aria-label="Edit name"
+                                      >
+                                        <Pencil className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                    {xUrl && (
+                                      <a
+                                        href={xUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="text-accent-primary hover:text-accent-hover"
+                                        title="View on X"
+                                      >
+                                        <Twitter className="w-4 h-4" />
+                                      </a>
+                                    )}
+                                  </>
                                 )}
                               </div>
                               <code className="text-xs text-white/50 font-mono">
@@ -422,6 +558,7 @@ export function Watchlist() {
                         }}
                         className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 sm:p-4 hover:bg-white/5 transition-colors cursor-pointer min-h-[56px]"
                         onClick={() =>
+                          editingKey !== `watch:${wallet.address}` &&
                           navigate(`/scanner/wallet/${wallet.address}`)
                         }
                       >
@@ -430,9 +567,68 @@ export function Watchlist() {
                             <Eye className="w-4 h-4 sm:w-5 sm:h-5 text-accent-primary" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <span className="font-medium text-white block truncate">
-                              {wallet.nickname || "—"}
-                            </span>
+                            {editingKey === `watch:${wallet.address}` ? (
+                              <div
+                                className="flex items-center gap-1 min-w-0"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <input
+                                  type="text"
+                                  value={editingValue}
+                                  onChange={(e) =>
+                                    setEditingValue(e.target.value)
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter")
+                                      handleSaveNickname(wallet.address);
+                                    if (e.key === "Escape") handleCancelEdit();
+                                  }}
+                                  onBlur={() =>
+                                    handleSaveNickname(wallet.address)
+                                  }
+                                  autoFocus
+                                  className="flex-1 min-w-0 px-2 py-1 rounded bg-white/10 text-white text-sm border border-white/20 focus:outline-none focus:border-accent-primary"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSaveNickname(wallet.address);
+                                  }}
+                                  disabled={savingNickname}
+                                  className="p-1 text-accent-primary hover:bg-accent-primary/20 rounded"
+                                >
+                                  <Check className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleCancelEdit(e)}
+                                  className="p-1 text-white/60 hover:bg-white/10 rounded"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-medium text-white block truncate">
+                                  {wallet.nickname || "—"}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) =>
+                                    handleStartEdit(
+                                      `watch:${wallet.address}`,
+                                      wallet.nickname || "",
+                                      e,
+                                    )
+                                  }
+                                  className="p-1 text-white/40 hover:text-accent-primary hover:bg-white/5 rounded shrink-0"
+                                  aria-label="Edit name"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            )}
                             <code className="text-xs text-white/50 font-mono">
                               {shortenAddress(wallet.address)}
                             </code>

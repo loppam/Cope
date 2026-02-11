@@ -505,7 +505,10 @@ async function transactionHandler(req: VercelRequest, res: VercelResponse) {
         }
         const notificationId = createHash("sha256").update(`${tx.signature}:${uid}`).digest("hex");
         const notificationRef = db.collection("notifications").doc(notificationId);
-        const deepLink = tokenTransfers.length > 0 && tokenAddress ? `/token/${tokenAddress}` : `/scanner/wallet/${actorWallet}`;
+        const deepLink =
+          tokenTransfers.length > 0 && tokenAddress
+            ? `/app/trade?mint=${encodeURIComponent(tokenAddress)}`
+            : `/scanner/wallet/${actorWallet}`;
         const notificationData = {
           userId: uid,
           walletAddress: actorWallet,

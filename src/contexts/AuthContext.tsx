@@ -51,6 +51,7 @@ interface AuthContextType {
       totalRemoved?: number;
       profitMargin?: number;
     },
+    options?: { suppressToast?: boolean },
   ) => Promise<void>;
   removeFromWatchlist: (
     walletAddress: string,
@@ -351,6 +352,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       totalRemoved?: number;
       profitMargin?: number;
     },
+    options?: { suppressToast?: boolean },
   ) => {
     if (!user) throw new Error("User not authenticated");
     try {
@@ -373,7 +375,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       await refreshProfile();
 
-      toast.success("Wallet added to watchlist");
+      if (!options?.suppressToast) {
+        toast.success("Wallet added to watchlist");
+      }
     } catch (error: any) {
       console.error("Add to watchlist error:", error);
       toast.error(error.message || "Failed to add wallet to watchlist");

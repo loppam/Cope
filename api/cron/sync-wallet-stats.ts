@@ -1,11 +1,15 @@
 /**
  * Cron job: sync wallet stats (win rate, PnL) from Birdeye to Firestore.
- * Runs daily at 00:00 UTC. Requires CRON_SECRET in Authorization header.
+ * Runs daily at 00:00 UTC. Auth: Bearer CRON_SECRET (Vercel cron) OR Bearer firebase-id-token (@lopam.eth for manual trigger).
+ *
+ * CRON_SECRET: Set in Vercel Dashboard → Project → Settings → Environment Variables.
+ * Generate: openssl rand -base64 32. Vercel injects it when invoking the cron.
  *
  * Rate limit: ~2s between Birdeye calls to stay under 30 req/min.
  */
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
 const BIRDEYE_API_BASE = "https://public-api.birdeye.so";
@@ -61,9 +65,52 @@ export default async function handler(
 
   const authHeader = req.headers.authorization;
   const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
+
+  let isAuthorized = false;
+  if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
+    isAuthorized = true;
+  } else if (authHeader?.startsWith("Bearer ")) {
+    const token = authHeader.replace("Bearer ", "");
+    try {
+      if (getApps().length === 0) {
+        const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
+        let projectId: string | undefined;
+        let clientEmail: string | undefined;
+        let privateKey: string | undefined;
+        if (rawServiceAccount) {
+          try {
+            const sa = JSON.parse(rawServiceAccount);
+            projectId = sa.project_id;
+            clientEmail = sa.client_email;
+            privateKey = sa.private_key?.replace(/\\n/g, "\n");
+          } catch {
+            /* ignore */
+          }
+        }
+        projectId = projectId || process.env.FIREBASE_ADMIN_PROJECT_ID;
+        clientEmail = clientEmail || process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
+        if (!privateKey && process.env.FIREBASE_ADMIN_PRIVATE_KEY) {
+          privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY.replace(/\\n/g, "\n");
+        }
+        if (projectId && clientEmail && privateKey) {
+          initializeApp({
+            credential: cert({ projectId, clientEmail, privateKey }),
+          });
+        }
+      }
+      const adminAuth = getAuth();
+      const adminDb = getFirestore();
+      const decoded = await adminAuth.verifyIdToken(token);
+      const userSnap = await adminDb.collection("users").doc(decoded.uid).get();
+      const xHandle = userSnap.data()?.xHandle?.toLowerCase();
+      if (xHandle === "@lopam.eth") isAuthorized = true;
+    } catch (e) {
+      console.error("[sync-wallet-stats] token verify error:", e);
+    }
+  }
+
+  if (!isAuthorized) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
 
   const apiKey = process.env.BIRDEYE_API_KEY;

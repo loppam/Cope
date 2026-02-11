@@ -256,15 +256,14 @@ function DiscoverTabContent() {
   }, [searchQuery, isUsernameMode]);
 
   const watchedAddresses = new Set(watchlist.map((w) => w.address));
-  const followedTraders = topTraders.filter((t) => watchedAddresses.has(t.walletAddress));
-  const followedAccounts = accounts.filter((a) => watchedAddresses.has(a.walletAddress));
-  const hasFollowed = followedTraders.length > 0 || followedAccounts.length > 0;
-  const followedList = [
-    ...followedTraders.map((t) => ({ ...t, type: "trader" as const })),
-    ...followedAccounts
-      .filter((a) => !followedTraders.some((t) => t.walletAddress === a.walletAddress))
-      .map((a) => ({ ...a, type: "account" as const })),
-  ];
+
+  const goToProfile = (
+    item: { xHandle?: string | null; walletAddress: string }
+  ) => {
+    const handle = item.xHandle?.trim().replace(/^@/, "");
+    if (handle) navigate(`/${handle}`);
+    else navigate(`/scanner/wallet/${item.walletAddress}`);
+  };
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -316,7 +315,7 @@ function DiscoverTabContent() {
     setSearchQuery(user.xHandle || user.displayName || "");
     setSearchResults([]);
     setShowDropdown(false);
-    navigate("/scanner/wallet/" + user.walletAddress);
+    goToProfile(user);
   };
 
   const handleSearchSubmit = async () => {
@@ -327,23 +326,20 @@ function DiscoverTabContent() {
       if (type === "xhandle") {
         const user = await findUserByXHandle(q);
         if (user?.walletAddress) {
-          navigate("/scanner/wallet/" + user.walletAddress);
+          goToProfile(user);
+          return;
         }
       } else {
         const user = await findUserByWalletAddress(q, true);
         if (user?.walletAddress) {
-          navigate("/scanner/wallet/" + user.walletAddress);
-        } else {
-          navigate("/scanner/wallet/" + q);
+          goToProfile(user);
+          return;
         }
       }
+      navigate("/scanner/wallet/" + q);
     } catch {
       navigate("/scanner/wallet/" + q);
     }
-  };
-
-  const goToWallet = (address: string) => {
-    navigate("/scanner/wallet/" + address);
   };
 
   return (
@@ -432,66 +428,22 @@ function DiscoverTabContent() {
         </div>
       ) : (
         <div className="space-y-6">
-          {hasFollowed && (
-            <div>
-              <h3 className="text-sm font-semibold text-white/80 mb-3">Followed</h3>
-              <div className="space-y-2">
-                {followedList.map((item) => (
-                  <button
-                    key={item.uid}
-                    type="button"
-                    onClick={() => goToWallet(item.walletAddress)}
-                    className="w-full flex items-center gap-3 p-3 rounded-xl border border-[#12d585]/30 bg-[#12d585]/5 hover:bg-[#12d585]/10 transition-colors text-left min-h-[56px]"
-                  >
-                    {item.avatar ? (
-                      <img
-                        src={item.avatar}
-                        alt=""
-                        className="w-10 h-10 rounded-xl object-cover flex-shrink-0"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded-xl bg-[#12d585]/20 flex items-center justify-center flex-shrink-0">
-                        <Users className="w-5 h-5 text-[#12d585]" />
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-white truncate">
-                        {item.xHandle ||
-                          ("displayName" in item ? item.displayName : null) ||
-                          shortenAddress(item.walletAddress)}
-                      </div>
-                      <div className="text-xs text-white/50 font-mono truncate">
-                        {shortenAddress(item.walletAddress)}
-                      </div>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <div className="text-sm font-semibold text-[#12d585]">
-                        {Number(item.winRate ?? 0).toFixed(0)}% win
-                      </div>
-                      <div className="text-xs text-white/50">
-                        {item.totalTrades ?? 0} trades
-                      </div>
-                      {item.realizedPnL != null && (
-                        <div className={`text-xs ${item.realizedPnL >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                          {item.realizedPnL >= 0 ? "+" : ""}{item.realizedPnL.toFixed(0)}%
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
           {topTraders.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-white/80 mb-3">Top traders</h3>
               <div className="space-y-2">
-                {topTraders.map((t) => (
+                {topTraders.map((t) => {
+                  const isFollowed = watchedAddresses.has(t.walletAddress);
+                  return (
                   <button
                     key={t.uid}
                     type="button"
-                    onClick={() => goToWallet(t.walletAddress)}
-                    className="w-full flex items-center gap-3 p-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-colors text-left min-h-[56px]"
+                    onClick={() => goToProfile(t)}
+                    className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-colors text-left min-h-[56px] ${
+                      isFollowed
+                        ? "border-[#12d585]/30 bg-[#12d585]/5 hover:bg-[#12d585]/10"
+                        : "border-white/10 bg-white/5 hover:bg-white/10"
+                    }`}
                   >
                     {t.avatar ? (
                       <img
@@ -523,7 +475,8 @@ function DiscoverTabContent() {
                       )}
                     </div>
                   </button>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -535,12 +488,18 @@ function DiscoverTabContent() {
                   No public accounts yet
                 </div>
               ) : (
-                accounts.map((a) => (
+                accounts.map((a) => {
+                  const isFollowed = watchedAddresses.has(a.walletAddress);
+                  return (
                   <button
                     key={a.uid}
                     type="button"
-                    onClick={() => goToWallet(a.walletAddress)}
-                    className="w-full flex items-center gap-3 p-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-colors text-left min-h-[56px]"
+                    onClick={() => goToProfile(a)}
+                    className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-colors text-left min-h-[56px] ${
+                      isFollowed
+                        ? "border-[#12d585]/30 bg-[#12d585]/5 hover:bg-[#12d585]/10"
+                        : "border-white/10 bg-white/5 hover:bg-white/10"
+                    }`}
                   >
                     {a.avatar ? (
                       <img
@@ -575,7 +534,8 @@ function DiscoverTabContent() {
                       )}
                     </div>
                   </button>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
@@ -705,7 +665,7 @@ export function TokenScanner() {
       <h1 className="mb-4 text-xl font-bold text-white">Token Scanner</h1>
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ScannerTab)} className="w-full">
-        <TabsList className="w-full grid grid-cols-2 mb-4 bg-white/5 border border-white/10 p-1 rounded-xl min-w-0 overflow-hidden">
+        <TabsList className="w-full grid grid-cols-2 mb-4 bg-white/5 border border-white/10 p-1 rounded-xl min-w-0 min-h-[44px] overflow-visible">
           <TabsTrigger
             value="token"
             className="data-[state=active]:bg-accent-primary/20 data-[state=active]:text-accent-primary data-[state=active]:border-accent-primary/30 rounded-lg py-2.5 px-2 min-w-0 max-w-full text-xs sm:text-sm overflow-hidden justify-center gap-1 sm:gap-2 min-h-[44px]"

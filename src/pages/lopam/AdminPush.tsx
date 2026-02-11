@@ -3,6 +3,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { auth } from "@/lib/firebase";
+import { getApiBase } from "@/lib/utils";
 
 export function AdminPush() {
   const { userProfile } = useAuth();
@@ -12,6 +13,10 @@ export function AdminPush() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
     if (!title || !body) {
@@ -53,6 +58,28 @@ export function AdminPush() {
     }
   };
 
+  const handleSyncWalletStats = async () => {
+    setSyncLoading(true);
+    setSyncError(null);
+    setSyncSuccess(null);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error("Authentication required");
+      const base = getApiBase() || window.location.origin;
+      const res = await fetch(`${base}/api/cron/sync-wallet-stats`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || "Sync failed");
+      setSyncSuccess(`Synced ${json.synced ?? 0} of ${json.total ?? 0} wallets`);
+    } catch (err) {
+      setSyncError((err as Error).message);
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
   if (userProfile?.xHandle?.toLowerCase() !== "@lopam.eth") {
     return (
       <div className="p-6">
@@ -85,6 +112,18 @@ export function AdminPush() {
               <li>VAPID keys must be set in Vercel environment</li>
             </ul>
           </div>
+        </Card>
+        <Card className="space-y-4 p-6 mb-4">
+          <h3 className="font-semibold">Wallet Stats Sync</h3>
+          <p className="text-sm text-white/60">
+            Sync win rate and PnL from Birdeye to Firestore. Also runs daily at 00:00 UTC via
+            cron.
+          </p>
+          {syncError && <p className="text-sm text-[#FF4757]">{syncError}</p>}
+          {syncSuccess && <p className="text-sm text-[#12d585]">{syncSuccess}</p>}
+          <Button onClick={handleSyncWalletStats} disabled={syncLoading} className="w-full">
+            {syncLoading ? "Syncing..." : "Sync Wallet Stats Now"}
+          </Button>
         </Card>
         <Card className="space-y-4 p-6">
           <div>

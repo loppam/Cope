@@ -9,6 +9,9 @@ import {
   DollarSign,
   ArrowUpDown,
   ArrowLeft,
+  TrendingUp,
+  Activity,
+  Loader2,
 } from "lucide-react";
 import { getApiBase } from "@/lib/utils";
 import { shortenAddress } from "@/lib/utils";
@@ -26,6 +29,7 @@ import {
 import { getSolBalance } from "@/lib/rpc";
 import { getWalletProfitability } from "@/lib/moralis";
 import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
+import { getWalletAnalytics, type WalletAnalytics } from "@/lib/birdeye";
 import { DocumentHead } from "@/components/DocumentHead";
 
 interface TokenPosition {
@@ -53,6 +57,8 @@ export function PublicProfile() {
   const [usdcBalanceLoading, setUsdcBalanceLoading] = useState(true);
   const [openPositions, setOpenPositions] = useState<TokenPosition[]>([]);
   const [closedPositions] = useState<TokenPosition[]>([]);
+  const [walletAnalytics, setWalletAnalytics] = useState<WalletAnalytics | null>(null);
+  const [walletAnalyticsLoading, setWalletAnalyticsLoading] = useState(false);
 
   useEffect(() => {
     if (!handle?.trim()) {
@@ -95,6 +101,28 @@ export function PublicProfile() {
       .then(setUsdcBalance)
       .catch(() => setUsdcBalance(0))
       .finally(() => setUsdcBalanceLoading(false));
+  }, [profile?.walletAddress]);
+
+  useEffect(() => {
+    if (!profile?.walletAddress) {
+      setWalletAnalytics(null);
+      return;
+    }
+    let cancelled = false;
+    setWalletAnalyticsLoading(true);
+    getWalletAnalytics(profile.walletAddress, "30d")
+      .then((data) => {
+        if (!cancelled) setWalletAnalytics(data);
+      })
+      .catch(() => {
+        if (!cancelled) setWalletAnalytics(null);
+      })
+      .finally(() => {
+        if (!cancelled) setWalletAnalyticsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [profile?.walletAddress]);
 
   useEffect(() => {
@@ -446,6 +474,42 @@ export function PublicProfile() {
 
                 {profile.walletAddress && (
                   <>
+                    {(walletAnalyticsLoading || walletAnalytics) && (
+                      <div className="mt-4 pt-4 border-t border-white/10">
+                        <div className="grid grid-cols-2 gap-4 sm:gap-6">
+                          <div>
+                            <div className="flex items-center gap-2 mb-2 text-white/60">
+                              <TrendingUp className="w-4 h-4" />
+                              <span className="text-sm">Win Rate</span>
+                            </div>
+                            <p className="text-2xl font-bold text-[#12d585]">
+                              {walletAnalyticsLoading
+                                ? "—"
+                                : `${walletAnalytics?.winRate ?? 0}%`}
+                            </p>
+                            <p className="text-xs text-white/50 mt-1">
+                              {walletAnalyticsLoading
+                                ? "—"
+                                : `${walletAnalytics?.wins ?? 0}W / ${walletAnalytics?.losses ?? 0}L`}
+                            </p>
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 mb-2 text-white/60">
+                              <Activity className="w-4 h-4" />
+                              <span className="text-sm">Total Trades</span>
+                            </div>
+                            <p className="text-2xl font-bold">
+                              {walletAnalyticsLoading
+                                ? "—"
+                                : walletAnalytics?.totalTrades ?? 0}
+                            </p>
+                            <p className="text-xs text-white/50 mt-1">
+                              Last 30 days
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     <div className="mt-4 pt-4 border-t border-white/10">
                       <p className="text-2xl sm:text-3xl font-bold">
                         {usdcBalanceLoading

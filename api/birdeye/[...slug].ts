@@ -54,7 +54,7 @@ async function searchHandler(req: VercelRequest, res: VercelResponse) {
       chains.map(async ({ chain, chainId }) => {
         try {
           const url = new URL(`${BIRDEYE_API_BASE}/defi/v3/search`);
-          url.searchParams.set("term", term);
+          url.searchParams.set("keyword", term);
           url.searchParams.set("limit", String(Math.min(limit, 20)));
           if (chain === "solana") {
             url.searchParams.set("search_mode", "combination");

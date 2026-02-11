@@ -15,6 +15,15 @@ function toBirdeyeChain(chain: string): string {
   return chain === "bnb" ? "bsc" : chain;
 }
 
+/** Check if string looks like a contract address (Solana base58 or EVM 0x+hex). */
+function looksLikeAddress(s: string): boolean {
+  const t = s.trim();
+  if (!t || t.length < 20) return false;
+  if (/^0x[a-fA-F0-9]{40}$/.test(t)) return true; // EVM
+  if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(t)) return true; // Solana base58
+  return false;
+}
+
 interface BirdeyeSearchToken {
   address?: string;
   symbol?: string;
@@ -56,8 +65,14 @@ async function searchHandler(req: VercelRequest, res: VercelResponse) {
           const url = new URL(`${BIRDEYE_API_BASE}/defi/v3/search`);
           url.searchParams.set("keyword", term);
           url.searchParams.set("limit", String(Math.min(limit, 20)));
-          if (chain === "solana") {
-            url.searchParams.set("search_mode", "combination");
+          url.searchParams.set("sort_by", "volume_24h_usd");
+          url.searchParams.set("sort_type", "desc");
+          url.searchParams.set("target", "token");
+          if (looksLikeAddress(term)) {
+            url.searchParams.set("search_by", "address");
+          } else {
+            url.searchParams.set("search_by", "combination");
+            url.searchParams.set("search_mode", "fuzzy");
           }
           const r = await fetch(url.toString(), {
             method: "GET",

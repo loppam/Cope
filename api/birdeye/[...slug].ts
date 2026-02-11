@@ -55,7 +55,10 @@ async function searchHandler(req: VercelRequest, res: VercelResponse) {
         try {
           const url = new URL(`${BIRDEYE_API_BASE}/defi/v3/search`);
           url.searchParams.set("term", term);
-          url.searchParams.set("limit", String(Math.min(limit, 10)));
+          url.searchParams.set("limit", String(Math.min(limit, 20)));
+          if (chain === "solana") {
+            url.searchParams.set("search_mode", "combination");
+          }
           const r = await fetch(url.toString(), {
             method: "GET",
             headers: {
@@ -66,15 +69,40 @@ async function searchHandler(req: VercelRequest, res: VercelResponse) {
           });
           if (!r.ok) return;
           const data = await r.json();
-          const items = Array.isArray(data?.data) ? data.data : Array.isArray(data?.tokens) ? data.tokens : [];
+          const rawItems = data?.data?.items ?? data?.data ?? data?.tokens ?? [];
+          const items: Array<Record<string, unknown>> = [];
+          if (Array.isArray(rawItems)) {
+            for (const entry of rawItems) {
+              if (entry?.type === "token" && entry?.result != null) {
+                const arr = Array.isArray(entry.result) ? entry.result : [entry.result];
+                for (const tok of arr) {
+                  if (tok && (tok.address ?? tok.mint)) items.push(tok);
+                }
+              } else if (entry?.address ?? entry?.mint) {
+                items.push(entry);
+              }
+            }
+          }
           for (const item of items) {
             const addr = (item?.address ?? item?.mint ?? "").toString().trim();
             if (!addr) continue;
             const key = `${chain}:${addr.toLowerCase()}`;
             if (seen.has(key)) continue;
             seen.add(key);
+            const liq = item?.liquidity ?? item?.volume_24h_usd ?? item?.v24hUSD;
+            const mc = item?.market_cap ?? item?.mc;
+            const v24h = item?.volume_24h_usd ?? item?.v24hUSD;
+            const logo = item?.logo_uri ?? item?.logoURI;
             results.push({
-              ...item,
+              address: addr,
+              symbol: item?.symbol != null ? String(item.symbol) : undefined,
+              name: item?.name != null ? String(item.name) : undefined,
+              decimals: typeof item?.decimals === "number" ? item.decimals : undefined,
+              logoURI: logo != null ? String(logo) : undefined,
+              liquidity: typeof liq === "number" ? liq : undefined,
+              price: typeof item?.price === "number" ? item.price : undefined,
+              mc: typeof mc === "number" ? mc : undefined,
+              v24hUSD: typeof v24h === "number" ? v24h : undefined,
               chain: chain === "bsc" ? "bnb" : chain,
               chainId,
             });
@@ -164,10 +192,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const action = segments[segments.length - 1];
   const routeHandler = action ? ROUTES[action] : undefined;
   if (!routeHandler) {
-    return res.status(404).json({
+    res.status(404).json({
       error: "Not found",
       message: `Birdeye action '${action || ""}' not found. Use: search, token-overview`,
-    }) as void;
+    });
+    return;
   }
   await routeHandler(req, res);
 }

@@ -55,23 +55,62 @@ export interface BirdeyeTokenOverview {
   };
 }
 
+/** Check if string looks like a contract address (Solana base58 or EVM 0x+hex). */
+function looksLikeAddress(s: string): boolean {
+  const t = s.trim();
+  if (!t || t.length < 20) return false;
+  if (/^0x[a-fA-F0-9]{40}$/.test(t)) return true; // EVM
+  if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(t)) return true; // Solana base58
+  return false;
+}
+
 /**
  * Search tokens via Birdeye API (proxied through our backend).
  * Returns tokens from Solana, Base, and BNB merged and sorted by liquidity.
+ * When input looks like a contract address and search returns empty, falls back to token-overview.
  */
 export async function searchBirdeyeTokens(
   term: string,
   limit = 20
 ): Promise<TokenSearchResult[]> {
   const apiBase = getApiBase();
-  const params = new URLSearchParams({ term: term.trim(), limit: String(limit) });
+  const trimmed = term.trim();
+  const params = new URLSearchParams({ term: trimmed, limit: String(limit) });
   const res = await fetch(`${apiBase}/api/birdeye/search?${params.toString()}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error((err as { error?: string }).error || `Birdeye search failed: ${res.status}`);
   }
   const json = await res.json();
-  const tokens = Array.isArray(json?.tokens) ? json.tokens : [];
+  let tokens = Array.isArray(json?.tokens) ? json.tokens : [];
+  if (tokens.length === 0 && looksLikeAddress(trimmed)) {
+    const chains: Array<"solana" | "base" | "bnb"> = ["solana", "base", "bnb"];
+    for (const chain of chains) {
+      try {
+        const overview = await fetchBirdeyeTokenOverview(trimmed, chain);
+        const data = overview?.data;
+        if (data?.address ?? data?.symbol) {
+          const r: BirdeyeSearchToken = {
+            address: data.address ?? trimmed,
+            symbol: data.symbol,
+            name: data.name,
+            decimals: data.decimals,
+            logoURI: data.logoURI,
+            liquidity: data.liquidity,
+            price: data.price,
+            mc: data.mc,
+            v24hUSD: data.v24hUSD ?? data.v24h,
+            chain: chain,
+            chainId: CHAIN_IDS[chain],
+          };
+          tokens = [r];
+          break;
+        }
+      } catch {
+        // try next chain
+      }
+    }
+  }
   return tokens.map((t: BirdeyeSearchToken) => birdeyeSearchToTokenResult(t));
 }
 

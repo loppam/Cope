@@ -138,6 +138,21 @@ export function WalletSetup() {
                   console.warn("EVM address derivation failed:", e);
                 }
 
+                // SOL funder: one-time 0.005 SOL for new wallets (fee coverage)
+                try {
+                  const token = await user.getIdToken();
+                  const base = getApiBase();
+                  const fundRes = await fetch(`${base}/api/relay/fund-new-wallet`, {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${token}` },
+                  });
+                  if (!fundRes.ok) {
+                    console.warn("SOL funding failed:", fundRes.status);
+                  }
+                } catch (e) {
+                  console.warn("SOL funding failed:", e);
+                }
+
                 toast.success("Wallet generated successfully!", {
                   duration: 5000,
                 });

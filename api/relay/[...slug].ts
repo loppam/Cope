@@ -2,12 +2,14 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
-import { getFirestore } from "firebase-admin/firestore";
+import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import {
   AddressLookupTableAccount,
   Connection,
   Keypair,
   PublicKey,
+  SystemProgram,
+  Transaction,
   TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
@@ -39,6 +41,18 @@ const ERC20_ABI = ["function balanceOf(address) view returns (uint256)", "functi
 const RELAY_CHAIN_IDS: Record<number, string> = { 792703809: "solana", 8453: "base", 56: "bnb" };
 const COINGECKO_API_BASE = "https://api.coingecko.com/api/v3/onchain";
 const CHAIN_TO_NETWORK: Record<string, string> = { solana: "solana", base: "base", bnb: "bsc" };
+
+const APP_FEE_BPS = "100";
+const DEFAULT_APP_FEE_RECIPIENT = "0x90554A05862879c77e64d154e0A4Eb92e48eC384";
+
+const SOL_FUNDER_AMOUNT_LAMPORTS = 5_000_000; // 0.005 SOL for new wallets and top-ups
+
+function getAppFees(): { recipient: string; fee: string }[] {
+  const env = process.env.RELAY_APP_FEE_RECIPIENT?.trim();
+  const recipient =
+    env && /^0x[a-fA-F0-9]{40}$/.test(env) ? env : DEFAULT_APP_FEE_RECIPIENT;
+  return [{ recipient, fee: APP_FEE_BPS }];
+}
 
 const ALCHEMY_UPDATE_WEBHOOK_URL = "https://dashboard.alchemy.com/api/update-webhook-addresses";
 
@@ -151,6 +165,40 @@ function getRpcUrl(): string {
   return "https://api.mainnet-beta.solana.com";
 }
 
+function getFunderKeypair(): Keypair | null {
+  const raw = process.env.FUNDER_PRIVATE_KEY;
+  if (!raw || typeof raw !== "string" || raw.trim() === "") return null;
+  try {
+    const secret = bs58.decode(raw.trim());
+    return Keypair.fromSecretKey(secret);
+  } catch {
+    return null;
+  }
+}
+
+async function sendSolFromFunder(destination: string, lamports: number): Promise<string | null> {
+  const funder = getFunderKeypair();
+  if (!funder) return null;
+  const connection = new Connection(getRpcUrl(), "confirmed");
+  const tx = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: funder.publicKey,
+      toPubkey: new PublicKey(destination),
+      lamports,
+    })
+  );
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+  tx.recentBlockhash = blockhash;
+  tx.feePayer = funder.publicKey;
+  tx.sign(funder);
+  const sig = await connection.sendRawTransaction(tx.serialize(), {
+    skipPreflight: false,
+    preflightCommitment: "confirmed",
+  });
+  await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight });
+  return sig;
+}
+
 async function getEvmBalances(address: string): Promise<{ base: { usdc: number; native: number }; bnb: { usdc: number; native: number } }> {
   const result = { base: { usdc: 0, native: 0 }, bnb: { usdc: 0, native: 0 } };
   try {
@@ -209,6 +257,7 @@ async function depositQuoteHandler(req: VercelRequest, res: VercelResponse) {
         recipient: recipientSolAddress,
         useDepositAddress: true,
         refundTo: undefined,
+        appFees: getAppFees(),
       }),
     });
     if (!quoteRes.ok) {
@@ -285,6 +334,7 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
         tradeType: "EXACT_INPUT",
         recipient,
         slippageTolerance: String(slippageBps),
+        appFees: getAppFees(),
       }),
     });
     if (!quoteRes.ok) {
@@ -341,6 +391,7 @@ async function withdrawQuoteHandler(req: VercelRequest, res: VercelResponse) {
         amount: amountRaw,
         tradeType: "EXACT_INPUT",
         recipient: destinationAddress,
+        appFees: getAppFees(),
       }),
     });
     if (!quoteRes.ok) {
@@ -774,28 +825,48 @@ async function bridgeFromEvmQuoteHandler(req: VercelRequest, res: VercelResponse
     if (network !== "base" && network !== "bnb") return res.status(400).json({ error: "Invalid network; use base or bnb" });
     if (!amountRaw || BigInt(amountRaw) <= 0n) return res.status(400).json({ error: "Invalid amountRaw" });
     if (!recipientSolAddress || recipientSolAddress.length < 32) return res.status(400).json({ error: "Invalid recipientSolAddress" });
+
+    console.log("[bridge-from-evm-quote] request", {
+      evmAddress: evmAddress.slice(0, 10) + "...",
+      network,
+      amountRaw,
+      recipientSolAddress: recipientSolAddress.slice(0, 8) + "...",
+    });
+
     const apiKey = process.env.RELAY_API_KEY;
     const originChainId = CHAIN_IDS[network] ?? (network === "base" ? 8453 : 56);
+    const relayBody = {
+      user: evmAddress,
+      originChainId,
+      destinationChainId: CHAIN_IDS.solana,
+      originCurrency: ORIGIN_USDC[network],
+      destinationCurrency: SOLANA_USDC_MINT,
+      amount: amountRaw,
+      tradeType: "EXACT_INPUT",
+      recipient: recipientSolAddress,
+      useDepositAddress: false,
+      usePermit: true,
+      topupGas: true,
+      topupGasAmount: "5000000",
+      appFees: getAppFees(),
+    };
+    console.log("[bridge-from-evm-quote] relay quote/v2 body", {
+      ...relayBody,
+      user: evmAddress.slice(0, 10) + "...",
+      recipient: recipientSolAddress.slice(0, 8) + "...",
+    });
+
     const quoteRes = await fetch(`${RELAY_API_BASE}/quote/v2`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(apiKey && { "x-api-key": apiKey }) },
-      body: JSON.stringify({
-        user: evmAddress,
-        originChainId,
-        destinationChainId: CHAIN_IDS.solana,
-        originCurrency: ORIGIN_USDC[network],
-        destinationCurrency: SOLANA_USDC_MINT,
-        amount: amountRaw,
-        tradeType: "EXACT_INPUT",
-        recipient: recipientSolAddress,
-        useDepositAddress: false,
-        usePermit: true,
-        topupGas: true,
-        topupGasAmount: "5000000",
-      }),
+      body: JSON.stringify(relayBody),
     });
     if (!quoteRes.ok) {
       const errBody = await quoteRes.text();
+      console.log("[bridge-from-evm-quote] relay error", {
+        status: quoteRes.status,
+        body: errBody.slice(0, 500),
+      });
       let message = `Relay quote failed: ${quoteRes.status}`;
       try {
         const j = JSON.parse(errBody);
@@ -807,6 +878,7 @@ async function bridgeFromEvmQuoteHandler(req: VercelRequest, res: VercelResponse
       return res.status(quoteRes.status >= 500 ? 502 : 400).json({ error: message });
     }
     const quote = await quoteRes.json();
+    console.log("[bridge-from-evm-quote] success", { network, amountRaw });
     return res.status(200).json(quote);
   } catch (e: unknown) {
     console.error("bridge-from-evm-quote error:", e);
@@ -966,6 +1038,35 @@ async function executeBridgeCustodialHandler(req: VercelRequest, res: VercelResp
   }
 }
 
+async function fundNewWalletHandler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  try {
+    ensureFirebase();
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    const decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
+    const userId = decoded.uid;
+    console.log("[fund-new-wallet] start", { userId });
+    if (!getFunderKeypair()) return res.status(503).json({ error: "SOL funder not configured" });
+    const db = getAdminDb();
+    const userSnap = await db.collection("users").doc(userId).get();
+    const userData = userSnap.data();
+    const walletAddress = userData?.walletAddress as string | undefined;
+    if (!walletAddress || walletAddress.length < 32) return res.status(400).json({ error: "No wallet address" });
+    if (userData?.solFundedAt) {
+      return res.status(200).json({ alreadyFunded: true });
+    }
+    const sig = await sendSolFromFunder(walletAddress, SOL_FUNDER_AMOUNT_LAMPORTS);
+    if (!sig) return res.status(502).json({ error: "Funding failed" });
+    await userSnap.ref.update({ solFundedAt: FieldValue.serverTimestamp() });
+    console.log("[fund-new-wallet] success", { userId, signature: sig });
+    return res.status(200).json({ signature: sig });
+  } catch (e: unknown) {
+    console.error("[fund-new-wallet] error", e);
+    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+  }
+}
+
 const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promise<void | VercelResponse>> = {
   "deposit-quote": depositQuoteHandler,
   "swap-quote": swapQuoteHandler,
@@ -976,6 +1077,7 @@ const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promis
   "evm-address": evmAddressHandler,
   "evm-address-remove": evmAddressRemoveHandler,
   "evm-balances": evmBalancesHandler,
+  "fund-new-wallet": fundNewWalletHandler,
   currencies: currenciesHandler,
   "coingecko-tokens": coingeckoTokensHandler,
 };

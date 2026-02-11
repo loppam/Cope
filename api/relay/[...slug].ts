@@ -645,22 +645,23 @@ function isBase58Like(s: string): boolean {
 const MAX_INSTRUCTION_DATA_BYTES = 2048;
 
 /**
- * Decode Relay instruction data. Relay may send base64, hex, or base58.
- * Try decodings in order; use the one that produces valid output to avoid
- * "encoding overruns Uint8Array" from corrupt instruction data.
+ * Decode Relay instruction data for Solana.
+ * Relay's official Solana adapter uses hex exclusively (Buffer.from(i.data, 'hex')).
+ * We try hex first, then base64 as fallback for alternate solvers.
  */
 function decodeRelayInstructionData(data: string): Buffer {
   if (!data || typeof data !== "string") return Buffer.alloc(0);
   const s = data.trim();
   if (s.length === 0) return Buffer.alloc(0);
 
-  // 1. Hex (0x-prefix or plain) - unambiguous
+  // 1. Hex - Relay's Solana adapter uses hex only. Try first to match canonical format.
   if (isHexLike(s)) {
     const hex = s.startsWith("0x") ? s.slice(2) : s;
-    return Buffer.from(hex, "hex");
+    const buf = Buffer.from(hex, "hex");
+    if (buf.length <= MAX_INSTRUCTION_DATA_BYTES) return buf;
   }
 
-  // 2. Base64 - most common for raw bytes from APIs; try first
+  // 2. Base64 - fallback for alternate backends that may send base64
   if (isBase64Like(s)) {
     try {
       const buf = Buffer.from(s, "base64");
@@ -671,7 +672,15 @@ function decodeRelayInstructionData(data: string): Buffer {
     }
   }
 
-  // 3. Base58 - Solana/Relay sometimes use this; only if no base64-specific chars
+  // 3. Base64 fallback (padding quirks)
+  try {
+    const buf = Buffer.from(s, "base64");
+    if (buf.length > 0 && buf.length <= MAX_INSTRUCTION_DATA_BYTES) return buf;
+  } catch {
+    // fall through
+  }
+
+  // 4. Base58 - last resort for Solana-style encoding
   if (isBase58Like(s)) {
     try {
       const decoded = bs58.decode(s);
@@ -683,24 +692,8 @@ function decodeRelayInstructionData(data: string): Buffer {
     }
   }
 
-  // 4. Fallback: try base64 even if heuristic failed (e.g. padding quirks)
-  try {
-    const buf = Buffer.from(s, "base64");
-    if (buf.length > 0 && buf.length <= MAX_INSTRUCTION_DATA_BYTES) return buf;
-  } catch {
-    // fall through
-  }
-
-  // 5. Last resort: base58
-  try {
-    const buf = Buffer.from(bs58.decode(s));
-    if (buf.length <= MAX_INSTRUCTION_DATA_BYTES) return buf;
-  } catch {
-    // fall through
-  }
-
   throw new Error(
-    `[relay] Failed to decode instruction data (encoding overruns). Len=${s.length} preview=${s.slice(0, 24)}. Tried base64, hex, base58.`,
+    `[relay] Failed to decode instruction data. Len=${s.length} preview=${s.slice(0, 32)}. Expected hex (Relay canonical) or base64.`,
   );
 }
 
@@ -785,6 +778,57 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       console.warn("[execute-step] no step data", { userId, stepIndex });
       return res.status(400).json({ error: "No step data to execute" });
     }
+
+    // Inspect raw step data to diagnose encoding (hex vs base64)
+    if (data && typeof data === "object") {
+      const d = data as Record<string, unknown>;
+      const dataKeys = Object.keys(d);
+      if (Array.isArray(d.instructions)) {
+        (d.instructions as Array<{ data?: string; programId?: string }>).forEach(
+          (ix, idx) => {
+            const raw = ix.data ?? "";
+            const trimmed = raw.startsWith("0x") ? raw.slice(2) : raw;
+            const isHexLike =
+              trimmed.length > 0 &&
+              trimmed.length % 2 === 0 &&
+              /^[0-9a-fA-F]+$/.test(trimmed);
+            const isBase64Like =
+              raw.length > 0 &&
+              raw.length % 4 === 0 &&
+              /^[A-Za-z0-9+/]+=*$/.test(raw);
+            const hasBase64Chars = /[+/=]/.test(raw);
+            console.log(`[execute-step] instruction ${idx} data inspect`, {
+              programId: ix.programId,
+              dataLength: raw.length,
+              preview: raw.slice(0, 64),
+              isHexLike,
+              isBase64Like,
+              hasBase64Chars,
+            });
+          },
+        );
+      }
+      const serializedKeys = [
+        "serializedTransaction",
+        "transaction",
+        "payload",
+        "transactionBytes",
+      ];
+      serializedKeys.forEach((k) => {
+        if (typeof d[k] === "string") {
+          const v = (d[k] as string).slice(0, 48);
+          console.log(`[execute-step] serialized tx key "${k}"`, {
+            length: (d[k] as string).length,
+            preview: v,
+            isBase64Like: /^[A-Za-z0-9+/]+=*$/.test(
+              (d[k] as string).slice(0, 64),
+            ),
+          });
+        }
+      });
+      console.log("[execute-step] step data keys", { dataKeys });
+    }
+
     const encryptionSecret = process.env.ENCRYPTION_SECRET;
     if (!encryptionSecret) {
       console.warn("[execute-step] ENCRYPTION_SECRET not configured");
@@ -904,13 +948,30 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
     });
 
     const isEncodingOverrun = /encoding overruns Uint8Array/i.test(errMsg);
-    if (isEncodingOverrun) {
+    const isInvalidInstructionData = /InvalidInstructionData|0x3e7f/i.test(
+      errMsg,
+    );
+    if (isEncodingOverrun || isInvalidInstructionData) {
+      const body = (req as any)?.body as { quoteResponse?: { steps?: Array<{ items?: Array<{ data?: unknown }> }> } };
+      const steps = body?.quoteResponse?.steps;
+      const firstItem = steps?.[stepIndex]?.items?.[0];
+      const stepData = firstItem?.data;
+      const dataKeys = stepData && typeof stepData === "object" ? Object.keys(stepData as object) : [];
+      const usedSerializedTx = !!(stepData && typeof stepData === "object" && (stepData as Record<string, unknown>).serializedTransaction);
+      const usedInstructions = !!(stepData && typeof stepData === "object" && Array.isArray((stepData as Record<string, unknown>).instructions));
+      const firstIxDataPreview = usedInstructions && Array.isArray((stepData as { instructions?: Array<{ data?: string }> })?.instructions)
+        ? (stepData as { instructions: Array<{ data?: string }> }).instructions[0]?.data?.slice(0, 48)
+        : null;
       console.error(
-        "[execute-step] encoding overrun - possible Relay instruction data format mismatch",
+        "[execute-step] encoding/instruction error - Relay step data diagnostic",
         {
           userId,
           stepIndex,
-          errMsg,
+          errMsg: errMsg.slice(0, 120),
+          dataKeys,
+          usedSerializedTx,
+          usedInstructions,
+          firstIxDataPreview: firstIxDataPreview ?? "(none)",
         },
       );
     }

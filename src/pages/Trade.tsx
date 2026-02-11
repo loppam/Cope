@@ -224,6 +224,7 @@ export function Trade() {
           marketCapUsd: fields.marketCapUsd,
           liquidityUsd: fields.liquidityUsd,
           volume_24h: fields.volume_24h,
+          holders: fields.holders,
           buys: fields.buys,
           sells: fields.sells,
           totalTransactions: fields.totalTransactions,

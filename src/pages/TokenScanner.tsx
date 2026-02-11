@@ -37,6 +37,8 @@ import {
   findUserByXHandle,
   type UserSearchResult,
 } from "@/lib/auth";
+import { useAuth } from "@/contexts/AuthContext";
+import { DocumentHead } from "@/components/DocumentHead";
 
 function formatMarketCap(value: number): string {
   if (!value || isNaN(value)) return "$0";
@@ -123,6 +125,9 @@ interface DiscoverAccount {
   displayName?: string | null;
   avatar?: string | null;
   walletAddress: string;
+  winRate?: number;
+  totalTrades?: number;
+  realizedPnL?: number;
 }
 
 function AnalysisRow({
@@ -200,6 +205,7 @@ function AnalysisRow({
 
 function DiscoverTabContent() {
   const navigate = useNavigate();
+  const { watchlist } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<UserSearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -249,6 +255,17 @@ function DiscoverTabContent() {
     };
   }, [searchQuery, isUsernameMode]);
 
+  const watchedAddresses = new Set(watchlist.map((w) => w.address));
+  const followedTraders = topTraders.filter((t) => watchedAddresses.has(t.walletAddress));
+  const followedAccounts = accounts.filter((a) => watchedAddresses.has(a.walletAddress));
+  const hasFollowed = followedTraders.length > 0 || followedAccounts.length > 0;
+  const followedList = [
+    ...followedTraders.map((t) => ({ ...t, type: "trader" as const })),
+    ...followedAccounts
+      .filter((a) => !followedTraders.some((t) => t.walletAddress === a.walletAddress))
+      .map((a) => ({ ...a, type: "account" as const })),
+  ];
+
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
@@ -275,6 +292,9 @@ function DiscoverTabContent() {
             displayName: a.displayName ?? null,
             avatar: a.avatar ?? null,
             walletAddress: a.walletAddress,
+            winRate: a.winRate ?? 0,
+            totalTrades: a.totalTrades ?? 0,
+            realizedPnL: a.realizedPnL,
           })),
         );
       } catch {
@@ -412,6 +432,56 @@ function DiscoverTabContent() {
         </div>
       ) : (
         <div className="space-y-6">
+          {hasFollowed && (
+            <div>
+              <h3 className="text-sm font-semibold text-white/80 mb-3">Followed</h3>
+              <div className="space-y-2">
+                {followedList.map((item) => (
+                  <button
+                    key={item.uid}
+                    type="button"
+                    onClick={() => goToWallet(item.walletAddress)}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl border border-[#12d585]/30 bg-[#12d585]/5 hover:bg-[#12d585]/10 transition-colors text-left min-h-[56px]"
+                  >
+                    {item.avatar ? (
+                      <img
+                        src={item.avatar}
+                        alt=""
+                        className="w-10 h-10 rounded-xl object-cover flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-xl bg-[#12d585]/20 flex items-center justify-center flex-shrink-0">
+                        <Users className="w-5 h-5 text-[#12d585]" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-white truncate">
+                        {item.xHandle ||
+                          ("displayName" in item ? item.displayName : null) ||
+                          shortenAddress(item.walletAddress)}
+                      </div>
+                      <div className="text-xs text-white/50 font-mono truncate">
+                        {shortenAddress(item.walletAddress)}
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className="text-sm font-semibold text-[#12d585]">
+                        {Number(item.winRate ?? 0).toFixed(0)}% win
+                      </div>
+                      <div className="text-xs text-white/50">
+                        {item.totalTrades ?? 0} trades
+                      </div>
+                      {item.realizedPnL != null && (
+                        <div className={`text-xs ${item.realizedPnL >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          {item.realizedPnL >= 0 ? "+" : ""}{item.realizedPnL.toFixed(0)}%
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {topTraders.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-white/80 mb-3">Top traders</h3>
@@ -490,6 +560,19 @@ function DiscoverTabContent() {
                       <div className="text-xs text-white/50 font-mono truncate">
                         {shortenAddress(a.walletAddress)}
                       </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className="text-sm font-semibold text-[#12d585]">
+                        {Number(a.winRate ?? 0).toFixed(0)}% win
+                      </div>
+                      <div className="text-xs text-white/50">
+                        {a.totalTrades ?? 0} trades
+                      </div>
+                      {a.realizedPnL != null && (
+                        <div className={`text-xs ${a.realizedPnL >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          {a.realizedPnL >= 0 ? "+" : ""}{a.realizedPnL.toFixed(0)}%
+                        </div>
+                      )}
                     </div>
                   </button>
                 ))
@@ -613,7 +696,12 @@ export function TokenScanner() {
   const isRevealing = analysis && !loading && currentStep > 0;
 
   return (
-    <div className="min-h-[50vh] p-4 sm:p-6 max-w-[720px] mx-auto">
+    <>
+      <DocumentHead
+        title="Token Scanner"
+        description="Scan and analyze Solana tokens on COPE"
+      />
+      <div className="min-h-screen p-4 sm:p-6 pb-16 max-w-[720px] mx-auto overflow-visible">
       <h1 className="mb-4 text-xl font-bold text-white">Token Scanner</h1>
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ScannerTab)} className="w-full">
@@ -940,5 +1028,6 @@ export function TokenScanner() {
         </TabsContent>
       </Tabs>
     </div>
+    </>
   );
 }

@@ -443,7 +443,7 @@ export async function getWalletAnalytics(
     // Use PnL summary endpoint for better performance
     const pnlSummary = await getWalletPnLSummary(walletAddress, duration);
     
-    if (pnlSummary.success && pnlSummary.data?.summary) {
+    if (pnlSummary.data?.summary) {
       const summary = pnlSummary.data.summary;
       
       // Get token list for additional context (optional - can be removed if not needed)

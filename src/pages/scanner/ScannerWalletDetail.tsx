@@ -122,7 +122,7 @@ export function ScannerWalletDetail() {
         </Button>
       </div>
 
-      <div className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8">
+      <div className="p-4 sm:p-6 max-w-[720px] mx-auto pb-16 overflow-visible">
         <div className="mb-4 sm:mb-6">
           <h1 className="text-xl sm:text-2xl font-bold mb-1 sm:mb-2">
             Wallet Details
@@ -267,7 +267,7 @@ export function ScannerWalletDetail() {
             ) : isWatched ? (
               <>
                 <Star className="w-5 h-5 fill-[#12d585] text-[#12d585]" />
-                Already COPE'd
+                Followed
               </>
             ) : (
               <>

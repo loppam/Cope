@@ -40,7 +40,7 @@ async function fetchBirdeyePnL(
   if (!res.ok) return null;
 
   const json = await res.json().catch(() => null);
-  if (!json?.success || !json?.data?.summary) return null;
+  if (!json?.data?.summary) return null;
 
   const summary = json.data.summary;
   const winRate = (summary.counts?.win_rate ?? 0) * 100;

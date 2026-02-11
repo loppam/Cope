@@ -26,6 +26,7 @@ import { db } from "@/lib/firebase";
 import { WalletNotification } from "@/lib/notifications";
 import { shortenAddress, formatCurrency } from "@/lib/utils";
 import { toast } from "sonner";
+import { DocumentHead } from "@/components/DocumentHead";
 
 export function Home() {
   const navigate = useNavigate();
@@ -175,7 +176,12 @@ export function Home() {
   };
 
   return (
-    <div className="p-4 sm:p-6 max-w-[720px] mx-auto animate-fade-in pb-8">
+    <>
+      <DocumentHead
+        title="Home"
+        description="Your feed - follow wallets to see their plays on COPE"
+      />
+      <div className="p-4 sm:p-6 max-w-[720px] mx-auto animate-fade-in pb-8">
       <div className="mb-4 sm:mb-6 mt-4 space-y-1 sm:space-y-2">
         <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-white">
           Your Feed
@@ -372,5 +378,6 @@ export function Home() {
         </div>
       )}
     </div>
+    </>
   );
 }

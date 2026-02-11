@@ -24,6 +24,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { toast } from "sonner";
+import { DocumentHead } from "@/components/DocumentHead";
 
 export function Alerts() {
   const navigate = useNavigate();
@@ -237,7 +238,12 @@ export function Alerts() {
   const readNotifications = filteredNotifications.filter((n) => n.read);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E] p-4 sm:p-6 pb-8">
+    <>
+      <DocumentHead
+        title="Alerts"
+        description="Manage your trading alerts and notifications on COPE"
+      />
+      <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E] p-4 sm:p-6 pb-8">
       <div className="max-w-[720px] mx-auto">
         <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
@@ -505,5 +511,6 @@ export function Alerts() {
         )}
       </div>
     </div>
+    </>
   );
 }

@@ -26,6 +26,7 @@ import {
 import { getSolBalance } from "@/lib/rpc";
 import { getWalletProfitability } from "@/lib/moralis";
 import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
+import { DocumentHead } from "@/components/DocumentHead";
 
 interface TokenPosition {
   mint: string;
@@ -285,27 +286,32 @@ export function PublicProfile() {
 
   if (loading) {
     return (
-      <div
-        className="min-h-screen flex items-center justify-center bg-gradient-to-b from-[#000000] to-[#0B3D2E]"
-        style={{
-          paddingTop: "var(--safe-area-inset-top)",
-          paddingBottom: "var(--safe-area-inset-bottom)",
-        }}
-      >
-        <p className="text-white/60">Loading profile…</p>
-      </div>
+      <>
+        <DocumentHead title="Loading profile…" appendBrand={true} />
+        <div
+          className="min-h-screen flex items-center justify-center bg-gradient-to-b from-[#000000] to-[#0B3D2E]"
+          style={{
+            paddingTop: "var(--safe-area-inset-top)",
+            paddingBottom: "var(--safe-area-inset-bottom)",
+          }}
+        >
+          <p className="text-white/60">Loading profile…</p>
+        </div>
+      </>
     );
   }
 
   if (error || !profile) {
     return (
-      <div
-        className="min-h-screen flex flex-col items-center justify-center gap-4 p-4 bg-gradient-to-b from-[#000000] to-[#0B3D2E]"
-        style={{
-          paddingTop: "var(--safe-area-inset-top)",
-          paddingBottom: "var(--safe-area-inset-bottom)",
-        }}
-      >
+      <>
+        <DocumentHead title="Profile not found" appendBrand={true} />
+        <div
+          className="min-h-screen flex flex-col items-center justify-center gap-4 p-4 bg-gradient-to-b from-[#000000] to-[#0B3D2E]"
+          style={{
+            paddingTop: "var(--safe-area-inset-top)",
+            paddingBottom: "var(--safe-area-inset-bottom)",
+          }}
+        >
         <p className="text-white/80 text-center">
           {error || "Profile not found or private"}
         </p>
@@ -317,17 +323,25 @@ export function PublicProfile() {
           Go home
         </Button>
       </div>
+      </>
     );
   }
 
   return (
-    <div
-      className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E]"
-      style={{
-        paddingTop: "var(--safe-area-inset-top)",
-        paddingBottom: "var(--safe-area-inset-bottom)",
-      }}
-    >
+    <>
+      <DocumentHead
+        title={xHandle}
+        description={`View ${xHandle}'s wallet, positions, and PnL on COPE`}
+        ogImage={avatar || undefined}
+        ogType="profile"
+      />
+      <div
+        className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E]"
+        style={{
+          paddingTop: "var(--safe-area-inset-top)",
+          paddingBottom: "var(--safe-area-inset-bottom)",
+        }}
+      >
       <motion.div
         className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8"
         variants={container}
@@ -589,5 +603,6 @@ export function PublicProfile() {
         </motion.div>
       </motion.div>
     </div>
+    </>
   );
 }

@@ -22,6 +22,7 @@ import { getUserProfile } from "@/lib/auth";
 import { getFollowersList, getFollowersCount } from "@/lib/profile";
 import { toast } from "sonner";
 import type { WatchedWallet } from "@/lib/auth";
+import { DocumentHead } from "@/components/DocumentHead";
 
 type TabId = "following" | "watchlist" | "followers";
 
@@ -263,7 +264,12 @@ export function Watchlist() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E]">
+    <>
+      <DocumentHead
+        title="Social"
+        description="Follow traders and manage your watchlist on COPE"
+      />
+      <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E]">
       <div className="p-4">
         <BackButton onClick={() => navigate(-1)} />
       </div>
@@ -771,5 +777,6 @@ export function Watchlist() {
         }
       </div>
     </div>
+    </>
   );
 }

@@ -39,6 +39,7 @@ import { shortenAddress, getApiBase } from "@/lib/utils";
 import { getChainId } from "@/lib/relay";
 import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
 import { toast } from "sonner";
+import { DocumentHead } from "@/components/DocumentHead";
 
 type TradeChain = "solana" | "base" | "bnb";
 
@@ -580,7 +581,12 @@ export function Trade() {
   };
 
   return (
-    <div className="p-3 sm:p-6 max-w-[720px] mx-auto min-w-0">
+    <>
+      <DocumentHead
+        title="Trade"
+        description="Swap and trade tokens on COPE"
+      />
+      <div className="p-3 sm:p-6 max-w-[720px] mx-auto min-w-0">
       <div className="mb-6 sm:mb-8">
         <h1 className="text-xl sm:text-2xl font-bold mb-2">Trade Terminal</h1>
         <p className="text-sm text-white/60">
@@ -1197,5 +1203,6 @@ export function Trade() {
         );
       })()}
     </div>
+    </>
   );
 }

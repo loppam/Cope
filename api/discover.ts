@@ -5,7 +5,7 @@
  */
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, FieldPath } from "firebase-admin/firestore";
 
 function isUserPublic(data: { isPublic?: boolean }): boolean {
   return data.isPublic !== false;
@@ -117,19 +117,59 @@ export default async function handler(
       .limit(100)
       .get();
 
-    const accounts = usersSnap.docs
+    const accountDocs = usersSnap.docs
       .filter((d) => isUserPublic(d.data()))
-      .slice(0, 50)
-      .map((d) => {
-        const data = d.data();
-        return {
-          uid: d.id,
-          xHandle: data.xHandle ?? null,
-          displayName: data.displayName ?? null,
-          avatar: data.avatar ?? data.photoURL ?? null,
-          walletAddress: data.walletAddress,
-        };
+      .slice(0, 50);
+
+    const walletAddresses = accountDocs
+      .map((d) => d.data().walletAddress as string)
+      .filter(Boolean);
+
+    const statsByWallet = new Map<
+      string,
+      { winRate: number; totalTrades: number; realizedPnL?: number }
+    >();
+    if (walletAddresses.length > 0) {
+      const chunkSize = 10;
+      const chunks: string[][] = [];
+      for (let i = 0; i < walletAddresses.length; i += chunkSize) {
+        chunks.push(walletAddresses.slice(i, i + chunkSize));
+      }
+      const allStats = await Promise.all(
+        chunks.map((chunk) =>
+          db
+            .collection("walletStats")
+            .where(FieldPath.documentId(), "in", chunk)
+            .get()
+        )
+      );
+      allStats.forEach((snap) => {
+        snap.docs.forEach((d) => {
+          const data = d.data();
+          statsByWallet.set(d.id, {
+            winRate: data.winRate ?? 0,
+            totalTrades: data.totalTrades ?? 0,
+            realizedPnL: data.realizedPnL,
+          });
+        });
       });
+    }
+
+    const accounts = accountDocs.map((d) => {
+      const data = d.data();
+      const walletAddress = data.walletAddress;
+      const stats = walletAddress ? statsByWallet.get(walletAddress) : undefined;
+      return {
+        uid: d.id,
+        xHandle: data.xHandle ?? null,
+        displayName: data.displayName ?? null,
+        avatar: data.avatar ?? data.photoURL ?? null,
+        walletAddress,
+        winRate: stats?.winRate ?? 0,
+        totalTrades: stats?.totalTrades ?? 0,
+        realizedPnL: stats?.realizedPnL,
+      };
+    });
 
     res.status(200).json({ topTraders, accounts });
   } catch (err) {

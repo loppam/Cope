@@ -56,6 +56,7 @@ import type { WatchedWallet } from "@/lib/auth";
 import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
 import { Input } from "@/components/Input";
 import { Loader2 } from "lucide-react";
+import { DocumentHead } from "@/components/DocumentHead";
 
 interface TokenPosition {
   mint: string;
@@ -581,12 +582,17 @@ export function Profile() {
   }, [openPositions]);
 
   return (
-    <motion.div
-      className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8"
-      variants={container}
-      initial="initial"
-      animate="animate"
-    >
+    <>
+      <DocumentHead
+        title="Profile"
+        description="Your COPE profile, wallet, positions, and settings"
+      />
+      <motion.div
+        className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8"
+        variants={container}
+        initial="initial"
+        animate="animate"
+      >
       <motion.div className="mb-6 flex items-center justify-between" variants={item}>
         <h1 className="text-2xl font-bold">Profile</h1>
         <button
@@ -1297,5 +1303,6 @@ export function Profile() {
         </Card>
       </motion.div>
     </motion.div>
+    </>
   );
 }

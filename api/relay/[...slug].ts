@@ -847,7 +847,7 @@ async function bridgeFromEvmQuoteHandler(req: VercelRequest, res: VercelResponse
       useDepositAddress: false,
       usePermit: true,
       topupGas: true,
-      topupGasAmount: "5000000",
+      topupGasAmount: "1000000", // 0.001 SOL
       appFees: getAppFees(),
     };
     console.log("[bridge-from-evm-quote] relay quote/v2 body", {

@@ -1099,6 +1099,35 @@ async function fundNewWalletHandler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+async function notifyWithdrawalCompleteHandler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  try {
+    ensureFirebase();
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    const decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
+    const userId = decoded.uid;
+    const body = (req.body as { amount?: number; network?: string }) ?? {};
+    const amount = body.amount ?? 0;
+    const network = body.network ?? "Solana";
+    const { getUserTokens, sendToTokens } = await import("../../lib/push-server");
+    const tokens = await getUserTokens(userId);
+    if (tokens.length > 0) {
+      const amountStr = amount > 0 ? `$${amount.toFixed(2)} ` : "";
+      await sendToTokens(tokens, {
+        title: "Withdrawal complete",
+        body: `${amountStr}USDC sent to ${network}`,
+        deepLink: "/app/profile",
+        data: { type: "withdrawal_complete", refresh: "balance" },
+      });
+    }
+    return res.status(200).json({ ok: true });
+  } catch (e: unknown) {
+    console.error("notify-withdrawal-complete error:", e);
+    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+  }
+}
+
 const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promise<void | VercelResponse>> = {
   "deposit-quote": depositQuoteHandler,
   "swap-quote": swapQuoteHandler,
@@ -1110,6 +1139,7 @@ const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promis
   "evm-address-remove": evmAddressRemoveHandler,
   "evm-balances": evmBalancesHandler,
   "fund-new-wallet": fundNewWalletHandler,
+  "notify-withdrawal-complete": notifyWithdrawalCompleteHandler,
   currencies: currenciesHandler,
   "coingecko-tokens": coingeckoTokensHandler,
 };

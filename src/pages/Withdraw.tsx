@@ -98,6 +98,8 @@ export function Withdraw() {
         return;
       }
       if (data.signature) {
+        const completedAmount = parseFloat(amount);
+        const completedNetwork = network === "solana" ? "Solana" : network === "base" ? "Base" : "BNB";
         toast.success("Withdraw submitted", {
           description: "Transaction sent. Relay will complete the transfer.",
         });
@@ -112,7 +114,19 @@ export function Withdraw() {
               if (status?.status === "filled" || status?.status === "complete") {
                 clearInterval(interval);
                 toast.success("Withdraw complete");
-                setUsdcBalance((prev) => Math.max(0, prev - parseFloat(amount)));
+                setUsdcBalance((prev) => Math.max(0, prev - completedAmount));
+                window.dispatchEvent(new CustomEvent("cope-refresh-balance"));
+                user?.getIdToken().then((token) => {
+                  const base = getApiBase();
+                  fetch(`${base}/api/relay/notify-withdrawal-complete`, {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({ amount: completedAmount, network: completedNetwork }),
+                  }).catch(() => {});
+                });
               }
             } catch {
               // ignore

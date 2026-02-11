@@ -129,6 +129,8 @@ export function Profile() {
     }
   };
 
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
   useEffect(() => {
     if (walletAddress) {
       fetchBalance();
@@ -136,6 +138,15 @@ export function Profile() {
       setUsdcBalance(0);
       setUsdcBalanceLoading(false);
     }
+  }, [walletAddress]);
+
+  useEffect(() => {
+    const onRefresh = () => {
+      if (walletAddress) fetchBalance();
+      setRefreshTrigger((k) => k + 1);
+    };
+    window.addEventListener("cope-refresh-balance", onRefresh);
+    return () => window.removeEventListener("cope-refresh-balance", onRefresh);
   }, [walletAddress]);
 
   // Fetch open positions: SOL + EVM (Base/BNB USDC and native) + SPL tokens
@@ -213,7 +224,7 @@ export function Profile() {
         setOpenPositions([]);
         setClosedPositions([]);
       });
-  }, [walletAddress, user]);
+  }, [walletAddress, user, refreshTrigger]);
 
   // Fetch stats
   useEffect(() => {
@@ -327,13 +338,14 @@ export function Profile() {
         return;
       }
       if (data.signature) {
+        const completedAmount = parseFloat(withdrawAmount);
+        const completedNetwork = withdrawNetwork === "solana" ? "Solana" : withdrawNetwork === "base" ? "Base" : "BNB";
         toast.success("Withdraw submitted", {
           description: "Transaction sent. Relay will complete the transfer.",
         });
         setWithdrawQuote(null);
         setWithdrawAmount("");
-        const amt = parseFloat(withdrawAmount);
-        if (Number.isFinite(amt)) setUsdcBalance((prev) => Math.max(0, prev - amt));
+        if (Number.isFinite(completedAmount)) setUsdcBalance((prev) => Math.max(0, prev - completedAmount));
         if (withdrawRequestId) {
           let attempts = 0;
           const interval = setInterval(async () => {
@@ -343,6 +355,18 @@ export function Profile() {
               if (status?.status === "filled" || status?.status === "complete") {
                 clearInterval(interval);
                 toast.success("Withdraw complete");
+                window.dispatchEvent(new CustomEvent("cope-refresh-balance"));
+                user?.getIdToken().then((token) => {
+                  const base = getApiBase();
+                  fetch(`${base}/api/relay/notify-withdrawal-complete`, {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({ amount: completedAmount, network: completedNetwork }),
+                  }).catch(() => {});
+                });
               }
             } catch {
               // ignore

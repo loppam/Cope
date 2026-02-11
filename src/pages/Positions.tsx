@@ -280,6 +280,14 @@ export function Positions() {
     fetchPositions();
   }, [walletAddress, user]);
 
+  useEffect(() => {
+    const onRefresh = () => {
+      if (walletAddress) fetchPositions(true);
+    };
+    window.addEventListener("cope-refresh-balance", onRefresh);
+    return () => window.removeEventListener("cope-refresh-balance", onRefresh);
+  }, [walletAddress]);
+
   // Calculate total value
   // Since SOL is included in the positions list, tokensValue already includes SOL
   // All token values from API are already in USD, SOL value is calculated as solBalance * solPrice

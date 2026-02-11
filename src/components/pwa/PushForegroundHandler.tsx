@@ -17,9 +17,14 @@ export function PushForegroundHandler() {
     const unsubscribe = subscribeToForegroundPush((payload) => {
       const title = payload.notification?.title || "COPE Alert";
       const body = payload.notification?.body || "";
-      const deepLink = payload.data?.deepLink || "/app/alerts";
+      const data = payload.data || {};
+      const deepLink = data.deepLink || "/app/profile";
+      const type = data.type;
 
-      // Show styled notification toast
+      if (type === "deposit_complete" || type === "withdrawal_complete") {
+        window.dispatchEvent(new CustomEvent("cope-refresh-balance"));
+      }
+
       toast(title, {
         description: body || undefined,
         icon: <Bell className="w-5 h-5 text-[#12d585]" />,

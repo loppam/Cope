@@ -749,6 +749,21 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
           return;
         }
         console.log("evm-deposit: bridge completed", { userId, network, amount: amount.toString() });
+        const amountUsd = (Number(amount) / 1e6).toFixed(2);
+        try {
+          const { getUserTokens, sendToTokens } = await import("../../lib/push-server");
+          const tokens = await getUserTokens(userId);
+          if (tokens.length > 0) {
+            await sendToTokens(tokens, {
+              title: "Deposit complete",
+              body: `$${amountUsd} USDC bridged from ${network === "base" ? "Base" : "BNB"} to your Solana wallet`,
+              deepLink: "/app/profile",
+              data: { type: "deposit_complete", refresh: "balance" },
+            });
+          }
+        } catch (pushErr) {
+          console.error("evm-deposit: push notification failed", pushErr);
+        }
       } catch (e: unknown) {
         console.error("evm-deposit bridge background error:", e);
       }

@@ -790,6 +790,8 @@ async function bridgeFromEvmQuoteHandler(req: VercelRequest, res: VercelResponse
         recipient: recipientSolAddress,
         useDepositAddress: false,
         usePermit: true,
+        topupGas: true,
+        topupGasAmount: "5000000",
       }),
     });
     if (!quoteRes.ok) {

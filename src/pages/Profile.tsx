@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router";
 import { motion } from "motion/react";
 import { Button } from "@/components/Button";
@@ -457,6 +457,15 @@ export function Profile() {
     },
   };
 
+  // Client-side filter: hide SOL if < 0.01, hide all USDC (cash is separate)
+  const displayedOpenPositions = useMemo(() => {
+    return openPositions.filter((p) => {
+      if (p.mint === SOL_MINT) return p.amount >= 0.01;
+      if (p.symbol === "USDC" || p.mint === SOLANA_USDC_MINT || p.mint === "base-usdc" || p.mint === "bnb-usdc") return false;
+      return true;
+    });
+  }, [openPositions]);
+
   return (
     <motion.div
       className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8"
@@ -627,11 +636,11 @@ export function Profile() {
                     >
                       Open positions
                     </button>
-                    {openPositions.length === 0 ? (
+                    {displayedOpenPositions.length === 0 ? (
                       <p className="text-sm text-white/50">No open positions</p>
                     ) : (
                       <ul className="space-y-2">
-                        {openPositions.map((pos) => (
+                        {displayedOpenPositions.map((pos) => (
                           <li
                             key={pos.mint}
                             className="flex items-center gap-3 py-3 px-2 rounded-lg min-h-[44px] hover:bg-white/5 active:bg-white/10 touch-manipulation"

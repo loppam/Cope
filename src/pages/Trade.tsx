@@ -37,7 +37,7 @@ import {
 } from "lucide-react";
 import { shortenAddress, getApiBase } from "@/lib/utils";
 import { getChainId } from "@/lib/relay";
-import { SOLANA_USDC_MINT } from "@/lib/constants";
+import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
 import { toast } from "sonner";
 
 type TradeChain = "solana" | "base" | "bnb";
@@ -73,6 +73,9 @@ export function Trade() {
   const quickAmounts = [10, 50, 100];
   const slippagePresets = [50, 100, 200]; // 0.5%, 1%, 2%
   const REFRESH_COOLDOWN_MS = 15000; // 15 seconds
+  const SOL_RESERVE = 0.005; // Always leave at least this much SOL for gas
+  const sellableBalance =
+    token?.mint === SOL_MINT ? Math.max(0, tokenBalance - SOL_RESERVE) : tokenBalance;
   const fetchDetailsMintRef = useRef<string | null>(null);
 
   // Check if mint was passed from navigation state (e.g., from Positions page or feed)
@@ -405,9 +408,11 @@ export function Trade() {
       });
       return;
     }
-    if (amountNum > tokenBalance) {
+    if (amountNum > sellableBalance) {
       toast.error("Insufficient balance", {
-        description: `You have ${tokenBalance.toFixed(4)} ${token.symbol}`,
+        description: token.mint === SOL_MINT
+          ? `Max sellable is ${sellableBalance.toFixed(4)} ${token.symbol} (${SOL_RESERVE} reserved for gas)`
+          : `You have ${tokenBalance.toFixed(4)} ${token.symbol}`,
       });
       return;
     }
@@ -955,6 +960,11 @@ export function Trade() {
                       minimumFractionDigits: 0,
                       maximumFractionDigits: 6,
                     })} ${token.symbol}`}
+                {token.mint === SOL_MINT && sellableBalance < tokenBalance && (
+                  <span className="block mt-0.5 text-white/40">
+                    Max sellable: {sellableBalance.toFixed(4)} (0.005 reserved for gas)
+                  </span>
+                )}
               </p>
               <label className="block text-sm font-medium mb-2">
                 Sell Amount ({token.symbol})
@@ -964,7 +974,7 @@ export function Trade() {
                 placeholder="0.0"
                 value={sellAmount}
                 onChange={(e) => setSellAmount(e.target.value)}
-                disabled={tokenBalance <= 0}
+                disabled={sellableBalance <= 0}
                 className="min-w-0"
               />
               <div className="flex gap-2 mt-2 flex-wrap">
@@ -973,9 +983,9 @@ export function Trade() {
                     key={pct}
                     type="button"
                     onClick={() =>
-                      setSellAmount(((tokenBalance * pct) / 100).toString())
+                      setSellAmount(((sellableBalance * pct) / 100).toString())
                     }
-                    disabled={tokenBalance <= 0}
+                    disabled={sellableBalance <= 0}
                     className="flex-1 min-w-[3rem] h-9 sm:h-8 rounded-[10px] bg-white/5 hover:bg-white/10 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {pct}%
@@ -983,8 +993,8 @@ export function Trade() {
                 ))}
                 <button
                   type="button"
-                  onClick={() => setSellAmount(tokenBalance.toString())}
-                  disabled={tokenBalance <= 0}
+                  onClick={() => setSellAmount(sellableBalance.toString())}
+                  disabled={sellableBalance <= 0}
                   className="flex-1 min-w-[3rem] h-9 sm:h-8 rounded-[10px] bg-white/5 hover:bg-white/10 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   100%
@@ -997,7 +1007,7 @@ export function Trade() {
                 disabled={
                   swapping ||
                   !sellAmount ||
-                  tokenBalance <= 0 ||
+                  sellableBalance <= 0 ||
                   !userProfile?.walletAddress
                 }
               >

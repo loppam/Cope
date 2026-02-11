@@ -592,7 +592,7 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
       else if (chain === "BSC" || chain === "bnb" || chain === 56) network = "bnb";
       else return res.status(200).json({ received: true, skipped: "unsupported chain" });
     } else {
-      return res.status(400).json({ error: "Expected body: { to, value, token?, chainId? } or { activity: [...] }" });
+      return res.status(200).json({ received: true, skipped: "invalid or unsupported payload" });
     }
 
     if (!to || to.length < 40) return res.status(200).json({ received: true, skipped: "invalid to" });
@@ -612,7 +612,7 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
     const apiBase = process.env.API_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
     if (!apiBase) {
       console.error("evm-deposit webhook: API_BASE_URL or VERCEL_URL not set");
-      return res.status(500).json({ error: "Server misconfiguration" });
+      return res.status(200).json({ received: true, skipped: "server misconfiguration" });
     }
     const relaySecret = process.env.WEBHOOK_EVM_DEPOSIT_SECRET || process.env.RELAY_INTERNAL_SECRET;
     const relayHeaders: Record<string, string> = {
@@ -620,37 +620,46 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
       ...(relaySecret && { "x-webhook-secret": relaySecret }),
     };
 
-    const quoteRes = await fetch(`${apiBase}/api/relay/bridge-from-evm-quote`, {
-      method: "POST",
-      headers: relayHeaders,
-      body: JSON.stringify({
-        evmAddress: to,
-        network,
-        amountRaw: amount.toString(),
-        recipientSolAddress: walletAddress,
-      }),
-    });
-    if (!quoteRes.ok) {
-      const errText = await quoteRes.text();
-      console.error("evm-deposit: bridge-from-evm-quote failed", quoteRes.status, errText);
-      return res.status(502).json({ error: "Bridge quote failed" });
-    }
-    const quote = await quoteRes.json();
+    // Respond 200 immediately so Alchemy does not disable the webhook; run bridge in background
+    res.status(200).json({ received: true, processing: true });
 
-    const execRes = await fetch(`${apiBase}/api/relay/execute-bridge-custodial`, {
-      method: "POST",
-      headers: relayHeaders,
-      body: JSON.stringify({ userId, quoteResponse: quote }),
-    });
-    if (!execRes.ok) {
-      const errText = await execRes.text();
-      console.error("evm-deposit: execute-bridge-custodial failed", execRes.status, errText);
-      return res.status(502).json({ error: "Bridge execution failed" });
-    }
-    return res.status(200).json({ received: true, bridged: true });
+    (async () => {
+      try {
+        const quoteRes = await fetch(`${apiBase}/api/relay/bridge-from-evm-quote`, {
+          method: "POST",
+          headers: relayHeaders,
+          body: JSON.stringify({
+            evmAddress: to,
+            network,
+            amountRaw: amount.toString(),
+            recipientSolAddress: walletAddress,
+          }),
+        });
+        if (!quoteRes.ok) {
+          const errText = await quoteRes.text();
+          console.error("evm-deposit: bridge-from-evm-quote failed", quoteRes.status, errText);
+          return;
+        }
+        const quote = await quoteRes.json();
+
+        const execRes = await fetch(`${apiBase}/api/relay/execute-bridge-custodial`, {
+          method: "POST",
+          headers: relayHeaders,
+          body: JSON.stringify({ userId, quoteResponse: quote }),
+        });
+        if (!execRes.ok) {
+          const errText = await execRes.text();
+          console.error("evm-deposit: execute-bridge-custodial failed", execRes.status, errText);
+          return;
+        }
+        console.log("evm-deposit: bridge completed", { userId, network, amount: amount.toString() });
+      } catch (e: unknown) {
+        console.error("evm-deposit bridge background error:", e);
+      }
+    })();
   } catch (e: unknown) {
     console.error("evm-deposit webhook error:", e);
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+    return res.status(200).json({ received: true, skipped: "internal error" });
   }
 }
 

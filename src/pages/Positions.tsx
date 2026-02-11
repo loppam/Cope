@@ -17,7 +17,7 @@ import {
   getWalletPositions,
   getSolPrice,
 } from "@/lib/solanatracker";
-import { getSolBalance, getTokenAccounts } from "@/lib/rpc";
+import { getSolBalance, getUsdcBalance } from "@/lib/rpc";
 import { apiCache } from "@/lib/cache";
 import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
 import { toast } from "sonner";
@@ -79,18 +79,17 @@ export function Positions() {
       let currentSolPrice = 150;
       let currentUsdcBalance = 0;
       try {
-        const [balance, price, tokenAccounts] = await Promise.all([
+        const [balance, price, usdcBal] = await Promise.all([
           getSolBalance(walletAddress),
           getSolPrice(),
-          getTokenAccounts(walletAddress),
+          getUsdcBalance(walletAddress),
         ]);
         currentSolBalance = balance;
         currentSolPrice = price;
+        currentUsdcBalance = usdcBal;
         setSolBalance(balance);
         setSolPrice(price);
-        const usdcAccount = tokenAccounts.find((a) => a.mint === SOLANA_USDC_MINT);
-        currentUsdcBalance = usdcAccount?.uiAmount ?? 0;
-        setUsdcBalance(currentUsdcBalance);
+        setUsdcBalance(usdcBal);
       } catch (error) {
         console.warn("Failed to fetch SOL/USDC balance or price:", error);
         currentSolBalance = solBalance;

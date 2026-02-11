@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { shortenAddress } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
-import { getTokenAccounts } from "@/lib/rpc";
+import { getTokenAccounts, getUsdcBalance } from "@/lib/rpc";
 import {
   getPushNotificationStatus,
   requestPermissionAndGetPushToken,
@@ -114,15 +114,13 @@ export function Profile() {
   const walletAddress = userProfile?.walletAddress || null;
   const walletConnected = userProfile?.walletConnected || false;
 
-  // Fetch Solana USDC (SPL) balance via RPC
+  // Fetch Solana USDC (SPL) balance via RPC (same method as scripts/get-sol-usdc-balance.mjs)
   const fetchBalance = async () => {
     if (!walletAddress) return;
     setUsdcBalanceLoading(true);
     try {
-      const tokenAccounts = await getTokenAccounts(walletAddress);
-      const solUsdcAccount = tokenAccounts.find((a) => a.mint === SOLANA_USDC_MINT);
-      const solUsdcBalance = solUsdcAccount?.uiAmount ?? 0;
-      setUsdcBalance(solUsdcBalance);
+      const balance = await getUsdcBalance(walletAddress);
+      setUsdcBalance(balance);
     } catch (error) {
       console.error("Error fetching Solana USDC balance:", error);
       setUsdcBalance(0);
@@ -585,7 +583,7 @@ export function Profile() {
                         <DollarSign className="w-4 h-4 text-white/70" />
                       </div>
                       <div>
-                        <p className="text-sm text-white/60">Cash balance (Solana USDC)</p>
+                        <p className="text-sm text-white/60">Cash balance</p>
                         <p className="font-semibold">
                           {usdcBalanceLoading
                             ? "—"

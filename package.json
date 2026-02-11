@@ -15,7 +15,8 @@
     "reset-all": "node scripts/reset-all.mjs",
     "bridge-evm-usdc-to-sol": "node scripts/bridge-evm-usdc-to-sol.mjs",
     "backfill-evm-addresses": "node scripts/backfill-evm-addresses.mjs",
-    "sync-evm-deposit-webhook-addresses": "node scripts/sync-evm-deposit-webhook-addresses.mjs"
+    "sync-evm-deposit-webhook-addresses": "node scripts/sync-evm-deposit-webhook-addresses.mjs",
+    "get-sol-usdc-balance": "node scripts/get-sol-usdc-balance.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

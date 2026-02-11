@@ -56,6 +56,44 @@ export async function getSolBalance(walletAddress: string): Promise<number> {
   }
 }
 
+/** Solana mainnet USDC SPL mint (used for getUsdcBalance). */
+const SOLANA_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+/**
+ * Get USDC balance for a Solana wallet (same method as scripts/get-sol-usdc-balance.mjs).
+ * Uses getParsedTokenAccountsByOwner filtered by USDC mint and sums all USDC accounts.
+ */
+export async function getUsdcBalance(walletAddress: string): Promise<number> {
+  try {
+    const conn = getConnection();
+    const publicKey = new PublicKey(walletAddress);
+    const usdcMint = new PublicKey(SOLANA_USDC_MINT);
+    const tokenAccounts = await conn.getParsedTokenAccountsByOwner(publicKey, {
+      mint: usdcMint,
+    });
+    let total = 0;
+    for (const { account } of tokenAccounts.value) {
+      const parsed = account.data as ParsedAccountData;
+      const tokenAmount = parsed?.parsed?.info?.tokenAmount;
+      if (!tokenAmount) continue;
+      let uiAmount = tokenAmount.uiAmount ?? 0;
+      if (uiAmount === 0 && tokenAmount.uiAmountString != null) {
+        const parsedNum = parseFloat(tokenAmount.uiAmountString);
+        if (Number.isFinite(parsedNum)) uiAmount = parsedNum;
+      }
+      if (uiAmount === 0 && tokenAmount.amount != null && tokenAmount.decimals != null) {
+        const raw = Number(tokenAmount.amount);
+        if (Number.isFinite(raw)) uiAmount = raw / Math.pow(10, tokenAmount.decimals);
+      }
+      total += uiAmount;
+    }
+    return total;
+  } catch (error) {
+    console.error("Error fetching USDC balance:", error);
+    throw error;
+  }
+}
+
 /**
  * Get all token accounts for a wallet
  * Returns array of { mint, balance, decimals }

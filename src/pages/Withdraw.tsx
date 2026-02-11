@@ -6,9 +6,8 @@ import { Input } from "@/components/Input";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
-import { getTokenAccounts } from "@/lib/rpc";
+import { getUsdcBalance } from "@/lib/rpc";
 import { getIntentStatus } from "@/lib/relay";
-import { SOLANA_USDC_MINT } from "@/lib/constants";
 import { getApiBase } from "@/lib/utils";
 
 type WithdrawNetwork = "base" | "bnb" | "solana";
@@ -29,10 +28,7 @@ export function Withdraw() {
 
   useEffect(() => {
     if (!walletAddress) return;
-    getTokenAccounts(walletAddress).then((accounts) => {
-      const usdc = accounts.find((a) => a.mint === SOLANA_USDC_MINT);
-      setUsdcBalance(usdc?.uiAmount ?? 0);
-    });
+    getUsdcBalance(walletAddress).then(setUsdcBalance).catch(() => setUsdcBalance(0));
   }, [walletAddress]);
 
   const fetchWithdrawQuote = async () => {

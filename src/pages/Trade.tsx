@@ -538,6 +538,9 @@ export function Trade() {
         setSellAmount("");
         setSwapQuote(null);
         setRelayQuote(null);
+      } else if (result.status === "Retry" && result.retryAfterSeconds) {
+        toast.info("Retry transaction", { duration: 6000 });
+        setTimeout(() => handleConfirmSwap(), result.retryAfterSeconds * 1000);
       } else {
         throw new Error(result.error || "Swap failed");
       }

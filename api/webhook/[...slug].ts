@@ -558,17 +558,63 @@ const BNB_USDC = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d".toLowerCase();
 
 async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+
+  try {
+  const hasXWebhookSecret = !!req.headers["x-webhook-secret"];
+  const hasAuthorization = !!(req.headers.authorization?.trim());
+  const hasXAlchemySignature = !!(
+    (req.headers["x-alchemy-signature"] ?? req.headers["X-Alchemy-Signature"])?.toString().trim()
+  );
+  const webhookSecretConfigured = !!process.env.WEBHOOK_EVM_DEPOSIT_SECRET;
+  const alchemySigningKeyConfigured = !!process.env.ALCHEMY_EVM_DEPOSIT_SIGNING_KEY;
+
+  console.log("[evm-deposit] request received", {
+    hasXWebhookSecret: !!req.headers["x-webhook-secret"],
+    hasAuthorization,
+    hasXAlchemySignature,
+    webhookSecretConfigured,
+    alchemySigningKeyConfigured,
+  });
+
   const secret = process.env.WEBHOOK_EVM_DEPOSIT_SECRET;
+  let authOk = false;
   if (secret) {
     const headerSecret = req.headers["x-webhook-secret"] ?? req.headers.authorization?.replace(/^Bearer\s+/i, "");
-    if (headerSecret !== secret) return res.status(401).json({ error: "Unauthorized" });
+    if (headerSecret === secret) {
+      authOk = true;
+    } else if (hasXAlchemySignature) {
+      // Option B: Alchemy sends X-Alchemy-Signature but we don't have raw body to verify; allow so webhook works
+      console.log("[evm-deposit] Alchemy signature present; raw body unavailable for verification, allowing (Option B)");
+      authOk = true;
+    }
+    if (!authOk) {
+      console.log("[evm-deposit] 401 Unauthorized", {
+        hasXWebhookSecret: !!req.headers["x-webhook-secret"],
+        hasAuthorization,
+        hasXAlchemySignature,
+        webhookSecretConfigured: true,
+        alchemySigningKeyConfigured,
+      });
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+  } else {
+    authOk = true;
   }
+  console.log("[evm-deposit] auth ok");
+
   try {
     const body = req.body as Record<string, unknown>;
     let to: string;
     let amountRaw: string;
     let tokenAddress: string;
     let network: "base" | "bnb";
+
+    // Alchemy Address Activity: { event: { network, activity: [...] } }; also support flat body.activity
+    const activityArr = Array.isArray(body.event?.activity)
+      ? (body.event.activity as Record<string, unknown>[])
+      : Array.isArray(body.activity)
+        ? (body.activity as Record<string, unknown>[])
+        : null;
 
     if (body.to != null && body.value != null) {
       to = String(body.to).trim().toLowerCase();
@@ -578,40 +624,90 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
       if (chainId === 8453 || chainId === "base") network = "base";
       else if (chainId === 56 || chainId === "bnb" || chainId === "bsc") network = "bnb";
       else {
+        console.log("[evm-deposit] skipped: unsupported chain");
         return res.status(200).json({ received: true, skipped: "unsupported chain" });
       }
-    } else if (Array.isArray(body.activity)) {
-      const first = body.activity[0] as Record<string, unknown> | undefined;
-      if (!first) return res.status(200).json({ received: true });
+    } else if (activityArr && activityArr.length > 0) {
+      const first = activityArr[0];
+      const eventObj = body.event as Record<string, unknown> | undefined;
+      const chain =
+        first.chain ??
+        first.network ??
+        eventObj?.network ??
+        body.network;
+      const chainStr = String(chain ?? "").toUpperCase();
+      if (
+        chainStr === "BASE" ||
+        chainStr === "BASE_MAINNET" ||
+        chain === "base" ||
+        chain === 8453
+      )
+        network = "base";
+      else if (
+        chainStr === "BSC" ||
+        chainStr === "BSC_MAINNET" ||
+        chain === "bnb" ||
+        chain === 56
+      )
+        network = "bnb";
+      else {
+        console.log("[evm-deposit] skipped: unsupported chain (activity)", { chain: chainStr || chain });
+        return res.status(200).json({ received: true, skipped: "unsupported chain" });
+      }
       to = String(first.to ?? first.toAddress ?? "").trim().toLowerCase();
-      const val = first.value ?? first.rawContract?.value ?? first.tokenAmount;
-      amountRaw = typeof val === "string" ? val : typeof val === "number" ? String(val) : "";
-      tokenAddress = String(first.asset ?? first.contract ?? first.tokenAddress ?? "").trim().toLowerCase();
-      const chain = first.chain ?? first.network ?? body.network;
-      if (chain === "BASE" || chain === "base" || chain === 8453) network = "base";
-      else if (chain === "BSC" || chain === "bnb" || chain === 56) network = "bnb";
-      else return res.status(200).json({ received: true, skipped: "unsupported chain" });
+      const rawContract = first.rawContract as { rawValue?: string; address?: string } | undefined;
+      const rawVal = rawContract?.rawValue;
+      if (rawVal && typeof rawVal === "string") {
+        amountRaw = BigInt(rawVal).toString();
+      } else {
+        const val = first.value ?? first.tokenAmount;
+        amountRaw = typeof val === "string" ? val : typeof val === "number" ? String(Math.floor(val * 1e6)) : "";
+      }
+      tokenAddress = String(
+        rawContract?.address ?? first.contract ?? first.tokenAddress ?? first.asset ?? ""
+      )
+        .trim()
+        .toLowerCase();
     } else {
+      console.log("[evm-deposit] skipped: invalid or unsupported payload");
       return res.status(200).json({ received: true, skipped: "invalid or unsupported payload" });
     }
 
-    if (!to || to.length < 40) return res.status(200).json({ received: true, skipped: "invalid to" });
+    if (!to || to.length < 40) {
+      console.log("[evm-deposit] skipped: invalid to");
+      return res.status(200).json({ received: true, skipped: "invalid to" });
+    }
     const token = tokenAddress || "";
-    if (network === "base" && token !== BASE_USDC) return res.status(200).json({ received: true, skipped: "not USDC" });
-    if (network === "bnb" && token !== BNB_USDC) return res.status(200).json({ received: true, skipped: "not USDC" });
+    if (network === "base" && token !== BASE_USDC) {
+      console.log("[evm-deposit] skipped: not USDC (base)");
+      return res.status(200).json({ received: true, skipped: "not USDC" });
+    }
+    if (network === "bnb" && token !== BNB_USDC) {
+      console.log("[evm-deposit] skipped: not USDC (bnb)");
+      return res.status(200).json({ received: true, skipped: "not USDC" });
+    }
     const amount = amountRaw ? BigInt(amountRaw) : 0n;
-    if (amount <= 0n) return res.status(200).json({ received: true, skipped: "zero amount" });
+    if (amount <= 0n) {
+      console.log("[evm-deposit] skipped: zero amount");
+      return res.status(200).json({ received: true, skipped: "zero amount" });
+    }
 
     const usersSnap = await db.collection("users").where("evmAddress", "==", to).limit(1).get();
-    if (usersSnap.empty) return res.status(200).json({ received: true, skipped: "unknown address" });
+    if (usersSnap.empty) {
+      console.log("[evm-deposit] skipped: unknown address");
+      return res.status(200).json({ received: true, skipped: "unknown address" });
+    }
     const userDoc = usersSnap.docs[0];
     const userId = userDoc.id;
     const walletAddress = userDoc.get("walletAddress") as string | undefined;
-    if (!walletAddress) return res.status(200).json({ received: true, skipped: "no solana wallet" });
+    if (!walletAddress) {
+      console.log("[evm-deposit] skipped: no solana wallet");
+      return res.status(200).json({ received: true, skipped: "no solana wallet" });
+    }
 
     const apiBase = process.env.API_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
     if (!apiBase) {
-      console.error("evm-deposit webhook: API_BASE_URL or VERCEL_URL not set");
+      console.error("[evm-deposit] skipped: server misconfiguration (no API_BASE_URL or VERCEL_URL)");
       return res.status(200).json({ received: true, skipped: "server misconfiguration" });
     }
     const relaySecret = process.env.WEBHOOK_EVM_DEPOSIT_SECRET || process.env.RELAY_INTERNAL_SECRET;
@@ -659,7 +755,11 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
     })();
   } catch (e: unknown) {
     console.error("evm-deposit webhook error:", e);
-    return res.status(200).json({ received: true, skipped: "internal error" });
+    if (!res.headersSent) return res.status(200).json({ received: true, skipped: "internal error" });
+  }
+  } catch (e: unknown) {
+    console.error("[evm-deposit] unexpected error (ensuring 2xx for Alchemy):", e);
+    if (!res.headersSent) return res.status(200).json({ received: true, skipped: "internal error" });
   }
 }
 

@@ -490,12 +490,13 @@ async function buildVersionedTxFromRelayInstructions(
 
 async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  let userId: string | undefined;
   try {
     ensureFirebase();
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
     const decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
-    const userId = decoded.uid;
+    userId = decoded.uid;
     const body = req.body as { quoteResponse?: unknown; stepIndex?: number };
     const quoteResponse = body?.quoteResponse;
     const stepIndex = typeof body?.stepIndex === "number" ? body.stepIndex : 0;
@@ -581,11 +582,41 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
   } catch (e: unknown) {
     const err = e as Error & { logs?: string[]; getLogs?: () => string[] };
     const logs = err.logs ?? (typeof err.getLogs === "function" ? err.getLogs() : undefined);
-    console.error("[execute-step] error", {
-      error: e instanceof Error ? e.message : String(e),
-      logs: logs ?? null,
+    const errMsg = e instanceof Error ? e.message : String(e);
+    console.error("[execute-step] error", { error: errMsg, logs: logs ?? null });
+
+    const isInsufficientSol =
+      /insufficient lamports|Transfer: insufficient/i.test(errMsg) ||
+      (Array.isArray(logs) && logs.some((l) => /insufficient lamports|need \d+/.test(String(l))));
+
+    if (isInsufficientSol && getFunderKeypair() && userId) {
+      try {
+        const db = getAdminDb();
+        const snap = await db.collection("users").doc(userId).get();
+        const walletAddress = snap.data()?.walletAddress as string | undefined;
+        if (walletAddress && walletAddress.length >= 32) {
+          const fundSig = await sendSolFromFunder(walletAddress, SOL_FUNDER_AMOUNT_LAMPORTS);
+          if (fundSig) {
+            console.log("[execute-step] funded wallet for retry", { userId, signature: fundSig });
+            return res.status(200).json({
+              status: "Retry",
+              error: "Retry transaction",
+              retryAfterSeconds: 5,
+              signature: "",
+              funded: true,
+            });
+          }
+        }
+      } catch (fundErr) {
+        console.warn("[execute-step] funder top-up failed", fundErr);
+      }
+    }
+
+    return res.status(500).json({
+      error: "Transaction failed. Please try again.",
+      signature: "",
+      status: "Failed",
     });
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error", signature: "", status: "Failed" });
   }
 }
 

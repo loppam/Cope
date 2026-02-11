@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { shortenAddress } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
-import { getTokenAccounts, getUsdcBalance } from "@/lib/rpc";
+import { getUsdcBalance } from "@/lib/rpc";
 import {
   getPushNotificationStatus,
   requestPermissionAndGetPushToken,
@@ -321,6 +321,11 @@ export function Profile() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Execution failed");
+      if (data.status === "Retry" && data.retryAfterSeconds) {
+        toast.info("Retry transaction", { duration: 6000 });
+        setTimeout(() => executeWithdraw(), data.retryAfterSeconds * 1000);
+        return;
+      }
       if (data.signature) {
         toast.success("Withdraw submitted", {
           description: "Transaction sent. Relay will complete the transfer.",

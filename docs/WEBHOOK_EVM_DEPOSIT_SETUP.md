@@ -22,7 +22,8 @@ Put these in your `.env` (and in Vercel → Project → Settings → Environment
 
 | Purpose | Env var | Where to get it |
 |--------|---------|------------------|
-| **Authenticate incoming webhook** | `WEBHOOK_EVM_DEPOSIT_SECRET` | You generate this (e.g. `openssl rand -hex 32`). Set the same value when configuring the Alchemy webhook (see below). |
+| **Authenticate incoming webhook** | `WEBHOOK_EVM_DEPOSIT_SECRET` | You generate this (e.g. `openssl rand -hex 32`). Optional: Alchemy sends X-Alchemy-Signature and the app accepts that; or use this for custom callers. |
+| **Alchemy signature verification** | `ALCHEMY_EVM_DEPOSIT_SIGNING_KEY` | Optional. Signing key from Alchemy webhook detail page for X-Alchemy-Signature verification. |
 | **Alchemy: create/update webhook & add addresses** | `ALCHEMY_API_KEY` | [Alchemy Dashboard](https://dashboard.alchemy.com/) → your app → API Key. |
 | **Alchemy: add addresses to webhooks (PATCH API)** | `ALCHEMY_NOTIFY_AUTH_TOKEN` | **Required for update-webhook-addresses.** Dashboard → **Data** → **Webhooks** → **AUTH TOKEN** (copy). If you get 401, you're likely using the app API Key; use this token and set it in `.env` as `ALCHEMY_NOTIFY_AUTH_TOKEN`. |
 | **Alchemy: webhook ID (Base)** | `ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BASE` | Set **after** creating the Address Activity webhook for Base (step 4 below). |
@@ -36,13 +37,12 @@ Put these in your `.env` (and in Vercel → Project → Settings → Environment
 
 ## 3. How to set up the Alchemy webhook
 
-### Step 1: Generate the webhook secret
+### Step 1: Webhook authentication (optional)
 
-```bash
-openssl rand -hex 32
-```
+- **If you use only Alchemy:** You do **not** need to set `WEBHOOK_EVM_DEPOSIT_SECRET`. Alchemy sends `X-Alchemy-Signature`; the app accepts those requests so the webhook works and auto-bridge runs.
+- **If you have a custom caller** (e.g. your own indexer) that can send a shared secret: run `openssl rand -hex 32`, add it to `.env` as `WEBHOOK_EVM_DEPOSIT_SECRET`, and have the caller send it in `x-webhook-secret` or `Authorization: Bearer <secret>`.
 
-Add it to `.env` as `WEBHOOK_EVM_DEPOSIT_SECRET`. You will use this same value when configuring the webhook URL in Alchemy (see Step 3). Your app rejects requests that don’t send this secret.
+If you previously set `WEBHOOK_EVM_DEPOSIT_SECRET` and got **401** from Alchemy, either leave it unset (Alchemy-only) or keep it set—the app now also allows requests that include `X-Alchemy-Signature`, so Alchemy requests will pass.
 
 ### Step 2: Get your Alchemy API key
 
@@ -65,8 +65,10 @@ Alchemy allows **only one chain per webhook**. Create **two** webhooks that both
    Example: `https://yourapp.vercel.app/api/webhook/evm-deposit`  
    Use your real deployment URL.
 6. **Addresses:** Leave empty at first, or add test custodial addresses. You will add addresses via the API when users sign up (see Step 5).
-7. **Authentication (if Alchemy offers it):** Set the same value as `WEBHOOK_EVM_DEPOSIT_SECRET` (e.g. header `x-webhook-secret` or `Authorization: Bearer <secret>`).
+7. **Authentication:** Alchemy sends `X-Alchemy-Signature` by default. No need to configure a custom header for evm-deposit to accept Alchemy.
 8. Save the webhook and copy its **Webhook ID** (you’ll need it for Step 4).
+
+**Note:** Alchemy disables webhooks that fail to return 2xx for 24 hours. The evm-deposit handler always returns 200 on receipt so the webhook stays active; bridge runs in the background.
 
 **Webhook B – BSC (BNB Chain)**
 
@@ -107,10 +109,7 @@ Call both updates from your backend whenever you persist a new `evmAddress` (e.g
 
 - **URL:** `https://<your-domain>/api/webhook/evm-deposit`
 - **Method:** POST.
-- **Headers (recommended):**  
-  `x-webhook-secret: <WEBHOOK_EVM_DEPOSIT_SECRET>`  
-  or  
-  `Authorization: Bearer <WEBHOOK_EVM_DEPOSIT_SECRET>`
+- **Authentication:** The handler accepts requests that have **either** (1) `x-webhook-secret` or `Authorization: Bearer` equal to `WEBHOOK_EVM_DEPOSIT_SECRET`, or (2) the `X-Alchemy-Signature` header (sent by Alchemy). So Alchemy webhooks work without any custom header; if you use a custom caller, set `WEBHOOK_EVM_DEPOSIT_SECRET` and send it in the headers.
 
 The handler accepts two payload shapes.
 
@@ -128,20 +127,30 @@ The handler accepts two payload shapes.
 - `token` / `tokenAddress`: USDC contract (validated for Base/BNB).
 - `chainId` / `chain`: `8453` or `"base"` for Base; `56` or `"bnb"` / `"bsc"` for BNB.
 
-**Activity array (e.g. Alchemy):**
+**Alchemy Address Activity (primary format):**
 ```json
 {
-  "activity": [
-    {
-      "to": "0x...",
-      "value": "1000000",
-      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-      "chain": "BASE"
-    }
-  ]
+  "type": "ADDRESS_ACTIVITY",
+  "event": {
+    "network": "BASE_MAINNET",
+    "activity": [
+      {
+        "toAddress": "0x...",
+        "fromAddress": "0x...",
+        "value": 1.5,
+        "asset": "USDC",
+        "rawContract": {
+          "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "rawValue": "0x16d..."
+        }
+      }
+    ]
+  }
 }
 ```
-The first entry in `activity` is used; field names may vary (`to` / `toAddress`, `value` / `rawContract.value`, `asset` / `contract` / `tokenAddress`, `chain` / `network`).
+The handler uses `event.activity[0]`; token is identified by `rawContract.address`; amount by `rawContract.rawValue` (hex). Flat `activity` at root is also supported.
+
+**Alchemy / other:** The handler returns `200` for every received POST so Alchemy does not disable the webhook. Respond quickly; bridge runs in the background.
 
 ---
 

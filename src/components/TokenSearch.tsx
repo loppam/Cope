@@ -1,38 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { Search, X, Loader2 } from 'lucide-react';
 import { TokenSearchResult } from '@/lib/solanatracker';
-import { searchRelayTokens, RELAY_CHAIN_ID_TO_NETWORK } from '@/lib/relay';
-import { shortenAddress, getApiBase } from '@/lib/utils';
+import { searchBirdeyeTokens } from '@/lib/birdeye-token';
+import { shortenAddress } from '@/lib/utils';
 
 interface TokenSearchProps {
   onSelect: (token: TokenSearchResult) => void;
   placeholder?: string;
   className?: string;
-}
-
-function relayCurrencyToSearchResult(c: {
-  chainId: number;
-  chain: string;
-  address: string;
-  symbol: string;
-  name: string;
-  decimals: number;
-  logoURI?: string;
-  verified?: boolean;
-}): TokenSearchResult {
-  const chain = (RELAY_CHAIN_ID_TO_NETWORK[c.chainId] ?? c.chain) as 'solana' | 'base' | 'bnb';
-  return {
-    id: `${c.chainId}-${c.address}`,
-    name: c.name,
-    symbol: c.symbol,
-    mint: c.address,
-    image: c.logoURI,
-    decimals: c.decimals,
-    hasSocials: false,
-    chain,
-    chainId: c.chainId,
-    status: c.verified ? 'graduated' : undefined,
-  };
 }
 
 export function TokenSearch({ onSelect, placeholder = "Search token by name or symbol...", className = "" }: TokenSearchProps) {
@@ -55,7 +30,7 @@ export function TokenSearch({ onSelect, placeholder = "Search token by name or s
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Debounced search via Relay (one search for all chains; metadata includes chain)
+  // Debounced search via Birdeye (Solana, Base, BNB merged and sorted)
   useEffect(() => {
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
@@ -70,13 +45,11 @@ export function TokenSearch({ onSelect, placeholder = "Search token by name or s
     setLoading(true);
     searchTimeoutRef.current = setTimeout(async () => {
       try {
-        const apiBase = getApiBase();
-        const { currencies } = await searchRelayTokens(query.trim(), 20, apiBase);
-        const list = (currencies ?? []).map(relayCurrencyToSearchResult);
+        const list = await searchBirdeyeTokens(query.trim(), 20);
         setResults(list);
         setShowResults(true);
       } catch (error) {
-        console.error('Error searching tokens (Relay):', error);
+        console.error('Error searching tokens (Birdeye):', error);
         setResults([]);
       } finally {
         setLoading(false);

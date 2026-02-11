@@ -12,9 +12,9 @@ import {
   getWalletPositions,
 } from "@/lib/solanatracker";
 import {
-  fetchCoinGeckoTokenDetails,
-  coingeckoAttributesToTokenFields,
-} from "@/lib/coingecko";
+  fetchBirdeyeTokenOverview,
+  birdeyeOverviewToTokenFields,
+} from "@/lib/birdeye-token";
 import type { SwapQuote } from "@/lib/jupiter-swap";
 import {
   formatTokenAmount,
@@ -95,12 +95,14 @@ export function Trade() {
     if (urlMint) setMint(urlMint);
   }, [searchParams, location.state?.mint]);
 
-  // Fetch token details from CoinGecko when mint is set (on select or URL)
+  // Fetch token details when we have a selected token (Solana: mint; Base/BNB: crossChainToken)
   useEffect(() => {
     if (mint) {
-      fetchTokenDetails(mint, token);
+      fetchTokenDetails(mint, "solana", token);
+    } else if (crossChainToken && (tradeChain === "base" || tradeChain === "bnb")) {
+      fetchTokenDetails(crossChainToken.address, tradeChain, token);
     }
-  }, [mint]);
+  }, [mint, crossChainToken, tradeChain]);
 
   // Refresh cooldown timer
   useEffect(() => {
@@ -175,31 +177,43 @@ export function Trade() {
   }, [token?.mint, userProfile?.walletAddress]);
 
   const fetchTokenDetails = async (
-    mintAddress: string,
+    address: string,
+    chain: TradeChain,
     currentToken: TokenSearchResult | null
   ) => {
-    fetchDetailsMintRef.current = mintAddress;
+    fetchDetailsMintRef.current = address;
     setLoading(true);
+    const chainId = getChainId(chain);
     const base: TokenSearchResult =
-      currentToken?.mint === mintAddress
+      currentToken?.mint === address
         ? currentToken
-        : {
-            id: mintAddress,
-            mint: mintAddress,
-            name: "",
-            symbol: "",
-            decimals: 6,
-            hasSocials: false,
-            chain: "solana",
-            chainId: 792703809,
-          };
-    const isStale = () => fetchDetailsMintRef.current !== mintAddress;
+        : crossChainToken?.address === address
+          ? {
+              id: `${chainId}-${address}`,
+              mint: address,
+              name: crossChainToken.name || "",
+              symbol: crossChainToken.symbol || "",
+              decimals: 6,
+              hasSocials: false,
+              chain,
+              chainId,
+            }
+          : {
+              id: `${chainId}-${address}`,
+              mint: address,
+              name: "",
+              symbol: "",
+              decimals: 6,
+              hasSocials: false,
+              chain,
+              chainId,
+            };
+    const isStale = () => fetchDetailsMintRef.current !== address;
     try {
-      const coingecko = await fetchCoinGeckoTokenDetails("solana", [mintAddress]);
+      const overview = await fetchBirdeyeTokenOverview(address, chain);
       if (isStale()) return;
-      const first = coingecko.data?.[0]?.attributes;
-      if (first) {
-        const fields = coingeckoAttributesToTokenFields(first);
+      const fields = birdeyeOverviewToTokenFields(overview.data);
+      if (Object.keys(fields).length > 0) {
         setToken({
           ...base,
           name: base.name || fields.name || "",
@@ -210,17 +224,25 @@ export function Trade() {
           marketCapUsd: fields.marketCapUsd,
           liquidityUsd: fields.liquidityUsd,
           volume_24h: fields.volume_24h,
-          launchpad: fields.launchpad ?? base.launchpad,
+          buys: fields.buys,
+          sells: fields.sells,
+          totalTransactions: fields.totalTransactions,
+          socials: fields.socials ?? base.socials,
         });
         setLoading(false);
         return;
       }
     } catch (e) {
       if (isStale()) return;
-      console.warn("CoinGecko token details failed, using fallback:", e);
+      console.warn("Birdeye token details failed:", e);
+    }
+    if (chain !== "solana") {
+      if (!isStale()) setToken(base);
+      setLoading(false);
+      return;
     }
     try {
-      const tokenInfo = await getTokenInfo(mintAddress);
+      const tokenInfo = await getTokenInfo(address);
       if (isStale()) return;
       const tokenData = convertTokenInfoToSearchResult(tokenInfo);
       setToken({ ...tokenData, chain: "solana", chainId: 792703809 });
@@ -228,7 +250,7 @@ export function Trade() {
       if (isStale()) return;
       console.error("Error fetching token details:", error);
       try {
-        const response = await searchTokens(mintAddress, 1, 1);
+        const response = await searchTokens(address, 1, 1);
         if (
           response.status === "success" &&
           response.data &&
@@ -248,11 +270,13 @@ export function Trade() {
   };
 
   const handleRefresh = async () => {
-    if (refreshCooldown > 0 || !mint) return;
+    const address = mint || crossChainToken?.address;
+    if (refreshCooldown > 0 || !address) return;
 
     setLastRefresh(Date.now());
     setRefreshCooldown(15);
-    await fetchTokenDetails(mint, token);
+    const chain = mint ? "solana" : (tradeChain as TradeChain);
+    await fetchTokenDetails(address, chain, token);
   };
 
   const handleCopyShareLink = async () => {
@@ -600,7 +624,7 @@ export function Trade() {
                     address: selectedToken.mint,
                     name: selectedToken.name,
                   });
-                  setToken(null);
+                  setToken(selectedToken);
                   setMint("");
                   setSearchParams({}, { replace: true });
                 }
@@ -620,16 +644,7 @@ export function Trade() {
 
         {((token) || (tradeChain !== "solana" && crossChainToken)) && !loading && (
           <Card glass>
-            {/* Cross-chain: minimal header */}
-            {crossChainToken && !token && (
-              <div className="mb-4">
-                <h3 className="font-bold text-base sm:text-lg">
-                  {crossChainToken.name} ({crossChainToken.symbol})
-                </h3>
-                <p className="text-xs text-white/50 font-mono truncate">{crossChainToken.address}</p>
-              </div>
-            )}
-            {/* Token Header (Solana only) */}
+            {/* Token Header (Solana + Base/BNB with Birdeye details) */}
             {token && (
             <div className="mb-4 sm:mb-6">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
@@ -685,6 +700,7 @@ export function Trade() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  {mint && (
                   <button
                     type="button"
                     onClick={handleCopyShareLink}
@@ -694,6 +710,7 @@ export function Trade() {
                     <Copy className="w-4 h-4" />
                     <span className="hidden sm:inline">Copy link</span>
                   </button>
+                  )}
                   <button
                     type="button"
                     onClick={handleRefresh}

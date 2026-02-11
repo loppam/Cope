@@ -23,12 +23,13 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** 1 RPS throttle for PnL API - last time a PnL request was started (ms) */
-let lastPnlRequestTime = 0;
-const PNL_MIN_INTERVAL_MS = 1000;
+/** Global 1 RPS throttle for all Solana Tracker API requests */
+let lastRequestTime = 0;
+const MIN_INTERVAL_MS = 1000;
 
 /**
- * Make a request to SolanaTracker API with retry logic and exponential backoff
+ * Make a request to SolanaTracker API with retry logic and exponential backoff.
+ * All requests go through a shared 1 req/sec throttle to respect rate limits.
  */
 async function solanatrackerRequest<T>(
   endpoint: string,
@@ -59,6 +60,14 @@ async function solanatrackerRequest<T>(
       }
     });
   }
+
+  // Shared throttle: 1 req/sec across all Solana Tracker endpoints
+  const now = Date.now();
+  const elapsed = now - lastRequestTime;
+  if (elapsed < MIN_INTERVAL_MS) {
+    await delay(MIN_INTERVAL_MS - elapsed);
+  }
+  lastRequestTime = Date.now();
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -508,14 +517,6 @@ export async function getWalletPnL(
     }
   }
 
-  // Throttle to 1 RPS for PnL API (rate limit)
-  const now = Date.now();
-  const elapsed = now - lastPnlRequestTime;
-  if (elapsed < PNL_MIN_INTERVAL_MS) {
-    await delay(PNL_MIN_INTERVAL_MS - elapsed);
-  }
-  lastPnlRequestTime = Date.now();
-
   try {
     const response = await solanatrackerRequest<WalletPnLResponse>(
       `/pnl/${walletAddress}`,
@@ -942,9 +943,9 @@ export async function getWalletPositions(
       },
     );
 
-    // Cache the response for 1 minute (60 seconds) to reduce API usage
+    // Cache the response for 2 minutes to reduce API usage and rate limit pressure
     if (useCache) {
-      apiCache.set(cacheKey, response, 60000);
+      apiCache.set(cacheKey, response, 120000);
     }
 
     return response;

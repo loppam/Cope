@@ -554,12 +554,17 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       else if (typeof d.transactionBytes === "string") serializedTx = d.transactionBytes;
     }
 
+    const funderKeypair = getFunderKeypair();
+    const useFunderAsPayer = !!funderKeypair;
+
     if (serializedTx) {
       const txBuffer = Buffer.from(serializedTx, "base64");
       transaction = VersionedTransaction.deserialize(txBuffer);
     } else if (isRelaySolanaTxData(data)) {
-      // Relay can return Solana steps as { instructions, addressLookupTableAddresses } instead of a serialized tx
-      transaction = await buildVersionedTxFromRelayInstructions(data, wallet.publicKey, connection);
+      // Relay can return Solana steps as { instructions, addressLookupTableAddresses } instead of a serialized tx.
+      // When funder is configured, use it as fee payer so user does not need SOL (true USDC-only).
+      const payerKey = useFunderAsPayer ? funderKeypair!.publicKey : wallet.publicKey;
+      transaction = await buildVersionedTxFromRelayInstructions(data, payerKey, connection);
     }
 
     if (!transaction) {
@@ -573,9 +578,15 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       stepIndex,
       accountCount: txAccountKeys.length,
       accountKeys: txAccountKeys,
+      feePayerSponsored: useFunderAsPayer,
     });
 
-    transaction.sign([wallet]);
+    // When using funder as fee payer, funder must sign first, then user
+    if (useFunderAsPayer && !serializedTx && isRelaySolanaTxData(data)) {
+      transaction.sign([funderKeypair!, wallet]);
+    } else {
+      transaction.sign([wallet]);
+    }
     const sig = await connection.sendRawTransaction(transaction.serialize(), { skipPreflight: false, preflightCommitment: "confirmed" });
     console.log("[execute-step] success", { userId, stepIndex, signature: sig });
     return res.status(200).json({ signature: sig, status: "Success" });

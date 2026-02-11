@@ -49,6 +49,7 @@ import { syncWebhook } from "@/lib/webhook";
 import { getFollowersCount } from "@/lib/profile";
 import { getWalletPositions, getWalletPnL, getSolPrice } from "@/lib/solanatracker";
 import { getSolBalance } from "@/lib/rpc";
+import { getWalletProfitability } from "@/lib/moralis";
 import { getIntentStatus } from "@/lib/relay";
 import { toast } from "sonner";
 import type { WatchedWallet } from "@/lib/auth";
@@ -150,6 +151,7 @@ export function Profile() {
   }, [walletAddress]);
 
   // Fetch open positions: SOL + EVM (Base/BNB USDC and native) + SPL tokens
+  // Phased loading: positions first, then 1s delay, then PnL (Solana Tracker 1 RPS) + Moralis (EVM PnL)
   const APPROX_ETH_PRICE = 3000;
   const APPROX_BNB_PRICE = 600;
   useEffect(() => {
@@ -158,15 +160,56 @@ export function Profile() {
       setClosedPositions([]);
       return;
     }
+    let cancelled = false;
     const base = getApiBase();
-    Promise.all([
-      getWalletPositions(walletAddress, false),
-      getWalletPnL(walletAddress, false),
-      getSolBalance(walletAddress),
-      getSolPrice(),
-      user ? user.getIdToken().then((token) => fetch(`${base}/api/relay/evm-balances`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => null)) : Promise.resolve(null),
-    ])
-      .then(([positionsRes, pnlRes, solBalance, solPrice, evmData]) => {
+
+    (async () => {
+      try {
+        // Phase 1: positions + balances (Solana Tracker throttle applies to getWalletPositions)
+        const [positionsRes, solBalance, solPrice, evmData] = await Promise.all([
+          getWalletPositions(walletAddress, true),
+          getSolBalance(walletAddress),
+          getSolPrice(),
+          user
+            ? user.getIdToken().then((token) =>
+                fetch(`${base}/api/relay/evm-balances`, {
+                  headers: { Authorization: `Bearer ${token}` },
+                })
+                  .then((r) => r.json())
+                  .catch(() => null),
+              )
+            : Promise.resolve(null),
+        ]);
+
+        if (cancelled) return;
+
+        // Delay 1s before Phase 2 to respect Solana Tracker 1 req/sec
+        await new Promise((r) => setTimeout(r, 1000));
+        if (cancelled) return;
+
+        // Phase 2: Solana PnL + Moralis EVM PnL (parallel)
+        const evmAddress = evmData?.evmAddress;
+        const [pnlRes, evmPnlBase, evmPnlBnb] = await Promise.all([
+          getWalletPnL(walletAddress, true),
+          evmAddress
+            ? getWalletProfitability(evmAddress, "base")
+            : Promise.resolve([]),
+          evmAddress
+            ? getWalletProfitability(evmAddress, "bsc")
+            : Promise.resolve([]),
+        ]);
+
+        if (cancelled) return;
+
+        // Build EVM PnL lookup by mint
+        const evmPnlByMint = new Map<string, { pnl: number; pnlPercent?: number }>();
+        for (const item of [...evmPnlBase, ...evmPnlBnb]) {
+          evmPnlByMint.set(item.mint, {
+            pnl: item.pnl,
+            pnlPercent: item.pnlPercent,
+          });
+        }
+
         const combined: TokenPosition[] = [];
         if (solBalance > 0 && solPrice > 0) {
           combined.push({
@@ -179,16 +222,52 @@ export function Profile() {
         }
         if (evmData?.evmAddress) {
           if (evmData.base?.usdc > 0) {
-            combined.push({ mint: "base-usdc", symbol: "USDC", name: "USD Coin (Base)", amount: evmData.base.usdc, value: evmData.base.usdc });
+            const evmPnl = evmPnlByMint.get("base-usdc");
+            combined.push({
+              mint: "base-usdc",
+              symbol: "USDC",
+              name: "USD Coin (Base)",
+              amount: evmData.base.usdc,
+              value: evmData.base.usdc,
+              pnl: evmPnl?.pnl,
+              pnlPercent: evmPnl?.pnlPercent,
+            });
           }
           if (evmData.base?.native > 0) {
-            combined.push({ mint: "base-eth", symbol: "ETH", name: "Ethereum (Base)", amount: evmData.base.native, value: evmData.base.native * APPROX_ETH_PRICE });
+            const evmPnl = evmPnlByMint.get("base-eth");
+            combined.push({
+              mint: "base-eth",
+              symbol: "ETH",
+              name: "Ethereum (Base)",
+              amount: evmData.base.native,
+              value: evmData.base.native * APPROX_ETH_PRICE,
+              pnl: evmPnl?.pnl,
+              pnlPercent: evmPnl?.pnlPercent,
+            });
           }
           if (evmData.bnb?.usdc > 0) {
-            combined.push({ mint: "bnb-usdc", symbol: "USDC", name: "USD Coin (BNB)", amount: evmData.bnb.usdc, value: evmData.bnb.usdc });
+            const evmPnl = evmPnlByMint.get("bnb-usdc");
+            combined.push({
+              mint: "bnb-usdc",
+              symbol: "USDC",
+              name: "USD Coin (BNB)",
+              amount: evmData.bnb.usdc,
+              value: evmData.bnb.usdc,
+              pnl: evmPnl?.pnl,
+              pnlPercent: evmPnl?.pnlPercent,
+            });
           }
           if (evmData.bnb?.native > 0) {
-            combined.push({ mint: "bnb-bnb", symbol: "BNB", name: "BNB", amount: evmData.bnb.native, value: evmData.bnb.native * APPROX_BNB_PRICE });
+            const evmPnl = evmPnlByMint.get("bnb-bnb");
+            combined.push({
+              mint: "bnb-bnb",
+              symbol: "BNB",
+              name: "BNB",
+              amount: evmData.bnb.native,
+              value: evmData.bnb.native * APPROX_BNB_PRICE,
+              pnl: evmPnl?.pnl,
+              pnlPercent: evmPnl?.pnlPercent,
+            });
           }
         }
         const pnlByMint = pnlRes?.tokens ?? {};
@@ -196,7 +275,7 @@ export function Profile() {
           const mint = t.token.mint;
           const symbol = (t.token.symbol || "").toUpperCase();
           if (mint === SOL_MINT || mint === SOLANA_USDC_MINT) continue;
-          if (symbol === "SOL") continue; // avoid duplicate SOL (tracker may use different mint)
+          if (symbol === "SOL") continue;
           const value = t.value || 0;
           if (value <= 0) continue;
           const p = pnlByMint[mint];
@@ -219,11 +298,17 @@ export function Profile() {
         }
         setOpenPositions(combined);
         setClosedPositions([]);
-      })
-      .catch(() => {
-        setOpenPositions([]);
-        setClosedPositions([]);
-      });
+      } catch {
+        if (!cancelled) {
+          setOpenPositions([]);
+          setClosedPositions([]);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [walletAddress, user, refreshTrigger]);
 
   // Fetch stats

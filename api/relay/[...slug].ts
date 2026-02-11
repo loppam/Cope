@@ -832,21 +832,15 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
         serializedTx = d.transactionBytes;
     }
 
-    const funderKeypair = getFunderKeypair();
-    const useFunderAsPayer = !!funderKeypair;
-
     if (serializedTx) {
       const txBuffer = Buffer.from(serializedTx, "base64");
       transaction = VersionedTransaction.deserialize(txBuffer);
     } else if (isRelaySolanaTxData(data)) {
       // Relay can return Solana steps as { instructions, addressLookupTableAddresses } instead of a serialized tx.
-      // When funder is configured, use it as fee payer so user does not need SOL (true USDC-only).
-      const payerKey = useFunderAsPayer
-        ? funderKeypair!.publicKey
-        : wallet.publicKey;
+      // User pays for their own gas. Funder only top-ups on insufficient SOL (see catch block).
       transaction = await buildVersionedTxFromRelayInstructions(
         data,
-        payerKey,
+        wallet.publicKey,
         connection,
       );
     }
@@ -869,15 +863,9 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       stepIndex,
       accountCount: txAccountKeys.length,
       accountKeys: txAccountKeys,
-      feePayerSponsored: useFunderAsPayer,
     });
 
-    // When using funder as fee payer, funder must sign first, then user
-    if (useFunderAsPayer && !serializedTx && isRelaySolanaTxData(data)) {
-      transaction.sign([funderKeypair!, wallet]);
-    } else {
-      transaction.sign([wallet]);
-    }
+    transaction.sign([wallet]);
 
     let serialized: Uint8Array;
     try {

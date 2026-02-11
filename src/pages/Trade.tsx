@@ -63,7 +63,11 @@ export function Trade() {
   const [slippage, setSlippage] = useState(100); // 1% in basis points
   const [showSlippageSettings, setShowSlippageSettings] = useState(false);
   const [tradeChain, setTradeChain] = useState<TradeChain>("solana");
-  const [crossChainToken, setCrossChainToken] = useState<{ symbol: string; address: string; name: string } | null>(null);
+  const [crossChainToken, setCrossChainToken] = useState<{
+    symbol: string;
+    address: string;
+    name: string;
+  } | null>(null);
   const [evmAddress, setEvmAddress] = useState<string | null>(null);
 
   // Sell state: user's token balance (UI units) and sell amount (UI units)
@@ -76,7 +80,9 @@ export function Trade() {
   const REFRESH_COOLDOWN_MS = 15000; // 15 seconds
   const SOL_RESERVE = 0.005; // Always leave at least this much SOL for gas
   const sellableBalance =
-    token?.mint === SOL_MINT ? Math.max(0, tokenBalance - SOL_RESERVE) : tokenBalance;
+    token?.mint === SOL_MINT
+      ? Math.max(0, tokenBalance - SOL_RESERVE)
+      : tokenBalance;
   const fetchDetailsMintRef = useRef<string | null>(null);
 
   // Check if mint was passed from navigation state (e.g., from Positions page or feed)
@@ -100,7 +106,10 @@ export function Trade() {
   useEffect(() => {
     if (mint) {
       fetchTokenDetails(mint, "solana", token);
-    } else if (crossChainToken && (tradeChain === "base" || tradeChain === "bnb")) {
+    } else if (
+      crossChainToken &&
+      (tradeChain === "base" || tradeChain === "bnb")
+    ) {
       fetchTokenDetails(crossChainToken.address, tradeChain, token);
     }
   }, [mint, crossChainToken, tradeChain]);
@@ -133,18 +142,25 @@ export function Trade() {
       return;
     }
     let cancelled = false;
-    user.getIdToken().then((token) => {
-      const base = getApiBase();
-      return fetch(`${base}/api/relay/evm-address`, {
-        headers: { Authorization: `Bearer ${token}` },
+    user
+      .getIdToken()
+      .then((token) => {
+        const base = getApiBase();
+        return fetch(`${base}/api/relay/evm-address`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && data.evmAddress) setEvmAddress(data.evmAddress);
+        else if (!cancelled) setEvmAddress(null);
+      })
+      .catch(() => {
+        if (!cancelled) setEvmAddress(null);
       });
-    }).then((res) => res.json()).then((data) => {
-      if (!cancelled && data.evmAddress) setEvmAddress(data.evmAddress);
-      else if (!cancelled) setEvmAddress(null);
-    }).catch(() => {
-      if (!cancelled) setEvmAddress(null);
-    });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [tradeChain, user, userProfile?.evmAddress]);
 
   // Fetch user's token balance for the selected token (for Sell section)
@@ -180,7 +196,7 @@ export function Trade() {
   const fetchTokenDetails = async (
     address: string,
     chain: TradeChain,
-    currentToken: TokenSearchResult | null
+    currentToken: TokenSearchResult | null,
   ) => {
     fetchDetailsMintRef.current = address;
     setLoading(true);
@@ -258,7 +274,11 @@ export function Trade() {
           response.data &&
           response.data.length > 0
         ) {
-          setToken({ ...response.data[0], chain: "solana", chainId: 792703809 });
+          setToken({
+            ...response.data[0],
+            chain: "solana",
+            chainId: 792703809,
+          });
         } else {
           setToken(base);
         }
@@ -331,15 +351,21 @@ export function Trade() {
       return;
     }
     if (!isCrossChain && !token) {
-      toast.error("Select a token", { description: "Search or paste a token address" });
+      toast.error("Select a token", {
+        description: "Search or paste a token address",
+      });
       return;
     }
     if (isCrossChain && !crossChainToken) {
-      toast.error("Select a token", { description: `Choose a token on ${tradeChain === "base" ? "Base" : "BNB"}` });
+      toast.error("Select a token", {
+        description: `Choose a token on ${tradeChain === "base" ? "Base" : "BNB"}`,
+      });
       return;
     }
     if (isCrossChain && !evmAddress) {
-      toast.error("Loading wallet", { description: "Wait for cross-chain address" });
+      toast.error("Loading wallet", {
+        description: "Wait for cross-chain address",
+      });
       return;
     }
 
@@ -383,13 +409,24 @@ export function Trade() {
       const details = data?.details || {};
       const currencyIn = details.currencyIn || {};
       const currencyOut = details.currencyOut || {};
-      const inputAmount = parseInt(currencyIn.amount || "0", 10) || Math.floor(amountNum * 1e6);
+      const inputAmount =
+        parseInt(currencyIn.amount || "0", 10) || Math.floor(amountNum * 1e6);
       const outputAmount = parseInt(currencyOut.amount || "0", 10);
-      const inputAmountUi = parseFloat(currencyIn.amountFormatted || "0") || amountNum;
+      const inputAmountUi =
+        parseFloat(currencyIn.amountFormatted || "0") || amountNum;
       const outputAmountUi = parseFloat(currencyOut.amountFormatted || "0");
-      const inUsd = currencyIn.amountUsd != null ? parseFloat(currencyIn.amountUsd) : undefined;
-      const outUsd = currencyOut.amountUsd != null ? parseFloat(currencyOut.amountUsd) : undefined;
-      const impact = details.totalImpact?.percent != null ? parseFloat(details.totalImpact.percent) : 0;
+      const inUsd =
+        currencyIn.amountUsd != null
+          ? parseFloat(currencyIn.amountUsd)
+          : undefined;
+      const outUsd =
+        currencyOut.amountUsd != null
+          ? parseFloat(currencyOut.amountUsd)
+          : undefined;
+      const impact =
+        details.totalImpact?.percent != null
+          ? parseFloat(details.totalImpact.percent)
+          : 0;
 
       setSwapQuote({
         inputMint: SOLANA_USDC_MINT,
@@ -412,7 +449,8 @@ export function Trade() {
     } catch (error: unknown) {
       console.error("Error getting swap quote:", error);
       toast.error("Failed to get quote", {
-        description: error instanceof Error ? error.message : "Please try again",
+        description:
+          error instanceof Error ? error.message : "Please try again",
       });
     } finally {
       setSwapping(false);
@@ -436,9 +474,10 @@ export function Trade() {
     }
     if (amountNum > sellableBalance) {
       toast.error("Insufficient balance", {
-        description: token.mint === SOL_MINT
-          ? `Max sellable is ${sellableBalance.toFixed(4)} ${token.symbol} (${SOL_RESERVE} reserved for gas)`
-          : `You have ${tokenBalance.toFixed(4)} ${token.symbol}`,
+        description:
+          token.mint === SOL_MINT
+            ? `Max sellable is ${sellableBalance.toFixed(4)} ${token.symbol} (${SOL_RESERVE} reserved for gas)`
+            : `You have ${tokenBalance.toFixed(4)} ${token.symbol}`,
       });
       return;
     }
@@ -472,11 +511,21 @@ export function Trade() {
       const currencyOut = details.currencyOut || {};
       const inputAmount = parseInt(currencyIn.amount || "0", 10) || amountRaw;
       const outputAmount = parseInt(currencyOut.amount || "0", 10);
-      const inputAmountUi = parseFloat(currencyIn.amountFormatted || "0") || amountNum;
+      const inputAmountUi =
+        parseFloat(currencyIn.amountFormatted || "0") || amountNum;
       const outputAmountUi = parseFloat(currencyOut.amountFormatted || "0");
-      const inUsd = currencyIn.amountUsd != null ? parseFloat(currencyIn.amountUsd) : undefined;
-      const outUsd = currencyOut.amountUsd != null ? parseFloat(currencyOut.amountUsd) : undefined;
-      const impact = details.totalImpact?.percent != null ? parseFloat(details.totalImpact.percent) : 0;
+      const inUsd =
+        currencyIn.amountUsd != null
+          ? parseFloat(currencyIn.amountUsd)
+          : undefined;
+      const outUsd =
+        currencyOut.amountUsd != null
+          ? parseFloat(currencyOut.amountUsd)
+          : undefined;
+      const impact =
+        details.totalImpact?.percent != null
+          ? parseFloat(details.totalImpact.percent)
+          : 0;
 
       setSwapQuote({
         inputMint: token.mint,
@@ -499,7 +548,8 @@ export function Trade() {
     } catch (error: unknown) {
       console.error("Error getting sell quote:", error);
       toast.error("Failed to get quote", {
-        description: error instanceof Error ? error.message : "Please try again",
+        description:
+          error instanceof Error ? error.message : "Please try again",
       });
     } finally {
       setSwapping(false);
@@ -573,7 +623,8 @@ export function Trade() {
     } catch (error: unknown) {
       console.error("Error executing swap:", error);
       toast.error("Swap failed", {
-        description: error instanceof Error ? error.message : "Please try again",
+        description:
+          error instanceof Error ? error.message : "Please try again",
       });
     } finally {
       setSwapping(false);
@@ -582,627 +633,660 @@ export function Trade() {
 
   return (
     <>
-      <DocumentHead
-        title="Trade"
-        description="Swap and trade tokens on COPE"
-      />
+      <DocumentHead title="Trade" description="Swap and trade tokens on COPE" />
       <div className="p-3 sm:p-6 max-w-[720px] mx-auto min-w-0">
-      <div className="mb-6 sm:mb-8">
-        <h1 className="text-xl sm:text-2xl font-bold mb-2">Trade Terminal</h1>
-        <p className="text-sm text-white/60">
-          Paste token CA to trade instantly
-        </p>
-      </div>
-
-      <div className="space-y-6">
-        {/* Copy Trade Banner */}
-        {location.state?.fromFeed && location.state?.walletNickname && (
-          <Card className="bg-accent-primary/10 border-accent-primary/20">
-            <div className="flex items-center gap-3">
-              <Copy className="w-5 h-5 text-accent-primary" />
-              <div className="flex-1">
-                <p className="text-sm font-medium text-white">
-                  Copying trade from {location.state.walletNickname}
-                </p>
-                <p className="text-xs text-white/70 mt-0.5">
-                  Token pre-filled from feed
-                </p>
-              </div>
-            </div>
-          </Card>
-        )}
-
-        {/* Token search only — chain comes from selected token (Relay metadata) */}
-        <div className="min-w-0 space-y-3">
-          <div>
-            <label className="block text-sm font-medium mb-2">Token</label>
-            <TokenSearch
-              onSelect={(selectedToken) => {
-                const chain = selectedToken.chain ?? "solana";
-                setTradeChain(chain);
-                if (chain === "solana") {
-                  setToken(selectedToken);
-                  setMint(selectedToken.mint);
-                  setCrossChainToken(null);
-                  setSearchParams({ mint: selectedToken.mint }, { replace: true });
-                } else {
-                  setCrossChainToken({
-                    symbol: selectedToken.symbol,
-                    address: selectedToken.mint,
-                    name: selectedToken.name,
-                  });
-                  setToken(selectedToken);
-                  setMint("");
-                  setSearchParams({}, { replace: true });
-                }
-              }}
-              placeholder="Search token by name, symbol, or address..."
-            />
-          </div>
+        <div className="mb-6 sm:mb-8">
+          <h1 className="text-xl sm:text-2xl font-bold mb-2">Trade Terminal</h1>
+          <p className="text-sm text-white/60">
+            Paste token CA to trade instantly
+          </p>
         </div>
 
-        {loading && (
-          <Card glass>
-            <div className="p-6 text-center text-white/60">
-              Loading token details...
-            </div>
-          </Card>
-        )}
+        <div className="space-y-6">
+          {/* Copy Trade Banner */}
+          {location.state?.fromFeed && location.state?.walletNickname && (
+            <Card className="bg-accent-primary/10 border-accent-primary/20">
+              <div className="flex items-center gap-3">
+                <Copy className="w-5 h-5 text-accent-primary" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-white">
+                    Copying trade from {location.state.walletNickname}
+                  </p>
+                  <p className="text-xs text-white/70 mt-0.5">
+                    Token pre-filled from feed
+                  </p>
+                </div>
+              </div>
+            </Card>
+          )}
 
-        {((token) || (tradeChain !== "solana" && crossChainToken)) && !loading && (
-          <Card glass>
-            {/* Token Header (Solana + Base/BNB with Birdeye details) */}
-            {token && (
-            <div className="mb-4 sm:mb-6">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
-                <div className="flex items-start gap-3 sm:gap-4 flex-1 min-w-0">
-                  {token.image && (
-                    <img
-                      src={token.image}
-                      alt={token.symbol}
-                      className="w-12 h-12 sm:w-16 sm:h-16 rounded-full flex-shrink-0 border-2 border-white/10"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = "none";
-                      }}
-                    />
-                  )}
-                  <div className="flex-1 min-w-0 overflow-hidden">
-                    <div className="flex flex-wrap items-center gap-2 mb-1">
-                      <h3 className="font-bold text-base sm:text-lg truncate">
-                        {token.name}
-                      </h3>
-                      <span className="text-white/60 text-sm shrink-0">
-                        ({token.symbol})
-                      </span>
-                      {token.status && (
-                        <span
-                          className={`px-2 py-0.5 rounded text-xs shrink-0 ${
-                            token.status === "graduated"
-                              ? "bg-[#12d585]/20 text-[#12d585]"
-                              : token.status === "graduating"
-                                ? "bg-yellow-500/20 text-yellow-500"
-                                : "bg-white/10 text-white/60"
+          {/* Token search only — chain comes from selected token (Relay metadata) */}
+          <div className="min-w-0 space-y-3">
+            <div>
+              <label className="block text-sm font-medium mb-2">Token</label>
+              <TokenSearch
+                onSelect={(selectedToken) => {
+                  const chain = selectedToken.chain ?? "solana";
+                  setTradeChain(chain);
+                  if (chain === "solana") {
+                    setToken(selectedToken);
+                    setMint(selectedToken.mint);
+                    setCrossChainToken(null);
+                    setSearchParams(
+                      { mint: selectedToken.mint },
+                      { replace: true },
+                    );
+                  } else {
+                    setCrossChainToken({
+                      symbol: selectedToken.symbol,
+                      address: selectedToken.mint,
+                      name: selectedToken.name,
+                    });
+                    setToken(selectedToken);
+                    setMint("");
+                    setSearchParams({}, { replace: true });
+                  }
+                }}
+                placeholder="Search token by name, symbol, or address..."
+              />
+            </div>
+          </div>
+
+          {loading && (
+            <Card glass>
+              <div className="p-6 text-center text-white/60">
+                Loading token details...
+              </div>
+            </Card>
+          )}
+
+          {(token || (tradeChain !== "solana" && crossChainToken)) &&
+            !loading && (
+              <Card glass>
+                {/* Token Header (Solana + Base/BNB with Birdeye details) */}
+                {token && (
+                  <div className="mb-4 sm:mb-6">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
+                      <div className="flex items-start gap-3 sm:gap-4 flex-1 min-w-0">
+                        {token.image && (
+                          <img
+                            src={token.image}
+                            alt={token.symbol}
+                            className="w-12 h-12 sm:w-16 sm:h-16 rounded-full flex-shrink-0 border-2 border-white/10"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display =
+                                "none";
+                            }}
+                          />
+                        )}
+                        <div className="flex-1 min-w-0 overflow-hidden">
+                          <div className="flex flex-wrap items-center gap-2 mb-1">
+                            <h3 className="font-bold text-base sm:text-lg truncate">
+                              {token.name}
+                            </h3>
+                            <span className="text-white/60 text-sm shrink-0">
+                              ({token.symbol})
+                            </span>
+                            {token.status && (
+                              <span
+                                className={`px-2 py-0.5 rounded text-xs shrink-0 ${
+                                  token.status === "graduated"
+                                    ? "bg-[#12d585]/20 text-[#12d585]"
+                                    : token.status === "graduating"
+                                      ? "bg-yellow-500/20 text-yellow-500"
+                                      : "bg-white/10 text-white/60"
+                                }`}
+                              >
+                                {token.status}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-white/50 font-mono truncate">
+                            <span>{shortenAddress(token.mint)}</span>
+                            {token.deployer && (
+                              <>
+                                <span>•</span>
+                                <a
+                                  href={`https://solscan.io/account/${token.deployer}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="hover:text-[#12d585] transition-colors flex items-center gap-1 shrink-0"
+                                >
+                                  DEV <ExternalLink className="w-3 h-3" />
+                                </a>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {mint && (
+                          <button
+                            type="button"
+                            onClick={handleCopyShareLink}
+                            className="flex items-center justify-center gap-2 px-3 py-2 sm:px-4 rounded-lg text-sm font-medium bg-white/10 hover:bg-white/15 text-white transition-all touch-manipulation min-h-[44px] sm:min-h-0"
+                            title="Copy share link"
+                          >
+                            <Copy className="w-4 h-4" />
+                            <span className="hidden sm:inline">Copy link</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleRefresh}
+                          disabled={refreshCooldown > 0 || loading}
+                          className={`flex items-center justify-center gap-2 px-3 py-2 sm:px-4 rounded-lg text-sm font-medium transition-all shrink-0 min-h-[44px] sm:min-h-0 ${
+                            refreshCooldown > 0 || loading
+                              ? "bg-white/5 text-white/30 cursor-not-allowed"
+                              : "bg-white/10 hover:bg-white/15 text-white"
+                          }`}
+                          title={
+                            refreshCooldown > 0
+                              ? `Refresh available in ${refreshCooldown}s`
+                              : "Refresh token data"
+                          }
+                        >
+                          <RefreshCw
+                            className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
+                          />
+                          {refreshCooldown > 0
+                            ? `${refreshCooldown}s`
+                            : "Refresh"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Token Stats Grid */}
+                    <div className="grid grid-cols-2 gap-2 sm:gap-3 mb-4">
+                      <div className="bg-white/5 rounded-lg p-2 sm:p-3">
+                        <div className="text-xs text-white/60 mb-1">Price</div>
+                        <div className="text-sm sm:text-lg font-semibold truncate">
+                          {formatPrice(token.priceUsd)}
+                        </div>
+                      </div>
+                      <div className="bg-white/5 rounded-lg p-2 sm:p-3">
+                        <div className="text-xs text-white/60 mb-1">
+                          Market Cap
+                        </div>
+                        <div className="text-sm sm:text-lg font-semibold truncate">
+                          {formatCurrency(token.marketCapUsd)}
+                        </div>
+                      </div>
+                      <div className="bg-white/5 rounded-lg p-2 sm:p-3">
+                        <div className="text-xs text-white/60 mb-1">
+                          Liquidity
+                        </div>
+                        <div className="text-sm sm:text-lg font-semibold truncate">
+                          {formatCurrency(token.liquidityUsd)}
+                        </div>
+                      </div>
+                      <div className="bg-white/5 rounded-lg p-2 sm:p-3">
+                        <div className="text-xs text-white/60 mb-1">
+                          Holders
+                        </div>
+                        <div className="text-sm sm:text-lg font-semibold flex items-center gap-1 truncate">
+                          <Users className="w-4 h-4 shrink-0" />
+                          {token.holders ?? 0}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Additional Info */}
+                    <div className="space-y-2 mb-4">
+                      <div className="flex flex-wrap gap-4 text-xs text-white/60">
+                        {token.createdAt && (
+                          <div className="flex items-center gap-1">
+                            <Calendar className="w-3 h-3" />
+                            <span>Age: {getTokenAge(token.createdAt)}</span>
+                          </div>
+                        )}
+                        {token.launchpad?.curvePercentage !== undefined && (
+                          <div className="flex items-center gap-1">
+                            <TrendingUp className="w-3 h-3" />
+                            <span>
+                              Bonding Curve:{" "}
+                              {token.launchpad.curvePercentage.toFixed(2)}%
+                            </span>
+                          </div>
+                        )}
+                        {token.market && (
+                          <div className="flex items-center gap-1">
+                            <span>Market: {token.market}</span>
+                          </div>
+                        )}
+                        {token.volume_24h !== undefined &&
+                          token.volume_24h > 0 && (
+                            <div className="flex items-center gap-1">
+                              <span>
+                                Vol 24h: {formatCurrency(token.volume_24h)}
+                              </span>
+                            </div>
+                          )}
+                      </div>
+
+                      {/* Trading Stats */}
+                      {(token.buys !== undefined ||
+                        token.sells !== undefined ||
+                        token.totalTransactions !== undefined) && (
+                        <div className="flex flex-wrap gap-4 text-xs text-white/60 pt-2 border-t border-white/5">
+                          {token.buys !== undefined && (
+                            <span>🟢 Buys: {token.buys}</span>
+                          )}
+                          {token.sells !== undefined && (
+                            <span>🔴 Sells: {token.sells}</span>
+                          )}
+                          {token.totalTransactions !== undefined && (
+                            <span>📊 Total: {token.totalTransactions}</span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Risk & Distribution Info */}
+                      {(token.riskScore !== undefined ||
+                        token.top10 !== undefined ||
+                        token.dev !== undefined) && (
+                        <div className="flex flex-wrap gap-4 text-xs text-white/60 pt-2 border-t border-white/5">
+                          {token.riskScore !== undefined && (
+                            <span>⚠️ Risk: {token.riskScore}/10</span>
+                          )}
+                          {token.top10 !== undefined && (
+                            <span>👥 Top 10: {token.top10.toFixed(2)}%</span>
+                          )}
+                          {token.dev !== undefined && (
+                            <span>👤 Dev: {token.dev.toFixed(2)}%</span>
+                          )}
+                          {token.bundlers?.percentage !== undefined && (
+                            <span>
+                              📦 Bundlers:{" "}
+                              {token.bundlers.percentage.toFixed(2)}%
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Social Links */}
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      <a
+                        href={`https://solscan.io/token/${token.mint}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs flex items-center gap-1 transition-colors"
+                      >
+                        <span>🔍</span> Solscan
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                      {token.socials?.twitter && (
+                        <a
+                          href={token.socials.twitter}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs flex items-center gap-1 transition-colors"
+                        >
+                          <span>🐦</span> Twitter
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                      {token.socials?.website && (
+                        <a
+                          href={token.socials.website}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs flex items-center gap-1 transition-colors"
+                        >
+                          <span>🌐</span> Website
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                      {token.socials?.telegram && (
+                        <a
+                          href={token.socials.telegram}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs flex items-center gap-1 transition-colors"
+                        >
+                          <span>✈️</span> Telegram
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                      {token.socials?.discord && (
+                        <a
+                          href={token.socials.discord}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs flex items-center gap-1 transition-colors"
+                        >
+                          <span>💬</span> Discord
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                      {token.market === "pumpfun" && (
+                        <a
+                          href={`https://pump.fun/${token.mint}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs flex items-center gap-1 transition-colors"
+                        >
+                          <span>🏆</span> PumpFun
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Buy Section */}
+                <div className="mb-4 sm:mb-6">
+                  <label className="block text-sm font-medium mb-2">
+                    Buy Amount (USDC)
+                  </label>
+                  <Input
+                    type="number"
+                    placeholder="0.0"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    className="min-w-0"
+                  />
+                  <div className="flex gap-2 mt-2 flex-wrap">
+                    {quickAmounts.map((amt) => (
+                      <button
+                        key={amt}
+                        onClick={() => setAmount(amt.toString())}
+                        className="flex-1 min-w-[4rem] h-9 sm:h-8 rounded-[10px] bg-white/5 hover:bg-white/10 text-sm transition-colors"
+                      >
+                        {amt} USDC
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex gap-2 mb-3">
+                  <Button
+                    className="flex-1 h-11 sm:h-12 min-w-0"
+                    onClick={handleBuy}
+                    disabled={
+                      swapping || !amount || !userProfile?.walletAddress
+                    }
+                  >
+                    {swapping ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Getting Quote...
+                      </>
+                    ) : (
+                      <>
+                        <DollarSign className="w-5 h-5" />
+                        Buy
+                      </>
+                    )}
+                  </Button>
+                  <button
+                    onClick={() =>
+                      setShowSlippageSettings(!showSlippageSettings)
+                    }
+                    className="h-11 sm:h-12 px-3 sm:px-4 rounded-[10px] bg-white/5 hover:bg-white/10 transition-colors shrink-0"
+                    title="Slippage settings"
+                  >
+                    <Settings className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Slippage Settings */}
+                {showSlippageSettings && (
+                  <div className="mb-3 p-3 bg-white/5 rounded-[10px]">
+                    <div className="text-sm font-medium mb-2">
+                      Slippage Tolerance
+                    </div>
+                    <div className="flex gap-2 mb-2">
+                      {slippagePresets.map((preset) => (
+                        <button
+                          key={preset}
+                          onClick={() => setSlippage(preset)}
+                          className={`flex-1 h-8 rounded-[10px] text-sm transition-colors ${
+                            slippage === preset
+                              ? "bg-accent-primary text-white"
+                              : "bg-white/5 hover:bg-white/10"
                           }`}
                         >
-                          {token.status}
-                        </span>
-                      )}
+                          {preset / 100}%
+                        </button>
+                      ))}
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-white/50 font-mono truncate">
-                      <span>{shortenAddress(token.mint)}</span>
-                      {token.deployer && (
-                        <>
-                          <span>•</span>
-                          <a
-                            href={`https://solscan.io/account/${token.deployer}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="hover:text-[#12d585] transition-colors flex items-center gap-1 shrink-0"
-                          >
-                            DEV <ExternalLink className="w-3 h-3" />
-                          </a>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {mint && (
-                  <button
-                    type="button"
-                    onClick={handleCopyShareLink}
-                    className="flex items-center justify-center gap-2 px-3 py-2 sm:px-4 rounded-lg text-sm font-medium bg-white/10 hover:bg-white/15 text-white transition-all touch-manipulation min-h-[44px] sm:min-h-0"
-                    title="Copy share link"
-                  >
-                    <Copy className="w-4 h-4" />
-                    <span className="hidden sm:inline">Copy link</span>
-                  </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleRefresh}
-                    disabled={refreshCooldown > 0 || loading}
-                    className={`flex items-center justify-center gap-2 px-3 py-2 sm:px-4 rounded-lg text-sm font-medium transition-all shrink-0 min-h-[44px] sm:min-h-0 ${
-                      refreshCooldown > 0 || loading
-                        ? "bg-white/5 text-white/30 cursor-not-allowed"
-                        : "bg-white/10 hover:bg-white/15 text-white"
-                    }`}
-                    title={
-                      refreshCooldown > 0
-                        ? `Refresh available in ${refreshCooldown}s`
-                        : "Refresh token data"
-                    }
-                  >
-                    <RefreshCw
-                      className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
+                    <Input
+                      type="number"
+                      placeholder="Custom %"
+                      value={slippage / 100}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        if (!isNaN(val) && val > 0) {
+                          setSlippage(Math.floor(val * 100));
+                        }
+                      }}
+                      className="h-8 text-sm"
                     />
-                    {refreshCooldown > 0 ? `${refreshCooldown}s` : "Refresh"}
-                  </button>
-                </div>
-              </div>
+                  </div>
+                )}
 
-              {/* Token Stats Grid */}
-              <div className="grid grid-cols-2 gap-2 sm:gap-3 mb-4">
-                <div className="bg-white/5 rounded-lg p-2 sm:p-3">
-                  <div className="text-xs text-white/60 mb-1">Price</div>
-                  <div className="text-sm sm:text-lg font-semibold truncate">
-                    {formatPrice(token.priceUsd)}
-                  </div>
-                </div>
-                <div className="bg-white/5 rounded-lg p-2 sm:p-3">
-                  <div className="text-xs text-white/60 mb-1">Market Cap</div>
-                  <div className="text-sm sm:text-lg font-semibold truncate">
-                    {formatCurrency(token.marketCapUsd)}
-                  </div>
-                </div>
-                <div className="bg-white/5 rounded-lg p-2 sm:p-3">
-                  <div className="text-xs text-white/60 mb-1">Liquidity</div>
-                  <div className="text-sm sm:text-lg font-semibold truncate">
-                    {formatCurrency(token.liquidityUsd)}
-                  </div>
-                </div>
-                <div className="bg-white/5 rounded-lg p-2 sm:p-3">
-                  <div className="text-xs text-white/60 mb-1">Holders</div>
-                  <div className="text-sm sm:text-lg font-semibold flex items-center gap-1 truncate">
-                    <Users className="w-4 h-4 shrink-0" />
-                    {token.holders ?? 0}
-                  </div>
-                </div>
-              </div>
-
-              {/* Additional Info */}
-              <div className="space-y-2 mb-4">
-                <div className="flex flex-wrap gap-4 text-xs text-white/60">
-                  {token.createdAt && (
-                    <div className="flex items-center gap-1">
-                      <Calendar className="w-3 h-3" />
-                      <span>Age: {getTokenAge(token.createdAt)}</span>
+                {/* Sell Section (Solana only) */}
+                {token && (
+                  <div className="pt-4 border-t border-white/6">
+                    <p className="text-sm text-white/60 mb-2 truncate">
+                      Your Position:{" "}
+                      {loadingBalance
+                        ? "..."
+                        : `${tokenBalance.toLocaleString(undefined, {
+                            minimumFractionDigits: 0,
+                            maximumFractionDigits: 6,
+                          })} ${token.symbol}`}
+                      {token.mint === SOL_MINT &&
+                        sellableBalance < tokenBalance && (
+                          <span className="block mt-0.5 text-white/40">
+                            Max sellable: {sellableBalance.toFixed(4)} (0.005
+                            reserved for gas)
+                          </span>
+                        )}
+                    </p>
+                    <label className="block text-sm font-medium mb-2">
+                      Sell Amount ({token.symbol})
+                    </label>
+                    <Input
+                      type="number"
+                      placeholder="0.0"
+                      value={sellAmount}
+                      onChange={(e) => setSellAmount(e.target.value)}
+                      disabled={sellableBalance <= 0}
+                      className="min-w-0"
+                    />
+                    <div className="flex gap-2 mt-2 flex-wrap">
+                      {[25, 50, 75].map((pct) => (
+                        <button
+                          key={pct}
+                          type="button"
+                          onClick={() =>
+                            setSellAmount(
+                              ((sellableBalance * pct) / 100).toString(),
+                            )
+                          }
+                          disabled={sellableBalance <= 0}
+                          className="flex-1 min-w-[3rem] h-9 sm:h-8 rounded-[10px] bg-white/5 hover:bg-white/10 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {pct}%
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSellAmount(sellableBalance.toString())
+                        }
+                        disabled={sellableBalance <= 0}
+                        className="flex-1 min-w-[3rem] h-9 sm:h-8 rounded-[10px] bg-white/5 hover:bg-white/10 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        100%
+                      </button>
                     </div>
-                  )}
-                  {token.launchpad?.curvePercentage !== undefined && (
-                    <div className="flex items-center gap-1">
-                      <TrendingUp className="w-3 h-3" />
-                      <span>
-                        Bonding Curve:{" "}
-                        {token.launchpad.curvePercentage.toFixed(2)}%
-                      </span>
-                    </div>
-                  )}
-                  {token.market && (
-                    <div className="flex items-center gap-1">
-                      <span>Market: {token.market}</span>
-                    </div>
-                  )}
-                  {token.volume_24h !== undefined && token.volume_24h > 0 && (
-                    <div className="flex items-center gap-1">
-                      <span>Vol 24h: {formatCurrency(token.volume_24h)}</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Trading Stats */}
-                {(token.buys !== undefined ||
-                  token.sells !== undefined ||
-                  token.totalTransactions !== undefined) && (
-                  <div className="flex flex-wrap gap-4 text-xs text-white/60 pt-2 border-t border-white/5">
-                    {token.buys !== undefined && (
-                      <span>🟢 Buys: {token.buys}</span>
-                    )}
-                    {token.sells !== undefined && (
-                      <span>🔴 Sells: {token.sells}</span>
-                    )}
-                    {token.totalTransactions !== undefined && (
-                      <span>📊 Total: {token.totalTransactions}</span>
-                    )}
-                  </div>
-                )}
-
-                {/* Risk & Distribution Info */}
-                {(token.riskScore !== undefined ||
-                  token.top10 !== undefined ||
-                  token.dev !== undefined) && (
-                  <div className="flex flex-wrap gap-4 text-xs text-white/60 pt-2 border-t border-white/5">
-                    {token.riskScore !== undefined && (
-                      <span>⚠️ Risk: {token.riskScore}/10</span>
-                    )}
-                    {token.top10 !== undefined && (
-                      <span>👥 Top 10: {token.top10.toFixed(2)}%</span>
-                    )}
-                    {token.dev !== undefined && (
-                      <span>👤 Dev: {token.dev.toFixed(2)}%</span>
-                    )}
-                    {token.bundlers?.percentage !== undefined && (
-                      <span>
-                        📦 Bundlers: {token.bundlers.percentage.toFixed(2)}%
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Social Links */}
-              <div className="flex flex-wrap gap-2 mb-4">
-                <a
-                  href={`https://solscan.io/token/${token.mint}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs flex items-center gap-1 transition-colors"
-                >
-                  <span>🔍</span> Solscan
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-                {token.socials?.twitter && (
-                  <a
-                    href={token.socials.twitter}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs flex items-center gap-1 transition-colors"
-                  >
-                    <span>🐦</span> Twitter
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
-                {token.socials?.website && (
-                  <a
-                    href={token.socials.website}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs flex items-center gap-1 transition-colors"
-                  >
-                    <span>🌐</span> Website
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
-                {token.socials?.telegram && (
-                  <a
-                    href={token.socials.telegram}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs flex items-center gap-1 transition-colors"
-                  >
-                    <span>✈️</span> Telegram
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
-                {token.socials?.discord && (
-                  <a
-                    href={token.socials.discord}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs flex items-center gap-1 transition-colors"
-                  >
-                    <span>💬</span> Discord
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
-                {token.market === "pumpfun" && (
-                  <a
-                    href={`https://pump.fun/${token.mint}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs flex items-center gap-1 transition-colors"
-                  >
-                    <span>🏆</span> PumpFun
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
-              </div>
-            </div>
-            )}
-
-            {/* Buy Section */}
-            <div className="mb-4 sm:mb-6">
-              <label className="block text-sm font-medium mb-2">
-                Buy Amount (USDC)
-              </label>
-              <Input
-                type="number"
-                placeholder="0.0"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className="min-w-0"
-              />
-              <div className="flex gap-2 mt-2 flex-wrap">
-                {quickAmounts.map((amt) => (
-                  <button
-                    key={amt}
-                    onClick={() => setAmount(amt.toString())}
-                    className="flex-1 min-w-[4rem] h-9 sm:h-8 rounded-[10px] bg-white/5 hover:bg-white/10 text-sm transition-colors"
-                  >
-                    {amt} USDC
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex gap-2 mb-3">
-              <Button
-                className="flex-1 h-11 sm:h-12 min-w-0"
-                onClick={handleBuy}
-                disabled={swapping || !amount || !userProfile?.walletAddress}
-              >
-                {swapping ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    Getting Quote...
-                  </>
-                ) : (
-                  <>
-                    <DollarSign className="w-5 h-5" />
-                    Buy
-                  </>
-                )}
-              </Button>
-              <button
-                onClick={() => setShowSlippageSettings(!showSlippageSettings)}
-                className="h-11 sm:h-12 px-3 sm:px-4 rounded-[10px] bg-white/5 hover:bg-white/10 transition-colors shrink-0"
-                title="Slippage settings"
-              >
-                <Settings className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Slippage Settings */}
-            {showSlippageSettings && (
-              <div className="mb-3 p-3 bg-white/5 rounded-[10px]">
-                <div className="text-sm font-medium mb-2">
-                  Slippage Tolerance
-                </div>
-                <div className="flex gap-2 mb-2">
-                  {slippagePresets.map((preset) => (
-                    <button
-                      key={preset}
-                      onClick={() => setSlippage(preset)}
-                      className={`flex-1 h-8 rounded-[10px] text-sm transition-colors ${
-                        slippage === preset
-                          ? "bg-accent-primary text-white"
-                          : "bg-white/5 hover:bg-white/10"
-                      }`}
+                    <Button
+                      variant="outline"
+                      className="w-full h-10 mt-3 min-w-0"
+                      onClick={handleSell}
+                      disabled={
+                        swapping ||
+                        !sellAmount ||
+                        sellableBalance <= 0 ||
+                        !userProfile?.walletAddress
+                      }
                     >
-                      {preset / 100}%
-                    </button>
-                  ))}
-                </div>
-                <Input
-                  type="number"
-                  placeholder="Custom %"
-                  value={slippage / 100}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    if (!isNaN(val) && val > 0) {
-                      setSlippage(Math.floor(val * 100));
-                    }
-                  }}
-                  className="h-8 text-sm"
-                />
-              </div>
+                      {swapping ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Getting Quote...
+                        </>
+                      ) : (
+                        "Sell"
+                      )}
+                    </Button>
+                  </div>
+                )}
+              </Card>
             )}
 
-            {/* Sell Section (Solana only) */}
-            {token && (
-            <div className="pt-4 border-t border-white/6">
-              <p className="text-sm text-white/60 mb-2 truncate">
-                Your Position:{" "}
-                {loadingBalance
-                  ? "..."
-                  : `${tokenBalance.toLocaleString(undefined, {
-                      minimumFractionDigits: 0,
-                      maximumFractionDigits: 6,
-                    })} ${token.symbol}`}
-                {token.mint === SOL_MINT && sellableBalance < tokenBalance && (
-                  <span className="block mt-0.5 text-white/40">
-                    Max sellable: {sellableBalance.toFixed(4)} (0.005 reserved for gas)
-                  </span>
-                )}
-              </p>
-              <label className="block text-sm font-medium mb-2">
-                Sell Amount ({token.symbol})
-              </label>
-              <Input
-                type="number"
-                placeholder="0.0"
-                value={sellAmount}
-                onChange={(e) => setSellAmount(e.target.value)}
-                disabled={sellableBalance <= 0}
-                className="min-w-0"
-              />
-              <div className="flex gap-2 mt-2 flex-wrap">
-                {[25, 50, 75].map((pct) => (
-                  <button
-                    key={pct}
-                    type="button"
-                    onClick={() =>
-                      setSellAmount(((sellableBalance * pct) / 100).toString())
-                    }
-                    disabled={sellableBalance <= 0}
-                    className="flex-1 min-w-[3rem] h-9 sm:h-8 rounded-[10px] bg-white/5 hover:bg-white/10 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {pct}%
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => setSellAmount(sellableBalance.toString())}
-                  disabled={sellableBalance <= 0}
-                  className="flex-1 min-w-[3rem] h-9 sm:h-8 rounded-[10px] bg-white/5 hover:bg-white/10 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  100%
-                </button>
-              </div>
-              <Button
-                variant="outline"
-                className="w-full h-10 mt-3 min-w-0"
-                onClick={handleSell}
-                disabled={
-                  swapping ||
-                  !sellAmount ||
-                  sellableBalance <= 0 ||
-                  !userProfile?.walletAddress
-                }
-              >
-                {swapping ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Getting Quote...
-                  </>
-                ) : (
-                  "Sell"
-                )}
-              </Button>
-            </div>
-            )}
-          </Card>
-        )}
-
-        {!mint && (
-          <div className="text-center py-16">
-            <DollarSign className="w-12 h-12 mx-auto mb-4 text-white/30" />
-            <p className="text-white/60">
-              Paste a token address to start trading
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* Quote Preview Modal */}
-      {showQuoteModal && swapQuote && (token || crossChainToken) && (() => {
-        const displaySymbol = token?.symbol ?? crossChainToken?.symbol ?? "";
-        const displayDecimals = token?.decimals ?? (crossChainToken?.symbol === "USDC" ? 6 : 18);
-        return (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
-          <Card className="max-w-md w-full my-4 max-h-[90vh] overflow-y-auto">
-            <div className="mb-3 sm:mb-4">
-              <h3 className="text-lg sm:text-xl font-bold mb-2">
-                Confirm Swap
-              </h3>
-              <p className="text-xs sm:text-sm text-white/60">
-                Review your transaction details
+          {!mint && (
+            <div className="text-center py-16">
+              <DollarSign className="w-12 h-12 mx-auto mb-4 text-white/30" />
+              <p className="text-white/60">
+                Paste a token address to start trading
               </p>
             </div>
-
-            {/* Swap Details */}
-            <div className="space-y-3 mb-4 sm:mb-6">
-              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between p-2 sm:p-3 bg-white/5 rounded-[10px] min-w-0">
-                <div className="min-w-0">
-                  <div className="text-xs sm:text-sm text-white/60">
-                    You Pay
-                  </div>
-                  <div className="font-bold text-sm sm:text-base truncate">
-                    {swapDirection === "buy"
-                      ? `${swapQuote.inputAmountUi.toFixed(2)} USDC`
-                      : `${formatTokenAmount(swapQuote.inputAmount, displayDecimals)} ${displaySymbol}`}
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <div className="text-xs sm:text-sm text-white/60">
-                    {swapQuote.inUsdValue != null
-                      ? `~$${swapQuote.inUsdValue.toFixed(2)}`
-                      : swapDirection === "buy"
-                        ? `~$${swapQuote.inputAmountUi.toFixed(2)}`
-                        : `~$${((swapQuote.inputAmount / Math.pow(10, displayDecimals)) * (token?.priceUsd || 0)).toFixed(2)}`}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex justify-center">
-                <ArrowDownUp className="w-5 h-5 text-white/40 shrink-0" />
-              </div>
-
-              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between p-2 sm:p-3 bg-white/5 rounded-[10px] min-w-0">
-                <div className="min-w-0">
-                  <div className="text-xs sm:text-sm text-white/60">
-                    You Receive
-                  </div>
-                  <div className="font-bold text-sm sm:text-base truncate">
-                    {swapDirection === "buy"
-                      ? `${formatTokenAmount(swapQuote.outputAmount, displayDecimals)} ${displaySymbol}`
-                      : `${swapQuote.outputAmountUi.toFixed(2)} USDC`}
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <div className="text-xs sm:text-sm text-white/60">
-                    {swapQuote.outUsdValue != null
-                      ? `~$${swapQuote.outUsdValue.toFixed(2)}`
-                      : swapDirection === "buy"
-                        ? `~$${((swapQuote.outputAmount / Math.pow(10, displayDecimals)) * (token?.priceUsd || 0)).toFixed(2)}`
-                        : `~$${swapQuote.outputAmountUi.toFixed(2)}`}
-                  </div>
-                </div>
-              </div>
-
-              {/* Transaction Details */}
-              <div className="p-2 sm:p-3 bg-white/5 rounded-[10px] space-y-2 text-xs sm:text-sm">
-                <div className="flex justify-between">
-                  <span className="text-white/60">Price Impact</span>
-                  <span className={getPriceImpactColor(swapQuote.priceImpact)}>
-                    {formatPriceImpact(swapQuote.priceImpact)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-white/60">Slippage Tolerance</span>
-                  <span>{slippage / 100}%</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-white/60">Network Fee</span>
-                  <span>~0.000005 SOL</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex gap-2 sm:gap-3">
-              <Button
-                variant="outline"
-                className="flex-1 min-w-0 h-10 sm:h-11"
-                onClick={() => {
-                  setShowQuoteModal(false);
-                  setSwapQuote(null);
-                  setRelayQuote(null);
-                }}
-                disabled={swapping}
-              >
-                Cancel
-              </Button>
-              <Button
-                className="flex-1 min-w-0 h-10 sm:h-11"
-                onClick={handleConfirmSwap}
-                disabled={swapping}
-              >
-                {swapping ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    Swapping...
-                  </>
-                ) : (
-                  `Confirm ${swapDirection === "buy" ? "Buy" : "Sell"}`
-                )}
-              </Button>
-            </div>
-          </Card>
+          )}
         </div>
-        );
-      })()}
-    </div>
+
+        {/* Quote Preview Modal */}
+        {showQuoteModal &&
+          swapQuote &&
+          (token || crossChainToken) &&
+          (() => {
+            const displaySymbol =
+              token?.symbol ?? crossChainToken?.symbol ?? "";
+            const displayDecimals =
+              token?.decimals ?? (crossChainToken?.symbol === "USDC" ? 6 : 18);
+            return (
+              <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+                <Card className="max-w-md w-full my-4 max-h-[90vh] overflow-y-auto">
+                  <div className="mb-3 sm:mb-4">
+                    <h3 className="text-lg sm:text-xl font-bold mb-2">
+                      Confirm Swap
+                    </h3>
+                    <p className="text-xs sm:text-sm text-white/60">
+                      Review your transaction details
+                    </p>
+                  </div>
+
+                  {/* Swap Details */}
+                  <div className="space-y-3 mb-4 sm:mb-6">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between p-2 sm:p-3 bg-white/5 rounded-[10px] min-w-0">
+                      <div className="min-w-0">
+                        <div className="text-xs sm:text-sm text-white/60">
+                          You Pay
+                        </div>
+                        <div className="font-bold text-sm sm:text-base truncate">
+                          {swapDirection === "buy"
+                            ? `${swapQuote.inputAmountUi.toFixed(2)} USDC`
+                            : `${formatTokenAmount(swapQuote.inputAmount, displayDecimals)} ${displaySymbol}`}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-xs sm:text-sm text-white/60">
+                          {swapQuote.inUsdValue != null
+                            ? `~$${swapQuote.inUsdValue.toFixed(2)}`
+                            : swapDirection === "buy"
+                              ? `~$${swapQuote.inputAmountUi.toFixed(2)}`
+                              : `~$${((swapQuote.inputAmount / Math.pow(10, displayDecimals)) * (token?.priceUsd || 0)).toFixed(2)}`}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-center">
+                      <ArrowDownUp className="w-5 h-5 text-white/40 shrink-0" />
+                    </div>
+
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between p-2 sm:p-3 bg-white/5 rounded-[10px] min-w-0">
+                      <div className="min-w-0">
+                        <div className="text-xs sm:text-sm text-white/60">
+                          You Receive
+                        </div>
+                        <div className="font-bold text-sm sm:text-base truncate">
+                          {swapDirection === "buy"
+                            ? `${formatTokenAmount(swapQuote.outputAmount, displayDecimals)} ${displaySymbol}`
+                            : `${swapQuote.outputAmountUi.toFixed(2)} USDC`}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-xs sm:text-sm text-white/60">
+                          {swapQuote.outUsdValue != null
+                            ? `~$${swapQuote.outUsdValue.toFixed(2)}`
+                            : swapDirection === "buy"
+                              ? `~$${((swapQuote.outputAmount / Math.pow(10, displayDecimals)) * (token?.priceUsd || 0)).toFixed(2)}`
+                              : `~$${swapQuote.outputAmountUi.toFixed(2)}`}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Transaction Details */}
+                    <div className="p-2 sm:p-3 bg-white/5 rounded-[10px] space-y-2 text-xs sm:text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-white/60">Price Impact</span>
+                        <span
+                          className={getPriceImpactColor(swapQuote.priceImpact)}
+                        >
+                          {formatPriceImpact(swapQuote.priceImpact)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-white/60">
+                          Slippage Tolerance
+                        </span>
+                        <span>{slippage / 100}%</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-white/60">Network Fee</span>
+                        <span>~0.000005 SOL</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex gap-2 sm:gap-3">
+                    <Button
+                      variant="outline"
+                      className="flex-1 min-w-0 h-10 sm:h-11"
+                      onClick={() => {
+                        setShowQuoteModal(false);
+                        setSwapQuote(null);
+                        setRelayQuote(null);
+                      }}
+                      disabled={swapping}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      className="flex-1 min-w-0 h-10 sm:h-11"
+                      onClick={handleConfirmSwap}
+                      disabled={swapping}
+                    >
+                      {swapping ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          Swapping...
+                        </>
+                      ) : (
+                        `Confirm ${swapDirection === "buy" ? "Buy" : "Sell"}`
+                      )}
+                    </Button>
+                  </div>
+                </Card>
+              </div>
+            );
+          })()}
+      </div>
     </>
   );
 }

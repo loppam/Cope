@@ -14,7 +14,12 @@ import {
   TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
-import { HDNodeWallet, JsonRpcProvider, Contract, type TransactionRequest } from "ethers";
+import {
+  HDNodeWallet,
+  JsonRpcProvider,
+  Contract,
+  type TransactionRequest,
+} from "ethers";
 import bs58 from "bs58";
 
 // --- constants ---
@@ -37,10 +42,21 @@ const DESTINATION_USDC: Record<string, string> = {
 const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const BNB_USDC = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d";
 const ETH_DERIVATION_PATH = "m/44'/60'/0'/0/0";
-const ERC20_ABI = ["function balanceOf(address) view returns (uint256)", "function decimals() view returns (uint8)"];
-const RELAY_CHAIN_IDS: Record<number, string> = { 792703809: "solana", 8453: "base", 56: "bnb" };
+const ERC20_ABI = [
+  "function balanceOf(address) view returns (uint256)",
+  "function decimals() view returns (uint8)",
+];
+const RELAY_CHAIN_IDS: Record<number, string> = {
+  792703809: "solana",
+  8453: "base",
+  56: "bnb",
+};
 const COINGECKO_API_BASE = "https://api.coingecko.com/api/v3/onchain";
-const CHAIN_TO_NETWORK: Record<string, string> = { solana: "solana", base: "base", bnb: "bsc" };
+const CHAIN_TO_NETWORK: Record<string, string> = {
+  solana: "solana",
+  base: "base",
+  bnb: "bsc",
+};
 
 const APP_FEE_BPS = "100";
 const DEFAULT_APP_FEE_RECIPIENT = "0x90554A05862879c77e64d154e0A4Eb92e48eC384";
@@ -54,19 +70,28 @@ function getAppFees(): { recipient: string; fee: string }[] {
   return [{ recipient, fee: APP_FEE_BPS }];
 }
 
-const ALCHEMY_UPDATE_WEBHOOK_URL = "https://dashboard.alchemy.com/api/update-webhook-addresses";
+const ALCHEMY_UPDATE_WEBHOOK_URL =
+  "https://dashboard.alchemy.com/api/update-webhook-addresses";
 
 /** Fire-and-forget: add custodial evm address to both Alchemy webhooks (Base + BNB) so deposits trigger evm-deposit. */
 function addEvmAddressToAlchemyWebhooks(addr: string): void {
   // Notify API requires Auth Token from Dashboard → Data → Webhooks → AUTH TOKEN (app API Key can 401)
-  const apiKey = process.env.ALCHEMY_NOTIFY_AUTH_TOKEN || process.env.ALCHEMY_API_KEY;
+  const apiKey =
+    process.env.ALCHEMY_NOTIFY_AUTH_TOKEN || process.env.ALCHEMY_API_KEY;
   const webhookIdBase = process.env.ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BASE;
   const webhookIdBnb = process.env.ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BNB;
   if (!apiKey || !webhookIdBase || !webhookIdBnb) return;
   const low = addr.toLowerCase();
   const body = (id: string) =>
-    JSON.stringify({ webhook_id: id, addresses_to_add: [low], addresses_to_remove: [] });
-  const opts = { method: "PATCH" as const, headers: { "Content-Type": "application/json", "X-Alchemy-Token": apiKey } };
+    JSON.stringify({
+      webhook_id: id,
+      addresses_to_add: [low],
+      addresses_to_remove: [],
+    });
+  const opts = {
+    method: "PATCH" as const,
+    headers: { "Content-Type": "application/json", "X-Alchemy-Token": apiKey },
+  };
   Promise.all([
     fetch(ALCHEMY_UPDATE_WEBHOOK_URL, { ...opts, body: body(webhookIdBase) }),
     fetch(ALCHEMY_UPDATE_WEBHOOK_URL, { ...opts, body: body(webhookIdBnb) }),
@@ -75,14 +100,22 @@ function addEvmAddressToAlchemyWebhooks(addr: string): void {
 
 /** Fire-and-forget: remove custodial evm address from both Alchemy webhooks (e.g. when user removes wallet or deletes account). */
 function removeEvmAddressFromAlchemyWebhooks(addr: string): void {
-  const apiKey = process.env.ALCHEMY_NOTIFY_AUTH_TOKEN || process.env.ALCHEMY_API_KEY;
+  const apiKey =
+    process.env.ALCHEMY_NOTIFY_AUTH_TOKEN || process.env.ALCHEMY_API_KEY;
   const webhookIdBase = process.env.ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BASE;
   const webhookIdBnb = process.env.ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BNB;
   if (!apiKey || !webhookIdBase || !webhookIdBnb) return;
   const low = addr.toLowerCase();
   const body = (id: string) =>
-    JSON.stringify({ webhook_id: id, addresses_to_add: [], addresses_to_remove: [low] });
-  const opts = { method: "PATCH" as const, headers: { "Content-Type": "application/json", "X-Alchemy-Token": apiKey } };
+    JSON.stringify({
+      webhook_id: id,
+      addresses_to_add: [],
+      addresses_to_remove: [low],
+    });
+  const opts = {
+    method: "PATCH" as const,
+    headers: { "Content-Type": "application/json", "X-Alchemy-Token": apiKey },
+  };
   Promise.all([
     fetch(ALCHEMY_UPDATE_WEBHOOK_URL, { ...opts, body: body(webhookIdBase) }),
     fetch(ALCHEMY_UPDATE_WEBHOOK_URL, { ...opts, body: body(webhookIdBnb) }),
@@ -122,25 +155,46 @@ function getAdminDb() {
   return getFirestore();
 }
 
-async function deriveKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
+async function deriveKey(
+  password: string,
+  salt: Uint8Array,
+): Promise<CryptoKey> {
   const encoder = new TextEncoder();
-  const keyMaterial = await crypto.subtle.importKey("raw", encoder.encode(password), { name: "PBKDF2" }, false, ["deriveBits", "deriveKey"]);
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(password),
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits", "deriveKey"],
+  );
   return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: new Uint8Array(salt), iterations: 100000, hash: "SHA-256" },
+    {
+      name: "PBKDF2",
+      salt: new Uint8Array(salt),
+      iterations: 100000,
+      hash: "SHA-256",
+    },
     keyMaterial,
     { name: "AES-GCM", length: 256 },
     false,
-    ["encrypt", "decrypt"]
+    ["encrypt", "decrypt"],
   );
 }
 
-async function decrypt(encryptedData: string, password: string): Promise<string> {
+async function decrypt(
+  encryptedData: string,
+  password: string,
+): Promise<string> {
   const combined = new Uint8Array(Buffer.from(encryptedData, "base64"));
   const salt = combined.slice(0, 16);
   const iv = combined.slice(16, 28);
   const encrypted = combined.slice(28);
   const key = await deriveKey(password, salt);
-  const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, encrypted);
+  const decrypted = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv },
+    key,
+    encrypted,
+  );
   return new TextDecoder().decode(decrypted);
 }
 
@@ -148,7 +202,7 @@ async function decryptWalletCredentials(
   userId: string,
   encryptedMnemonic: string | undefined,
   encryptedSecretKey: string,
-  encryptionSecret: string
+  encryptionSecret: string,
 ): Promise<{ mnemonic?: string; secretKey: Uint8Array }> {
   const key = `${userId}:${encryptionSecret}`;
   const secretKeyStr = await decrypt(encryptedSecretKey, key);
@@ -176,7 +230,10 @@ function getFunderKeypair(): Keypair | null {
   }
 }
 
-async function sendSolFromFunder(destination: string, lamports: number): Promise<string | null> {
+async function sendSolFromFunder(
+  destination: string,
+  lamports: number,
+): Promise<string | null> {
   const funder = getFunderKeypair();
   if (!funder) return null;
   const connection = new Connection(getRpcUrl(), "confirmed");
@@ -185,9 +242,10 @@ async function sendSolFromFunder(destination: string, lamports: number): Promise
       fromPubkey: funder.publicKey,
       toPubkey: new PublicKey(destination),
       lamports,
-    })
+    }),
   );
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+  const { blockhash, lastValidBlockHeight } =
+    await connection.getLatestBlockhash("confirmed");
   tx.recentBlockhash = blockhash;
   tx.feePayer = funder.publicKey;
   tx.sign(funder);
@@ -195,14 +253,25 @@ async function sendSolFromFunder(destination: string, lamports: number): Promise
     skipPreflight: false,
     preflightCommitment: "confirmed",
   });
-  await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight });
+  await connection.confirmTransaction({
+    signature: sig,
+    blockhash,
+    lastValidBlockHeight,
+  });
   return sig;
 }
 
-async function getEvmBalances(address: string): Promise<{ base: { usdc: number; native: number }; bnb: { usdc: number; native: number } }> {
+async function getEvmBalances(
+  address: string,
+): Promise<{
+  base: { usdc: number; native: number };
+  bnb: { usdc: number; native: number };
+}> {
   const result = { base: { usdc: 0, native: 0 }, bnb: { usdc: 0, native: 0 } };
   try {
-    const baseProvider = new JsonRpcProvider(process.env.BASE_RPC_URL || "https://mainnet.base.org");
+    const baseProvider = new JsonRpcProvider(
+      process.env.BASE_RPC_URL || "https://mainnet.base.org",
+    );
     const [baseNative, baseUsdcRaw] = await Promise.all([
       baseProvider.getBalance(address),
       new Contract(BASE_USDC, ERC20_ABI, baseProvider).balanceOf(address),
@@ -213,7 +282,9 @@ async function getEvmBalances(address: string): Promise<{ base: { usdc: number; 
     console.warn("Base balance fetch failed:", e);
   }
   try {
-    const bnbProvider = new JsonRpcProvider(process.env.BNB_RPC_URL || "https://bsc-dataseed.binance.org");
+    const bnbProvider = new JsonRpcProvider(
+      process.env.BNB_RPC_URL || "https://bsc-dataseed.binance.org",
+    );
     const [bnbNative, bnbUsdcRaw] = await Promise.all([
       bnbProvider.getBalance(address),
       new Contract(BNB_USDC, ERC20_ABI, bnbProvider).balanceOf(address),
@@ -227,25 +298,46 @@ async function getEvmBalances(address: string): Promise<{ base: { usdc: number; 
 }
 
 async function depositQuoteHandler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
   try {
     ensureFirebase();
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    if (!authHeader?.startsWith("Bearer "))
+      return res.status(401).json({ error: "Unauthorized" });
     await getAdminAuth().verifyIdToken(authHeader.slice(7));
-    const body = req.body as { network?: string; amountUsd?: number; recipientSolAddress?: string };
+    const body = req.body as {
+      network?: string;
+      amountUsd?: number;
+      recipientSolAddress?: string;
+    };
     const network = (body?.network || "").toLowerCase();
-    const amountUsd = typeof body?.amountUsd === "number" ? body.amountUsd : parseFloat(String(body?.amountUsd ?? ""));
-    const recipientSolAddress = typeof body?.recipientSolAddress === "string" ? body.recipientSolAddress.trim() : "";
-    if (network !== "base" && network !== "bnb") return res.status(400).json({ error: "Invalid network; use base or bnb" });
-    if (!Number.isFinite(amountUsd) || amountUsd <= 0 || amountUsd > 1_000_000) return res.status(400).json({ error: "Invalid amountUsd" });
-    if (!recipientSolAddress || recipientSolAddress.length < 32) return res.status(400).json({ error: "Invalid recipientSolAddress" });
-    const originChainId = CHAIN_IDS[network] ?? (network === "base" ? 8453 : 56);
+    const amountUsd =
+      typeof body?.amountUsd === "number"
+        ? body.amountUsd
+        : parseFloat(String(body?.amountUsd ?? ""));
+    const recipientSolAddress =
+      typeof body?.recipientSolAddress === "string"
+        ? body.recipientSolAddress.trim()
+        : "";
+    if (network !== "base" && network !== "bnb")
+      return res
+        .status(400)
+        .json({ error: "Invalid network; use base or bnb" });
+    if (!Number.isFinite(amountUsd) || amountUsd <= 0 || amountUsd > 1_000_000)
+      return res.status(400).json({ error: "Invalid amountUsd" });
+    if (!recipientSolAddress || recipientSolAddress.length < 32)
+      return res.status(400).json({ error: "Invalid recipientSolAddress" });
+    const originChainId =
+      CHAIN_IDS[network] ?? (network === "base" ? 8453 : 56);
     const amountRaw = Math.floor(amountUsd * 1e6).toString();
     const apiKey = process.env.RELAY_API_KEY;
     const quoteRes = await fetch(`${RELAY_API_BASE}/quote/v2`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...(apiKey && { "x-api-key": apiKey }) },
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey && { "x-api-key": apiKey }),
+      },
       body: JSON.stringify({
         user: "0x0000000000000000000000000000000000000000",
         originChainId,
@@ -270,17 +362,22 @@ async function depositQuoteHandler(req: VercelRequest, res: VercelResponse) {
       } catch {
         if (errBody) message = errBody.slice(0, 200);
       }
-      return res.status(quoteRes.status >= 500 ? 502 : 400).json({ error: message });
+      return res
+        .status(quoteRes.status >= 500 ? 502 : 400)
+        .json({ error: message });
     }
     const quote = await quoteRes.json();
     const steps = quote?.steps || [];
     const firstStep = steps[0];
-    const depositAddress = firstStep?.depositAddress || firstStep?.items?.[0]?.data?.to;
+    const depositAddress =
+      firstStep?.depositAddress || firstStep?.items?.[0]?.data?.to;
     const requestId = firstStep?.requestId || quote?.protocol?.v2?.orderId;
     const details = quote?.details;
     const currencyOut = details?.currencyOut;
-    const amountFormatted = currencyOut?.amountFormatted ?? amountUsd.toFixed(2);
-    const amountOut = currencyOut?.amount != null ? String(currencyOut.amount) : amountRaw;
+    const amountFormatted =
+      currencyOut?.amountFormatted ?? amountUsd.toFixed(2);
+    const amountOut =
+      currencyOut?.amount != null ? String(currencyOut.amount) : amountRaw;
     return res.status(200).json({
       depositAddress: depositAddress || null,
       amount: amountOut,
@@ -288,42 +385,89 @@ async function depositQuoteHandler(req: VercelRequest, res: VercelResponse) {
       requestId: requestId || null,
       currency: "USDC",
       network,
-      details: details ? { currencyIn: details.currencyIn, currencyOut: details.currencyOut, fees: quote.fees } : undefined,
+      details: details
+        ? {
+            currencyIn: details.currencyIn,
+            currencyOut: details.currencyOut,
+            fees: quote.fees,
+          }
+        : undefined,
     });
   } catch (e: unknown) {
     console.error("deposit-quote error:", e);
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+    return res
+      .status(500)
+      .json({
+        error: e instanceof Error ? e.message : "Internal server error",
+      });
   }
 }
 
 async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
   try {
     ensureFirebase();
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    if (!authHeader?.startsWith("Bearer "))
+      return res.status(401).json({ error: "Unauthorized" });
     const decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
     const userId = decoded?.uid ?? "unknown";
-    const body = req.body as { inputMint?: string; outputMint?: string; amount?: string; slippageBps?: number; userWallet?: string; outputChainId?: number; outputChain?: string; recipient?: string };
+    const body = req.body as {
+      inputMint?: string;
+      outputMint?: string;
+      amount?: string;
+      slippageBps?: number;
+      userWallet?: string;
+      outputChainId?: number;
+      outputChain?: string;
+      recipient?: string;
+    };
     const inputMint = (body?.inputMint || "").trim();
     const outputMint = (body?.outputMint || "").trim();
     const amount = body?.amount ?? "";
-    const slippageBps = typeof body?.slippageBps === "number" ? body.slippageBps : 100;
+    const slippageBps =
+      typeof body?.slippageBps === "number" ? body.slippageBps : 100;
     const userWallet = (body?.userWallet || "").trim();
     let destinationChainId = CHAIN_IDS.solana;
-    if (typeof body?.outputChainId === "number") destinationChainId = body.outputChainId;
-    else if (body?.outputChain) destinationChainId = CHAIN_IDS[(body.outputChain as string).toLowerCase()] ?? destinationChainId;
+    if (typeof body?.outputChainId === "number")
+      destinationChainId = body.outputChainId;
+    else if (body?.outputChain)
+      destinationChainId =
+        CHAIN_IDS[(body.outputChain as string).toLowerCase()] ??
+        destinationChainId;
     if (!inputMint || !outputMint || !amount || !userWallet) {
-      console.warn("[swap-quote] missing params", { userId, inputMint: !!inputMint, outputMint: !!outputMint, amount: !!amount, userWallet: !!userWallet });
-      return res.status(400).json({ error: "Missing inputMint, outputMint, amount, or userWallet" });
+      console.warn("[swap-quote] missing params", {
+        userId,
+        inputMint: !!inputMint,
+        outputMint: !!outputMint,
+        amount: !!amount,
+        userWallet: !!userWallet,
+      });
+      return res
+        .status(400)
+        .json({
+          error: "Missing inputMint, outputMint, amount, or userWallet",
+        });
     }
     const tradeDir = outputMint === SOLANA_USDC_MINT ? "sell" : "buy";
-    console.log("[swap-quote] start", { userId, tradeDir, inputMint: inputMint.slice(0, 8) + "…", outputMint: outputMint.slice(0, 8) + "…", amount, slippageBps, userWallet: userWallet.slice(0, 8) + "…" });
+    console.log("[swap-quote] start", {
+      userId,
+      tradeDir,
+      inputMint: inputMint.slice(0, 8) + "…",
+      outputMint: outputMint.slice(0, 8) + "…",
+      amount,
+      slippageBps,
+      userWallet: userWallet.slice(0, 8) + "…",
+    });
     const apiKey = process.env.RELAY_API_KEY;
     const recipient = body?.recipient?.trim() || userWallet;
     const quoteRes = await fetch(`${RELAY_API_BASE}/quote/v2`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...(apiKey && { "x-api-key": apiKey }) },
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey && { "x-api-key": apiKey }),
+      },
       body: JSON.stringify({
         user: userWallet,
         originChainId: CHAIN_IDS.solana,
@@ -347,8 +491,14 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
       } catch {
         if (errBody) message = errBody.slice(0, 200);
       }
-      console.warn("[swap-quote] Relay quote failed", { userId, status: quoteRes.status, message: message.slice(0, 200) });
-      return res.status(quoteRes.status >= 500 ? 502 : 400).json({ error: message });
+      console.warn("[swap-quote] Relay quote failed", {
+        userId,
+        status: quoteRes.status,
+        message: message.slice(0, 200),
+      });
+      return res
+        .status(quoteRes.status >= 500 ? 502 : 400)
+        .json({ error: message });
     }
     const quote = await quoteRes.json();
     const stepCount = Array.isArray(quote?.steps) ? quote.steps.length : 0;
@@ -356,32 +506,63 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json(quote);
   } catch (e: unknown) {
     console.error("[swap-quote] error", e);
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+    return res
+      .status(500)
+      .json({
+        error: e instanceof Error ? e.message : "Internal server error",
+      });
   }
 }
 
 async function withdrawQuoteHandler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
   try {
     ensureFirebase();
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    if (!authHeader?.startsWith("Bearer "))
+      return res.status(401).json({ error: "Unauthorized" });
     await getAdminAuth().verifyIdToken(authHeader.slice(7));
-    const body = req.body as { destinationNetwork?: string; amount?: number; destinationAddress?: string; originAddress?: string };
+    const body = req.body as {
+      destinationNetwork?: string;
+      amount?: number;
+      destinationAddress?: string;
+      originAddress?: string;
+    };
     const destinationNetwork = (body?.destinationNetwork || "").toLowerCase();
-    const amount = typeof body?.amount === "number" ? body.amount : parseFloat(String(body?.amount || "0"));
+    const amount =
+      typeof body?.amount === "number"
+        ? body.amount
+        : parseFloat(String(body?.amount || "0"));
     const destinationAddress = (body?.destinationAddress || "").trim();
     const originAddress = (body?.originAddress || "").trim();
-    if (destinationNetwork !== "base" && destinationNetwork !== "bnb" && destinationNetwork !== "solana") return res.status(400).json({ error: "Invalid destinationNetwork; use base, bnb, or solana" });
-    if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "Invalid amount" });
-    if (!destinationAddress || destinationAddress.length < 20) return res.status(400).json({ error: "Invalid destinationAddress" });
+    if (
+      destinationNetwork !== "base" &&
+      destinationNetwork !== "bnb" &&
+      destinationNetwork !== "solana"
+    )
+      return res
+        .status(400)
+        .json({
+          error: "Invalid destinationNetwork; use base, bnb, or solana",
+        });
+    if (!Number.isFinite(amount) || amount <= 0)
+      return res.status(400).json({ error: "Invalid amount" });
+    if (!destinationAddress || destinationAddress.length < 20)
+      return res.status(400).json({ error: "Invalid destinationAddress" });
     const apiKey = process.env.RELAY_API_KEY;
     const destinationChainId = CHAIN_IDS[destinationNetwork] ?? CHAIN_IDS.base;
-    const destinationCurrency = destinationNetwork === "solana" ? SOLANA_USDC_MINT : (DESTINATION_USDC[destinationNetwork] || DESTINATION_USDC.base);
+    const destinationCurrency =
+      destinationNetwork === "solana"
+        ? SOLANA_USDC_MINT
+        : DESTINATION_USDC[destinationNetwork] || DESTINATION_USDC.base;
     const amountRaw = Math.floor(amount * 1e6).toString();
     const quoteRes = await fetch(`${RELAY_API_BASE}/quote/v2`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...(apiKey && { "x-api-key": apiKey }) },
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey && { "x-api-key": apiKey }),
+      },
       body: JSON.stringify({
         user: originAddress || "0x0000000000000000000000000000000000000000",
         originChainId: CHAIN_IDS.solana,
@@ -404,19 +585,36 @@ async function withdrawQuoteHandler(req: VercelRequest, res: VercelResponse) {
       } catch {
         if (errBody) message = errBody.slice(0, 200);
       }
-      return res.status(quoteRes.status >= 500 ? 502 : 400).json({ error: message });
+      return res
+        .status(quoteRes.status >= 500 ? 502 : 400)
+        .json({ error: message });
     }
     const quote = await quoteRes.json();
     return res.status(200).json(quote);
   } catch (e: unknown) {
     console.error("withdraw-quote error:", e);
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+    return res
+      .status(500)
+      .json({
+        error: e instanceof Error ? e.message : "Internal server error",
+      });
   }
 }
 
-type RelaySolanaAccountMeta = { pubkey: string; isSigner: boolean; isWritable: boolean };
-type RelaySolanaInstruction = { programId: string; keys: RelaySolanaAccountMeta[]; data: string };
-type RelaySolanaTxData = { instructions: RelaySolanaInstruction[]; addressLookupTableAddresses?: string[] };
+type RelaySolanaAccountMeta = {
+  pubkey: string;
+  isSigner: boolean;
+  isWritable: boolean;
+};
+type RelaySolanaInstruction = {
+  programId: string;
+  keys: RelaySolanaAccountMeta[];
+  data: string;
+};
+type RelaySolanaTxData = {
+  instructions: RelaySolanaInstruction[];
+  addressLookupTableAddresses?: string[];
+};
 
 function isRelaySolanaTxData(x: unknown): x is RelaySolanaTxData {
   if (!x || typeof x !== "object") return false;
@@ -466,7 +664,8 @@ function decodeRelayInstructionData(data: string): Buffer {
   if (isBase64Like(s)) {
     try {
       const buf = Buffer.from(s, "base64");
-      if (buf.length > 0 && buf.length <= MAX_INSTRUCTION_DATA_BYTES) return buf;
+      if (buf.length > 0 && buf.length <= MAX_INSTRUCTION_DATA_BYTES)
+        return buf;
     } catch {
       // fall through
     }
@@ -477,7 +676,8 @@ function decodeRelayInstructionData(data: string): Buffer {
     try {
       const decoded = bs58.decode(s);
       const buf = Buffer.from(decoded);
-      if (buf.length > 0 && buf.length <= MAX_INSTRUCTION_DATA_BYTES) return buf;
+      if (buf.length > 0 && buf.length <= MAX_INSTRUCTION_DATA_BYTES)
+        return buf;
     } catch {
       // fall through
     }
@@ -507,7 +707,7 @@ function decodeRelayInstructionData(data: string): Buffer {
 async function buildVersionedTxFromRelayInstructions(
   data: RelaySolanaTxData,
   payerKey: PublicKey,
-  connection: Connection
+  connection: Connection,
 ): Promise<VersionedTransaction> {
   const ixs: TransactionInstruction[] = data.instructions.map((ix) => {
     const keys = (ix.keys ?? []).map((k) => ({
@@ -522,7 +722,9 @@ async function buildVersionedTxFromRelayInstructions(
     });
   });
 
-  const lookupAddrs = Array.isArray(data.addressLookupTableAddresses) ? data.addressLookupTableAddresses : [];
+  const lookupAddrs = Array.isArray(data.addressLookupTableAddresses)
+    ? data.addressLookupTableAddresses
+    : [];
   const lookupAccounts: AddressLookupTableAccount[] = [];
   for (const addr of lookupAddrs) {
     try {
@@ -544,13 +746,17 @@ async function buildVersionedTxFromRelayInstructions(
 }
 
 async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
   let userId: string | undefined;
   let stepIndex = 0;
+  let transaction: VersionedTransaction | null = null;
+  let connection: Connection | null = null;
   try {
     ensureFirebase();
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    if (!authHeader?.startsWith("Bearer "))
+      return res.status(401).json({ error: "Unauthorized" });
     const decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
     userId = decoded.uid;
     const body = req.body as { quoteResponse?: unknown; stepIndex?: number };
@@ -561,10 +767,16 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       console.warn("[execute-step] missing quoteResponse", { userId });
       return res.status(400).json({ error: "Missing quoteResponse" });
     }
-    const quote = quoteResponse as { steps?: Array<{ items?: Array<{ data?: unknown }> }> };
+    const quote = quoteResponse as {
+      steps?: Array<{ items?: Array<{ data?: unknown }> }>;
+    };
     const steps = quote?.steps;
     if (!Array.isArray(steps) || !steps[stepIndex]) {
-      console.warn("[execute-step] invalid step index or steps", { userId, stepIndex, stepCount: steps?.length });
+      console.warn("[execute-step] invalid step index or steps", {
+        userId,
+        stepIndex,
+        stepCount: steps?.length,
+      });
       return res.status(400).json({ error: "Invalid step index or steps" });
     }
     const firstItem = steps[stepIndex]?.items?.[0];
@@ -576,7 +788,9 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
     const encryptionSecret = process.env.ENCRYPTION_SECRET;
     if (!encryptionSecret) {
       console.warn("[execute-step] ENCRYPTION_SECRET not configured");
-      return res.status(503).json({ error: "ENCRYPTION_SECRET not configured" });
+      return res
+        .status(503)
+        .json({ error: "ENCRYPTION_SECRET not configured" });
     }
     const db = getAdminDb();
     const userSnap = await db.collection("users").doc(userId).get();
@@ -587,7 +801,12 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       console.warn("[execute-step] wallet credentials not found", { userId });
       return res.status(400).json({ error: "Wallet credentials not found" });
     }
-    const { secretKey } = await decryptWalletCredentials(userId, encryptedMnemonic, encryptedSecretKey, encryptionSecret);
+    const { secretKey } = await decryptWalletCredentials(
+      userId,
+      encryptedMnemonic,
+      encryptedSecretKey,
+      encryptionSecret,
+    );
     const wallet = Keypair.fromSecretKey(secretKey);
     const storedWalletAddress = userData?.walletAddress as string | undefined;
     console.log("[execute-step] wallet loaded, signing", {
@@ -595,19 +814,22 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       stepIndex,
       signerPublicKey: wallet.publicKey.toBase58(),
       storedWalletAddress: storedWalletAddress ?? null,
-      signerMatchesStored: storedWalletAddress ? wallet.publicKey.toBase58() === storedWalletAddress : "no stored address",
+      signerMatchesStored: storedWalletAddress
+        ? wallet.publicKey.toBase58() === storedWalletAddress
+        : "no stored address",
     });
-    const connection = new Connection(getRpcUrl());
+    connection = new Connection(getRpcUrl());
 
-    let transaction: VersionedTransaction | null = null;
     let serializedTx: string | null = null;
     if (typeof data === "string") serializedTx = data;
     else if (data && typeof data === "object") {
       const d = data as Record<string, unknown>;
-      if (typeof d.serializedTransaction === "string") serializedTx = d.serializedTransaction;
+      if (typeof d.serializedTransaction === "string")
+        serializedTx = d.serializedTransaction;
       else if (typeof d.transaction === "string") serializedTx = d.transaction;
       else if (typeof d.payload === "string") serializedTx = d.payload;
-      else if (typeof d.transactionBytes === "string") serializedTx = d.transactionBytes;
+      else if (typeof d.transactionBytes === "string")
+        serializedTx = d.transactionBytes;
     }
 
     const funderKeypair = getFunderKeypair();
@@ -619,16 +841,29 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
     } else if (isRelaySolanaTxData(data)) {
       // Relay can return Solana steps as { instructions, addressLookupTableAddresses } instead of a serialized tx.
       // When funder is configured, use it as fee payer so user does not need SOL (true USDC-only).
-      const payerKey = useFunderAsPayer ? funderKeypair!.publicKey : wallet.publicKey;
-      transaction = await buildVersionedTxFromRelayInstructions(data, payerKey, connection);
+      const payerKey = useFunderAsPayer
+        ? funderKeypair!.publicKey
+        : wallet.publicKey;
+      transaction = await buildVersionedTxFromRelayInstructions(
+        data,
+        payerKey,
+        connection,
+      );
     }
 
     if (!transaction) {
-      console.warn("[execute-step] step data has no Solana transaction", { userId, stepIndex });
-      return res.status(400).json({ error: "Step data does not contain Solana transaction" });
+      console.warn("[execute-step] step data has no Solana transaction", {
+        userId,
+        stepIndex,
+      });
+      return res
+        .status(400)
+        .json({ error: "Step data does not contain Solana transaction" });
     }
 
-    const txAccountKeys = transaction.message.staticAccountKeys.map((pk) => pk.toBase58());
+    const txAccountKeys = transaction.message.staticAccountKeys.map((pk) =>
+      pk.toBase58(),
+    );
     console.log("[execute-step] tx accounts (static)", {
       userId,
       stepIndex,
@@ -659,27 +894,43 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       throw serErr;
     }
 
-    const sig = await connection.sendRawTransaction(serialized, { skipPreflight: false, preflightCommitment: "confirmed" });
-    console.log("[execute-step] success", { userId, stepIndex, signature: sig });
+    const sig = await connection.sendRawTransaction(serialized, {
+      skipPreflight: false,
+      preflightCommitment: "confirmed",
+    });
+    console.log("[execute-step] success", {
+      userId,
+      stepIndex,
+      signature: sig,
+    });
     return res.status(200).json({ signature: sig, status: "Success" });
   } catch (e: unknown) {
     const err = e as Error & { logs?: string[]; getLogs?: () => string[] };
-    const logs = err.logs ?? (typeof err.getLogs === "function" ? err.getLogs() : undefined);
+    const logs =
+      err.logs ??
+      (typeof err.getLogs === "function" ? err.getLogs() : undefined);
     const errMsg = e instanceof Error ? e.message : String(e);
-    console.error("[execute-step] error", { error: errMsg, logs: logs ?? null });
+    console.error("[execute-step] error", {
+      error: errMsg,
+      logs: logs ?? null,
+    });
 
     const isEncodingOverrun = /encoding overruns Uint8Array/i.test(errMsg);
     if (isEncodingOverrun) {
-      console.error("[execute-step] encoding overrun - possible Relay instruction data format mismatch", {
-        userId,
-        stepIndex,
-        errMsg,
-      });
+      console.error(
+        "[execute-step] encoding overrun - possible Relay instruction data format mismatch",
+        {
+          userId,
+          stepIndex,
+          errMsg,
+        },
+      );
     }
 
     const isInsufficientSol =
       /insufficient lamports|Transfer: insufficient/i.test(errMsg) ||
-      (Array.isArray(logs) && logs.some((l) => /insufficient lamports|need \d+/.test(String(l))));
+      (Array.isArray(logs) &&
+        logs.some((l) => /insufficient lamports|need \d+/.test(String(l))));
 
     if (isInsufficientSol && getFunderKeypair() && userId) {
       try {
@@ -687,9 +938,39 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
         const snap = await db.collection("users").doc(userId).get();
         const walletAddress = snap.data()?.walletAddress as string | undefined;
         if (walletAddress && walletAddress.length >= 32) {
-          const fundSig = await sendSolFromFunder(walletAddress, SOL_FUNDER_AMOUNT_LAMPORTS);
+          let lamportsToSend = SOL_FUNDER_AMOUNT_LAMPORTS;
+          if (transaction && connection) {
+            try {
+              const feeResult = await connection.getFeeForMessage(
+                transaction.message,
+                "confirmed",
+              );
+              const baseFee = feeResult.value ?? 5000;
+              const rentBuffer = 2_000_000; // ~1 ATA rent
+              const computeBuffer = 500_000;
+              const computed = baseFee + rentBuffer + computeBuffer;
+              lamportsToSend = Math.min(
+                Math.max(computed, 1_000_000),
+                10_000_000,
+              );
+              console.log("[execute-step] dynamic funding", {
+                baseFee,
+                lamportsToSend,
+              });
+            } catch {
+              // fall back to fixed amount
+            }
+          }
+          const fundSig = await sendSolFromFunder(
+            walletAddress,
+            lamportsToSend,
+          );
           if (fundSig) {
-            console.log("[execute-step] funded wallet for retry", { userId, signature: fundSig });
+            console.log("[execute-step] funded wallet for retry", {
+              userId,
+              signature: fundSig,
+              lamports: lamportsToSend,
+            });
             return res.status(200).json({
               status: "Retry",
               error: "Retry transaction",
@@ -716,24 +997,40 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
 }
 
 async function evmAddressHandler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "GET")
+    return res.status(405).json({ error: "Method not allowed" });
   try {
     ensureFirebase();
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    if (!authHeader?.startsWith("Bearer "))
+      return res.status(401).json({ error: "Unauthorized" });
     const decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
     const userId = decoded.uid;
     const encryptionSecret = process.env.ENCRYPTION_SECRET;
-    if (!encryptionSecret) return res.status(503).json({ error: "ENCRYPTION_SECRET not configured" });
+    if (!encryptionSecret)
+      return res
+        .status(503)
+        .json({ error: "ENCRYPTION_SECRET not configured" });
     const db = getAdminDb();
     const userSnap = await db.collection("users").doc(userId).get();
     const userData = userSnap.data();
     const encryptedSecretKey = userData?.encryptedSecretKey;
     const encryptedMnemonic = userData?.encryptedMnemonic;
-    if (!encryptedSecretKey) return res.status(400).json({ error: "Wallet credentials not found" });
-    const { mnemonic } = await decryptWalletCredentials(userId, encryptedMnemonic, encryptedSecretKey, encryptionSecret);
-    if (!mnemonic || !mnemonic.trim()) return res.status(200).json({ evmAddress: null });
-    const wallet = HDNodeWallet.fromPhrase(mnemonic.trim(), undefined, ETH_DERIVATION_PATH);
+    if (!encryptedSecretKey)
+      return res.status(400).json({ error: "Wallet credentials not found" });
+    const { mnemonic } = await decryptWalletCredentials(
+      userId,
+      encryptedMnemonic,
+      encryptedSecretKey,
+      encryptionSecret,
+    );
+    if (!mnemonic || !mnemonic.trim())
+      return res.status(200).json({ evmAddress: null });
+    const wallet = HDNodeWallet.fromPhrase(
+      mnemonic.trim(),
+      undefined,
+      ETH_DERIVATION_PATH,
+    );
     const addr = wallet.address.toLowerCase();
     try {
       await userSnap.ref.update({ evmAddress: addr });
@@ -744,29 +1041,61 @@ async function evmAddressHandler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ evmAddress: wallet.address });
   } catch (e: unknown) {
     console.error("evm-address error:", e);
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+    return res
+      .status(500)
+      .json({
+        error: e instanceof Error ? e.message : "Internal server error",
+      });
   }
 }
 
 async function evmBalancesHandler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "GET")
+    return res.status(405).json({ error: "Method not allowed" });
   try {
     ensureFirebase();
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    if (!authHeader?.startsWith("Bearer "))
+      return res.status(401).json({ error: "Unauthorized" });
     const decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
     const userId = decoded.uid;
     const encryptionSecret = process.env.ENCRYPTION_SECRET;
-    if (!encryptionSecret) return res.status(503).json({ error: "ENCRYPTION_SECRET not configured" });
+    if (!encryptionSecret)
+      return res
+        .status(503)
+        .json({ error: "ENCRYPTION_SECRET not configured" });
     const db = getAdminDb();
     const userSnap = await db.collection("users").doc(userId).get();
     const userData = userSnap.data();
     const encryptedSecretKey = userData?.encryptedSecretKey;
     const encryptedMnemonic = userData?.encryptedMnemonic;
-    if (!encryptedSecretKey) return res.status(200).json({ evmAddress: null, base: { usdc: 0, native: 0 }, bnb: { usdc: 0, native: 0 } });
-    const { mnemonic } = await decryptWalletCredentials(userId, encryptedMnemonic, encryptedSecretKey, encryptionSecret);
-    if (!mnemonic || !mnemonic.trim()) return res.status(200).json({ evmAddress: null, base: { usdc: 0, native: 0 }, bnb: { usdc: 0, native: 0 } });
-    const wallet = HDNodeWallet.fromPhrase(mnemonic.trim(), undefined, ETH_DERIVATION_PATH);
+    if (!encryptedSecretKey)
+      return res
+        .status(200)
+        .json({
+          evmAddress: null,
+          base: { usdc: 0, native: 0 },
+          bnb: { usdc: 0, native: 0 },
+        });
+    const { mnemonic } = await decryptWalletCredentials(
+      userId,
+      encryptedMnemonic,
+      encryptedSecretKey,
+      encryptionSecret,
+    );
+    if (!mnemonic || !mnemonic.trim())
+      return res
+        .status(200)
+        .json({
+          evmAddress: null,
+          base: { usdc: 0, native: 0 },
+          bnb: { usdc: 0, native: 0 },
+        });
+    const wallet = HDNodeWallet.fromPhrase(
+      mnemonic.trim(),
+      undefined,
+      ETH_DERIVATION_PATH,
+    );
     const addr = wallet.address.toLowerCase();
     try {
       await userSnap.ref.update({ evmAddress: addr });
@@ -775,82 +1104,134 @@ async function evmBalancesHandler(req: VercelRequest, res: VercelResponse) {
       // best-effort persist for webhook lookup
     }
     const balances = await getEvmBalances(wallet.address);
-    return res.status(200).json({ evmAddress: wallet.address, base: balances.base, bnb: balances.bnb });
+    return res
+      .status(200)
+      .json({
+        evmAddress: wallet.address,
+        base: balances.base,
+        bnb: balances.bnb,
+      });
   } catch (e: unknown) {
     console.error("evm-balances error:", e);
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+    return res
+      .status(500)
+      .json({
+        error: e instanceof Error ? e.message : "Internal server error",
+      });
   }
 }
 
-async function evmBalancesPublicHandler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+async function evmBalancesPublicHandler(
+  req: VercelRequest,
+  res: VercelResponse,
+) {
+  if (req.method !== "GET")
+    return res.status(405).json({ error: "Method not allowed" });
   const address = (req.query.address as string)?.trim();
   if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
-    return res.status(400).json({ error: "Invalid address; provide 0x-prefixed 40-char hex" });
+    return res
+      .status(400)
+      .json({ error: "Invalid address; provide 0x-prefixed 40-char hex" });
   }
   try {
     const balances = await getEvmBalances(address);
     return res.status(200).json({ base: balances.base, bnb: balances.bnb });
   } catch (e: unknown) {
     console.error("evm-balances-public error:", e);
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+    return res
+      .status(500)
+      .json({
+        error: e instanceof Error ? e.message : "Internal server error",
+      });
   }
 }
 
-async function evmAddressRemoveHandler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST" && req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+async function evmAddressRemoveHandler(
+  req: VercelRequest,
+  res: VercelResponse,
+) {
+  if (req.method !== "POST" && req.method !== "GET")
+    return res.status(405).json({ error: "Method not allowed" });
   try {
     ensureFirebase();
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    if (!authHeader?.startsWith("Bearer "))
+      return res.status(401).json({ error: "Unauthorized" });
     const decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
     const userId = decoded.uid;
     const db = getAdminDb();
     const userSnap = await db.collection("users").doc(userId).get();
     const evmAddress = userSnap.data()?.evmAddress;
-    if (evmAddress && typeof evmAddress === "string" && evmAddress.length >= 40) {
+    if (
+      evmAddress &&
+      typeof evmAddress === "string" &&
+      evmAddress.length >= 40
+    ) {
       removeEvmAddressFromAlchemyWebhooks(evmAddress);
     }
     return res.status(200).json({ success: true });
   } catch (e: unknown) {
     console.error("evm-address-remove error:", e);
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+    return res
+      .status(500)
+      .json({
+        error: e instanceof Error ? e.message : "Internal server error",
+      });
   }
 }
 
 async function currenciesHandler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "GET" && req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "GET" && req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
   try {
     const apiKey = process.env.RELAY_API_KEY;
     const body = req.method === "POST" ? req.body : {};
     const query = req.query || {};
     const term = (body.term ?? query.term ?? "").toString().trim();
-    const addressParam = (body.address ?? query.address ?? "").toString().trim();
+    const addressParam = (body.address ?? query.address ?? "")
+      .toString()
+      .trim();
     const tokensParam = body.tokens ?? query.tokens;
     const chainIdsParam = body.chainIds ?? query.chainIds;
-    const limit = Math.min(Math.max(1, parseInt(String(body.limit ?? query.limit ?? "20"), 10) || 20), 50);
+    const limit = Math.min(
+      Math.max(
+        1,
+        parseInt(String(body.limit ?? query.limit ?? "20"), 10) || 20,
+      ),
+      50,
+    );
     const verified = body.verified ?? query.verified;
-    const relayParams: Record<string, unknown> = { limit, useExternalSearch: true };
+    const relayParams: Record<string, unknown> = {
+      limit,
+      useExternalSearch: true,
+    };
     if (term) relayParams.term = term;
     if (addressParam) {
       relayParams.address = addressParam;
-      if (!Array.isArray(chainIdsParam) || chainIdsParam.length === 0) relayParams.chainIds = [CHAIN_IDS.solana];
+      if (!Array.isArray(chainIdsParam) || chainIdsParam.length === 0)
+        relayParams.chainIds = [CHAIN_IDS.solana];
       if (verified === undefined) relayParams.verified = false;
     }
-    if (Array.isArray(tokensParam) && tokensParam.length > 0) relayParams.tokens = tokensParam;
+    if (Array.isArray(tokensParam) && tokensParam.length > 0)
+      relayParams.tokens = tokensParam;
     else if (typeof tokensParam === "string" && tokensParam) {
       try {
         const parsed = JSON.parse(tokensParam) as string[];
-        if (Array.isArray(parsed) && parsed.length > 0) relayParams.tokens = parsed;
+        if (Array.isArray(parsed) && parsed.length > 0)
+          relayParams.tokens = parsed;
       } catch {
         relayParams.tokens = [tokensParam];
       }
     }
-    if (Array.isArray(chainIdsParam) && chainIdsParam.length > 0) relayParams.chainIds = chainIdsParam;
+    if (Array.isArray(chainIdsParam) && chainIdsParam.length > 0)
+      relayParams.chainIds = chainIdsParam;
     if (verified !== undefined) relayParams.verified = Boolean(verified);
     let relayRes = await fetch(`${RELAY_API_BASE}/currencies/v2`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...(apiKey && { "x-api-key": apiKey }) },
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey && { "x-api-key": apiKey }),
+      },
       body: JSON.stringify(relayParams),
     });
     if (relayRes.status === 404 || relayRes.status === 405) {
@@ -858,7 +1239,9 @@ async function currenciesHandler(req: VercelRequest, res: VercelResponse) {
       if (term) getUrl.searchParams.set("term", term);
       if (addressParam) getUrl.searchParams.set("address", addressParam);
       getUrl.searchParams.set("limit", String(limit));
-      relayRes = await fetch(getUrl.toString(), { headers: apiKey ? { "x-api-key": apiKey } : {} });
+      relayRes = await fetch(getUrl.toString(), {
+        headers: apiKey ? { "x-api-key": apiKey } : {},
+      });
     }
     const raw = await relayRes.text();
     if (!relayRes.ok) {
@@ -870,7 +1253,9 @@ async function currenciesHandler(req: VercelRequest, res: VercelResponse) {
       } catch {
         if (raw) message = raw.slice(0, 200);
       }
-      return res.status(relayRes.status >= 500 ? 502 : 400).json({ error: message });
+      return res
+        .status(relayRes.status >= 500 ? 502 : 400)
+        .json({ error: message });
     }
     let data: unknown;
     try {
@@ -878,9 +1263,20 @@ async function currenciesHandler(req: VercelRequest, res: VercelResponse) {
     } catch {
       return res.status(502).json({ error: "Invalid JSON from Relay" });
     }
-    const list = Array.isArray(data) ? data : (data as { currencies?: unknown[]; data?: unknown[] })?.currencies ?? (data as { currencies?: unknown[]; data?: unknown[] })?.data ?? [];
+    const list = Array.isArray(data)
+      ? data
+      : ((data as { currencies?: unknown[]; data?: unknown[] })?.currencies ??
+        (data as { currencies?: unknown[]; data?: unknown[] })?.data ??
+        []);
     const SUPPORTED_CHAIN_IDS = new Set([792703809, 8453, 56]);
-    type RelayItem = { chainId?: number; address?: string; symbol?: string; name?: string; decimals?: number; metadata?: { logoURI?: string; verified?: boolean } };
+    type RelayItem = {
+      chainId?: number;
+      address?: string;
+      symbol?: string;
+      name?: string;
+      decimals?: number;
+      metadata?: { logoURI?: string; verified?: boolean };
+    };
     const normalized = (list as RelayItem[])
       .filter((c) => c.chainId != null && SUPPORTED_CHAIN_IDS.has(c.chainId))
       .map((c) => ({
@@ -896,27 +1292,49 @@ async function currenciesHandler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ raw: data, currencies: normalized });
   } catch (e: unknown) {
     console.error("currencies error:", e);
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+    return res
+      .status(500)
+      .json({
+        error: e instanceof Error ? e.message : "Internal server error",
+      });
   }
 }
 
 async function coingeckoTokensHandler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "GET")
+    return res.status(405).json({ error: "Method not allowed" });
   try {
     const apiKey = process.env.COINGECKO_API_KEY;
     const query = req.query || {};
     const networkParam = (query.network ?? "").toString().trim().toLowerCase();
     const addressesParam = (query.addresses ?? "").toString().trim();
-    const network = (CHAIN_TO_NETWORK[networkParam] ?? networkParam) || "solana";
-    if (!addressesParam) return res.status(400).json({ error: "Missing addresses (comma-separated token addresses)" });
-    const addresses = addressesParam.split(",").map((a) => a.trim()).filter(Boolean);
-    if (addresses.length === 0) return res.status(400).json({ error: "At least one token address is required" });
-    if (addresses.length > 30) return res.status(400).json({ error: "Maximum 30 addresses per request" });
-    const url = new URL(`${COINGECKO_API_BASE}/networks/${network}/tokens/multi/${addresses.join(",")}`);
+    const network =
+      (CHAIN_TO_NETWORK[networkParam] ?? networkParam) || "solana";
+    if (!addressesParam)
+      return res
+        .status(400)
+        .json({ error: "Missing addresses (comma-separated token addresses)" });
+    const addresses = addressesParam
+      .split(",")
+      .map((a) => a.trim())
+      .filter(Boolean);
+    if (addresses.length === 0)
+      return res
+        .status(400)
+        .json({ error: "At least one token address is required" });
+    if (addresses.length > 30)
+      return res
+        .status(400)
+        .json({ error: "Maximum 30 addresses per request" });
+    const url = new URL(
+      `${COINGECKO_API_BASE}/networks/${network}/tokens/multi/${addresses.join(",")}`,
+    );
     url.searchParams.set("include", "top_pools");
     url.searchParams.set("include_composition", "true");
     url.searchParams.set("include_inactive_source", "true");
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
     if (apiKey) headers["x-cg-demo-api-key"] = apiKey;
     const coinRes = await fetch(url.toString(), { method: "GET", headers });
     const raw = await coinRes.text();
@@ -929,7 +1347,9 @@ async function coingeckoTokensHandler(req: VercelRequest, res: VercelResponse) {
       } catch {
         if (raw) message = raw.slice(0, 200);
       }
-      return res.status(coinRes.status >= 500 ? 502 : 400).json({ error: message });
+      return res
+        .status(coinRes.status >= 500 ? 502 : 400)
+        .json({ error: message });
     }
     let data: unknown;
     try {
@@ -940,32 +1360,62 @@ async function coingeckoTokensHandler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json(data);
   } catch (e: unknown) {
     console.error("coingecko-tokens error:", e);
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+    return res
+      .status(500)
+      .json({
+        error: e instanceof Error ? e.message : "Internal server error",
+      });
   }
 }
 
 function getEvmProvider(chainId: number): JsonRpcProvider {
-  if (chainId === 8453) return new JsonRpcProvider(process.env.BASE_RPC_URL || "https://mainnet.base.org");
-  if (chainId === 56) return new JsonRpcProvider(process.env.BNB_RPC_URL || "https://bsc-dataseed.binance.org");
+  if (chainId === 8453)
+    return new JsonRpcProvider(
+      process.env.BASE_RPC_URL || "https://mainnet.base.org",
+    );
+  if (chainId === 56)
+    return new JsonRpcProvider(
+      process.env.BNB_RPC_URL || "https://bsc-dataseed.binance.org",
+    );
   throw new Error(`Unsupported EVM chainId: ${chainId}`);
 }
 
-async function bridgeFromEvmQuoteHandler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-  const secret = process.env.WEBHOOK_EVM_DEPOSIT_SECRET || process.env.RELAY_INTERNAL_SECRET;
-  if (secret && req.headers["x-webhook-secret"] !== secret && req.headers.authorization !== `Bearer ${secret}`) {
+async function bridgeFromEvmQuoteHandler(
+  req: VercelRequest,
+  res: VercelResponse,
+) {
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
+  const secret =
+    process.env.WEBHOOK_EVM_DEPOSIT_SECRET || process.env.RELAY_INTERNAL_SECRET;
+  if (
+    secret &&
+    req.headers["x-webhook-secret"] !== secret &&
+    req.headers.authorization !== `Bearer ${secret}`
+  ) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   try {
-    const body = req.body as { evmAddress?: string; network?: string; amountRaw?: string; recipientSolAddress?: string };
+    const body = req.body as {
+      evmAddress?: string;
+      network?: string;
+      amountRaw?: string;
+      recipientSolAddress?: string;
+    };
     const evmAddress = (body?.evmAddress ?? "").trim();
     const network = (body?.network ?? "").toLowerCase();
     const amountRaw = body?.amountRaw ?? "";
     const recipientSolAddress = (body?.recipientSolAddress ?? "").trim();
-    if (!evmAddress || evmAddress.length < 40) return res.status(400).json({ error: "Invalid evmAddress" });
-    if (network !== "base" && network !== "bnb") return res.status(400).json({ error: "Invalid network; use base or bnb" });
-    if (!amountRaw || BigInt(amountRaw) <= 0n) return res.status(400).json({ error: "Invalid amountRaw" });
-    if (!recipientSolAddress || recipientSolAddress.length < 32) return res.status(400).json({ error: "Invalid recipientSolAddress" });
+    if (!evmAddress || evmAddress.length < 40)
+      return res.status(400).json({ error: "Invalid evmAddress" });
+    if (network !== "base" && network !== "bnb")
+      return res
+        .status(400)
+        .json({ error: "Invalid network; use base or bnb" });
+    if (!amountRaw || BigInt(amountRaw) <= 0n)
+      return res.status(400).json({ error: "Invalid amountRaw" });
+    if (!recipientSolAddress || recipientSolAddress.length < 32)
+      return res.status(400).json({ error: "Invalid recipientSolAddress" });
 
     console.log("[bridge-from-evm-quote] request", {
       evmAddress: evmAddress.slice(0, 10) + "...",
@@ -975,8 +1425,11 @@ async function bridgeFromEvmQuoteHandler(req: VercelRequest, res: VercelResponse
     });
 
     const apiKey = process.env.RELAY_API_KEY;
-    const originChainId = CHAIN_IDS[network] ?? (network === "base" ? 8453 : 56);
-    const useTopup = parseInt(amountRaw, 10) > 5_000_000; // > $5 USDC
+    const originChainId =
+      CHAIN_IDS[network] ?? (network === "base" ? 8453 : 56);
+    const amountUsdc = parseInt(amountRaw, 10);
+    const topupAmount =
+      amountUsdc > 5_000_000 ? "500000" : "200000"; // $0.50 for >=$5, $0.20 for <$5
     const relayBody = {
       user: evmAddress,
       originChainId,
@@ -988,8 +1441,8 @@ async function bridgeFromEvmQuoteHandler(req: VercelRequest, res: VercelResponse
       recipient: recipientSolAddress,
       useDepositAddress: false,
       usePermit: true,
-      topupGas: useTopup,
-      ...(useTopup && { topupGasAmount: "2000000" }), // 0.002 SOL
+      topupGas: true,
+      topupGasAmount: topupAmount,
       appFees: getAppFees(),
     };
     console.log("[bridge-from-evm-quote] relay quote/v2 body", {
@@ -1000,7 +1453,10 @@ async function bridgeFromEvmQuoteHandler(req: VercelRequest, res: VercelResponse
 
     const quoteRes = await fetch(`${RELAY_API_BASE}/quote/v2`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...(apiKey && { "x-api-key": apiKey }) },
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey && { "x-api-key": apiKey }),
+      },
       body: JSON.stringify(relayBody),
     });
     if (!quoteRes.ok) {
@@ -1017,21 +1473,36 @@ async function bridgeFromEvmQuoteHandler(req: VercelRequest, res: VercelResponse
       } catch {
         if (errBody) message = errBody.slice(0, 200);
       }
-      return res.status(quoteRes.status >= 500 ? 502 : 400).json({ error: message });
+      return res
+        .status(quoteRes.status >= 500 ? 502 : 400)
+        .json({ error: message });
     }
     const quote = await quoteRes.json();
     console.log("[bridge-from-evm-quote] success", { network, amountRaw });
     return res.status(200).json(quote);
   } catch (e: unknown) {
     console.error("bridge-from-evm-quote error:", e);
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+    return res
+      .status(500)
+      .json({
+        error: e instanceof Error ? e.message : "Internal server error",
+      });
   }
 }
 
-async function executeBridgeCustodialHandler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-  const secret = process.env.WEBHOOK_EVM_DEPOSIT_SECRET || process.env.RELAY_INTERNAL_SECRET;
-  if (secret && req.headers["x-webhook-secret"] !== secret && req.headers.authorization !== `Bearer ${secret}`) {
+async function executeBridgeCustodialHandler(
+  req: VercelRequest,
+  res: VercelResponse,
+) {
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
+  const secret =
+    process.env.WEBHOOK_EVM_DEPOSIT_SECRET || process.env.RELAY_INTERNAL_SECRET;
+  if (
+    secret &&
+    req.headers["x-webhook-secret"] !== secret &&
+    req.headers.authorization !== `Bearer ${secret}`
+  ) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   try {
@@ -1042,13 +1513,25 @@ async function executeBridgeCustodialHandler(req: VercelRequest, res: VercelResp
     if (!userId || !quoteResponse || typeof quoteResponse !== "object") {
       return res.status(400).json({ error: "Missing userId or quoteResponse" });
     }
-    const quote = quoteResponse as { steps?: Array<{ id?: string; kind?: string; items?: Array<{ data?: unknown; check?: { endpoint?: string; method?: string } }> }> };
+    const quote = quoteResponse as {
+      steps?: Array<{
+        id?: string;
+        kind?: string;
+        items?: Array<{
+          data?: unknown;
+          check?: { endpoint?: string; method?: string };
+        }>;
+      }>;
+    };
     const steps = quote?.steps;
     if (!Array.isArray(steps) || steps.length === 0) {
       return res.status(400).json({ error: "Invalid quote: no steps" });
     }
     const encryptionSecret = process.env.ENCRYPTION_SECRET;
-    if (!encryptionSecret) return res.status(503).json({ error: "ENCRYPTION_SECRET not configured" });
+    if (!encryptionSecret)
+      return res
+        .status(503)
+        .json({ error: "ENCRYPTION_SECRET not configured" });
     const db = getAdminDb();
     const userSnap = await db.collection("users").doc(userId).get();
     const userData = userSnap.data();
@@ -1058,14 +1541,26 @@ async function executeBridgeCustodialHandler(req: VercelRequest, res: VercelResp
     if (!encryptedSecretKey || !walletAddress) {
       return res.status(400).json({ error: "User wallet not found" });
     }
-    const { secretKey, mnemonic } = await decryptWalletCredentials(userId, encryptedMnemonic, encryptedSecretKey, encryptionSecret);
+    const { secretKey, mnemonic } = await decryptWalletCredentials(
+      userId,
+      encryptedMnemonic,
+      encryptedSecretKey,
+      encryptionSecret,
+    );
     const solanaKeypair = Keypair.fromSecretKey(secretKey);
     let evmWallet: HDNodeWallet | null = null;
     if (mnemonic?.trim()) {
-      evmWallet = HDNodeWallet.fromPhrase(mnemonic.trim(), undefined, ETH_DERIVATION_PATH);
+      evmWallet = HDNodeWallet.fromPhrase(
+        mnemonic.trim(),
+        undefined,
+        ETH_DERIVATION_PATH,
+      );
     }
     const apiKey = process.env.RELAY_API_KEY;
-    const relayHeaders: Record<string, string> = { "Content-Type": "application/json", ...(apiKey && { "x-api-key": apiKey }) };
+    const relayHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(apiKey && { "x-api-key": apiKey }),
+    };
     const solanaConnection = new Connection(getRpcUrl());
 
     for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
@@ -1082,28 +1577,44 @@ async function executeBridgeCustodialHandler(req: VercelRequest, res: VercelResp
 
       if (kind === "signature") {
         const signData = d.sign as Record<string, unknown> | undefined;
-        const postData = d.post as { endpoint?: string; method?: string; body?: unknown } | undefined;
+        const postData = d.post as
+          | { endpoint?: string; method?: string; body?: unknown }
+          | undefined;
         if (!signData || !postData?.endpoint || !evmWallet) {
-          console.warn("execute-bridge-custodial: skip signature step, missing sign/post or evmWallet");
+          console.warn(
+            "execute-bridge-custodial: skip signature step, missing sign/post or evmWallet",
+          );
           continue;
         }
         const signatureKind = (signData.signatureKind as string) ?? "eip191";
         let signature: string;
         if (signatureKind === "eip712") {
           const domain = signData.domain as Record<string, unknown>;
-          const types = signData.types as Record<string, Array<{ name: string; type: string }>>;
+          const types = signData.types as Record<
+            string,
+            Array<{ name: string; type: string }>
+          >;
           const value = signData.value as Record<string, unknown>;
           signature = await evmWallet.signTypedData(
             domain as object,
             types as Record<string, Array<{ name: string; type: string }>>,
-            value as Record<string, unknown>
+            value as Record<string, unknown>,
           );
         } else {
           const message = (signData.message as string) ?? "";
-          signature = await evmWallet.signMessage(message.startsWith("0x") ? Buffer.from(message.slice(2), "hex") : message);
+          signature = await evmWallet.signMessage(
+            message.startsWith("0x")
+              ? Buffer.from(message.slice(2), "hex")
+              : message,
+          );
         }
-        const postBody = typeof postData.body === "object" && postData.body !== null ? { ...postData.body } : {};
-        const postUrl = postData.endpoint.startsWith("http") ? postData.endpoint : `${RELAY_API_BASE}${postData.endpoint.startsWith("/") ? "" : "/"}${postData.endpoint}`;
+        const postBody =
+          typeof postData.body === "object" && postData.body !== null
+            ? { ...postData.body }
+            : {};
+        const postUrl = postData.endpoint.startsWith("http")
+          ? postData.endpoint
+          : `${RELAY_API_BASE}${postData.endpoint.startsWith("/") ? "" : "/"}${postData.endpoint}`;
         const postUrlWithSignature = `${postUrl}${postUrl.includes("?") ? "&" : "?"}signature=${encodeURIComponent(signature)}`;
         const postRes = await fetch(postUrlWithSignature, {
           method: (postData.method as string) ?? "POST",
@@ -1111,7 +1622,10 @@ async function executeBridgeCustodialHandler(req: VercelRequest, res: VercelResp
           body: JSON.stringify(postBody),
         });
         if (!postRes.ok) {
-          console.error("execute-bridge-custodial: permit post failed", await postRes.text());
+          console.error(
+            "execute-bridge-custodial: permit post failed",
+            await postRes.text(),
+          );
           return res.status(502).json({ error: "Relay permit post failed" });
         }
       } else if (kind === "transaction") {
@@ -1125,9 +1639,20 @@ async function executeBridgeCustodialHandler(req: VercelRequest, res: VercelResp
             to: d.to as string,
             data: d.data as string,
             value: typeof d.value === "string" ? BigInt(d.value) : undefined,
-            gasLimit: typeof d.gas === "string" ? BigInt(d.gas) : typeof d.gas === "number" ? BigInt(d.gas) : undefined,
-            maxFeePerGas: typeof d.maxFeePerGas === "string" ? BigInt(d.maxFeePerGas) : undefined,
-            maxPriorityFeePerGas: typeof d.maxPriorityFeePerGas === "string" ? BigInt(d.maxPriorityFeePerGas) : undefined,
+            gasLimit:
+              typeof d.gas === "string"
+                ? BigInt(d.gas)
+                : typeof d.gas === "number"
+                  ? BigInt(d.gas)
+                  : undefined,
+            maxFeePerGas:
+              typeof d.maxFeePerGas === "string"
+                ? BigInt(d.maxFeePerGas)
+                : undefined,
+            maxPriorityFeePerGas:
+              typeof d.maxPriorityFeePerGas === "string"
+                ? BigInt(d.maxPriorityFeePerGas)
+                : undefined,
             chainId,
           };
           const provider = getEvmProvider(chainId);
@@ -1137,36 +1662,59 @@ async function executeBridgeCustodialHandler(req: VercelRequest, res: VercelResp
         } else {
           let tx: VersionedTransaction | null = null;
           let serializedTx: string | null = null;
-          if (typeof d.serializedTransaction === "string") serializedTx = d.serializedTransaction;
-          else if (typeof d.transaction === "string") serializedTx = d.transaction;
+          if (typeof d.serializedTransaction === "string")
+            serializedTx = d.serializedTransaction;
+          else if (typeof d.transaction === "string")
+            serializedTx = d.transaction;
           else if (typeof d.payload === "string") serializedTx = d.payload;
-          else if (typeof d.transactionBytes === "string") serializedTx = d.transactionBytes;
+          else if (typeof d.transactionBytes === "string")
+            serializedTx = d.transactionBytes;
 
           if (serializedTx) {
             const txBuffer = Buffer.from(serializedTx, "base64");
             tx = VersionedTransaction.deserialize(txBuffer);
           } else if (isRelaySolanaTxData(d)) {
-            tx = await buildVersionedTxFromRelayInstructions(d, solanaKeypair.publicKey, solanaConnection);
+            tx = await buildVersionedTxFromRelayInstructions(
+              d,
+              solanaKeypair.publicKey,
+              solanaConnection,
+            );
           }
 
           if (!tx) {
-            return res.status(400).json({ error: "Step data does not contain Solana transaction" });
+            return res
+              .status(400)
+              .json({ error: "Step data does not contain Solana transaction" });
           }
 
           tx.sign([solanaKeypair]);
-          await solanaConnection.sendRawTransaction(tx.serialize(), { skipPreflight: false, preflightCommitment: "confirmed" });
+          await solanaConnection.sendRawTransaction(tx.serialize(), {
+            skipPreflight: false,
+            preflightCommitment: "confirmed",
+          });
         }
       }
 
       const check = firstItem?.check;
       if (check?.endpoint && (check.method === "GET" || !check.method)) {
-        const statusUrl = check.endpoint.startsWith("http") ? check.endpoint : `${RELAY_API_BASE}${check.endpoint.startsWith("/") ? "" : "/"}${check.endpoint}`;
+        const statusUrl = check.endpoint.startsWith("http")
+          ? check.endpoint
+          : `${RELAY_API_BASE}${check.endpoint.startsWith("/") ? "" : "/"}${check.endpoint}`;
         for (let i = 0; i < 60; i++) {
           await new Promise((r) => setTimeout(r, 2000));
-          const statusRes = await fetch(statusUrl, { headers: apiKey ? { "x-api-key": apiKey } : {} });
+          const statusRes = await fetch(statusUrl, {
+            headers: apiKey ? { "x-api-key": apiKey } : {},
+          });
           const statusJson = (await statusRes.json()) as { status?: string };
-          if (statusJson?.status === "success" || statusJson?.status === "completed") break;
-          if (statusJson?.status === "failed" || statusJson?.status === "reverted") {
+          if (
+            statusJson?.status === "success" ||
+            statusJson?.status === "completed"
+          )
+            break;
+          if (
+            statusJson?.status === "failed" ||
+            statusJson?.status === "reverted"
+          ) {
             return res.status(502).json({ error: "Bridge step failed" });
           }
         }
@@ -1176,51 +1724,72 @@ async function executeBridgeCustodialHandler(req: VercelRequest, res: VercelResp
     return res.status(200).json({ status: "Success" });
   } catch (e: unknown) {
     console.error("execute-bridge-custodial error:", e);
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+    return res
+      .status(500)
+      .json({
+        error: e instanceof Error ? e.message : "Internal server error",
+      });
   }
 }
 
 async function fundNewWalletHandler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
   try {
     ensureFirebase();
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    if (!authHeader?.startsWith("Bearer "))
+      return res.status(401).json({ error: "Unauthorized" });
     const decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
     const userId = decoded.uid;
     console.log("[fund-new-wallet] start", { userId });
-    if (!getFunderKeypair()) return res.status(503).json({ error: "SOL funder not configured" });
+    if (!getFunderKeypair())
+      return res.status(503).json({ error: "SOL funder not configured" });
     const db = getAdminDb();
     const userSnap = await db.collection("users").doc(userId).get();
     const userData = userSnap.data();
     const walletAddress = userData?.walletAddress as string | undefined;
-    if (!walletAddress || walletAddress.length < 32) return res.status(400).json({ error: "No wallet address" });
+    if (!walletAddress || walletAddress.length < 32)
+      return res.status(400).json({ error: "No wallet address" });
     if (userData?.solFundedAt) {
       return res.status(200).json({ alreadyFunded: true });
     }
-    const sig = await sendSolFromFunder(walletAddress, SOL_FUNDER_AMOUNT_LAMPORTS);
+    const sig = await sendSolFromFunder(
+      walletAddress,
+      SOL_FUNDER_AMOUNT_LAMPORTS,
+    );
     if (!sig) return res.status(502).json({ error: "Funding failed" });
     await userSnap.ref.update({ solFundedAt: FieldValue.serverTimestamp() });
     console.log("[fund-new-wallet] success", { userId, signature: sig });
     return res.status(200).json({ signature: sig });
   } catch (e: unknown) {
     console.error("[fund-new-wallet] error", e);
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+    return res
+      .status(500)
+      .json({
+        error: e instanceof Error ? e.message : "Internal server error",
+      });
   }
 }
 
-async function notifyWithdrawalCompleteHandler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+async function notifyWithdrawalCompleteHandler(
+  req: VercelRequest,
+  res: VercelResponse,
+) {
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
   try {
     ensureFirebase();
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    if (!authHeader?.startsWith("Bearer "))
+      return res.status(401).json({ error: "Unauthorized" });
     const decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
     const userId = decoded.uid;
     const body = (req.body as { amount?: number; network?: string }) ?? {};
     const amount = body.amount ?? 0;
     const network = body.network ?? "Solana";
-    const { getUserTokens, sendToTokens } = await import("../../lib/push-server");
+    const { getUserTokens, sendToTokens } =
+      await import("../../lib/push-server");
     const tokens = await getUserTokens(userId);
     if (tokens.length > 0) {
       const amountStr = amount > 0 ? `$${amount.toFixed(2)} ` : "";
@@ -1234,11 +1803,18 @@ async function notifyWithdrawalCompleteHandler(req: VercelRequest, res: VercelRe
     return res.status(200).json({ ok: true });
   } catch (e: unknown) {
     console.error("notify-withdrawal-complete error:", e);
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Internal server error" });
+    return res
+      .status(500)
+      .json({
+        error: e instanceof Error ? e.message : "Internal server error",
+      });
   }
 }
 
-const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promise<void | VercelResponse>> = {
+const ROUTES: Record<
+  string,
+  (req: VercelRequest, res: VercelResponse) => Promise<void | VercelResponse>
+> = {
   "deposit-quote": depositQuoteHandler,
   "swap-quote": swapQuoteHandler,
   "withdraw-quote": withdrawQuoteHandler,
@@ -1255,7 +1831,10 @@ const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promis
   "coingecko-tokens": coingeckoTokensHandler,
 };
 
-export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
+export default async function handler(
+  req: VercelRequest,
+  res: VercelResponse,
+): Promise<void> {
   const path = (req.url ?? "").split("?")[0];
   const segments = path.split("/").filter(Boolean);
   const action = segments[segments.length - 1];

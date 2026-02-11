@@ -866,6 +866,28 @@ export function Trade() {
                     <ExternalLink className="w-3 h-3" />
                   </a>
                 )}
+                {token.socials?.telegram && (
+                  <a
+                    href={token.socials.telegram}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs flex items-center gap-1 transition-colors"
+                  >
+                    <span>✈️</span> Telegram
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+                {token.socials?.discord && (
+                  <a
+                    href={token.socials.discord}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs flex items-center gap-1 transition-colors"
+                  >
+                    <span>💬</span> Discord
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
                 {token.market === "pumpfun" && (
                   <a
                     href={`https://pump.fun/${token.mint}`}

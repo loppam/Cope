@@ -38,6 +38,8 @@ export interface BirdeyeTokenOverview {
     logoURI?: string;
     price?: number;
     mc?: number;
+    marketCap?: number;
+    holder?: number;
     liquidity?: number;
     v24hUSD?: number;
     v24h?: number;
@@ -49,6 +51,7 @@ export interface BirdeyeTokenOverview {
       website?: string;
       twitter?: string;
       telegram?: string;
+      discord?: string;
       coingeckoId?: string;
     };
     [key: string]: unknown;
@@ -98,7 +101,7 @@ export async function searchBirdeyeTokens(
             logoURI: data.logoURI,
             liquidity: data.liquidity,
             price: data.price,
-            mc: data.mc,
+            mc: data.marketCap ?? data.mc,
             v24hUSD: data.v24hUSD ?? data.v24h,
             chain: chain,
             chainId: CHAIN_IDS[chain],
@@ -161,16 +164,18 @@ export async function fetchBirdeyeTokenOverview(
 export function birdeyeOverviewToTokenFields(data: BirdeyeTokenOverview["data"]): Partial<TokenSearchResult> {
   if (!data) return {};
   const ext = data.extensions ?? {};
+  const marketCap = data.marketCap ?? data.mc;
   return {
     name: data.name,
     symbol: data.symbol,
     image: data.logoURI,
     decimals: typeof data.decimals === "number" ? data.decimals : undefined,
     priceUsd: typeof data.price === "number" ? data.price : undefined,
-    marketCapUsd: typeof data.mc === "number" ? data.mc : undefined,
+    marketCapUsd: typeof marketCap === "number" ? marketCap : undefined,
     liquidityUsd: typeof data.liquidity === "number" ? data.liquidity : undefined,
     volume_24h:
       typeof data.v24hUSD === "number" ? data.v24hUSD : typeof data.v24h === "number" ? data.v24h : undefined,
+    holders: typeof data.holder === "number" ? data.holder : undefined,
     buys: data.buy24h,
     sells: data.sell24h,
     totalTransactions: data.trade24h,
@@ -178,6 +183,7 @@ export function birdeyeOverviewToTokenFields(data: BirdeyeTokenOverview["data"])
       website: ext.website,
       twitter: ext.twitter,
       telegram: ext.telegram,
+      discord: ext.discord,
     },
   };
 }

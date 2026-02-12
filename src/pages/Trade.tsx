@@ -74,6 +74,8 @@ export function Trade() {
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [sellAmount, setSellAmount] = useState("");
   const [loadingBalance, setLoadingBalance] = useState(false);
+  // USDC balance (UI units) for Buy section display
+  const [usdcBalance, setUsdcBalance] = useState<number | null>(null);
 
   const quickAmounts = [10, 50, 100];
   const slippagePresets = [50, 100, 200]; // 0.5%, 1%, 2%
@@ -192,6 +194,33 @@ export function Trade() {
     };
     fetchBalance();
   }, [token?.mint, userProfile?.walletAddress]);
+
+  // Fetch USDC balance for Buy section (same wallet positions, find SOL USDC)
+  useEffect(() => {
+    if (!userProfile?.walletAddress) {
+      setUsdcBalance(null);
+      return;
+    }
+    let cancelled = false;
+    getWalletPositions(userProfile.walletAddress, true)
+      .then((positions) => {
+        if (cancelled) return;
+        const usdcPosition = positions.tokens.find(
+          (t) => t.token.mint === SOLANA_USDC_MINT,
+        );
+        if (!usdcPosition) {
+          setUsdcBalance(0);
+          return;
+        }
+        setUsdcBalance(usdcPosition.balance ?? 0);
+      })
+      .catch(() => {
+        if (!cancelled) setUsdcBalance(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userProfile?.walletAddress]);
 
   const fetchTokenDetails = async (
     address: string,
@@ -597,19 +626,32 @@ export function Trade() {
         if (userProfile?.walletAddress) {
           const newBalance = await getSolBalance(userProfile.walletAddress);
           await updateBalance(newBalance);
-          if (swapDirection === "sell" && token?.mint) {
-            try {
-              const positions = await getWalletPositions(
-                userProfile.walletAddress,
-                false,
-              );
+          // Refetch positions so "your position" / sell balance and USDC balance update
+          try {
+            const positions = await getWalletPositions(
+              userProfile.walletAddress,
+              false,
+            );
+            if (swapDirection === "sell" && token?.mint) {
               const position = positions.tokens.find(
                 (t) => t.token.mint === token.mint,
               );
               setTokenBalance(position?.balance ?? 0);
-            } catch {
-              // ignore
+            } else if (swapDirection === "buy") {
+              const boughtMint = token?.mint ?? crossChainToken?.address;
+              if (boughtMint) {
+                const position = positions.tokens.find(
+                  (t) => t.token.mint === boughtMint,
+                );
+                setTokenBalance(position?.balance ?? 0);
+              }
+              const usdcPosition = positions.tokens.find(
+                (t) => t.token.mint === SOLANA_USDC_MINT,
+              );
+              if (usdcPosition) setUsdcBalance(usdcPosition.balance ?? 0);
             }
+          } catch {
+            // ignore
           }
         }
 
@@ -980,9 +1022,16 @@ export function Trade() {
 
                 {/* Buy Section */}
                 <div className="mb-4 sm:mb-6">
-                  <label className="block text-sm font-medium mb-2">
-                    Buy Amount (USDC)
-                  </label>
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="text-sm font-medium">
+                      Buy Amount (USDC)
+                    </label>
+                    <span className="text-sm text-white/70 min-w-0 truncate max-w-[50%]">
+                      {usdcBalance != null
+                        ? `${usdcBalance.toFixed(2)} USDC`
+                        : "—"}
+                    </span>
+                  </div>
                   <Input
                     type="number"
                     placeholder="0.0"

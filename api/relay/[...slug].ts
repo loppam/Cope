@@ -2,7 +2,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
-import { FieldValue, getFirestore } from "firebase-admin/firestore";
+import { getFirestore } from "firebase-admin/firestore";
 import {
   AddressLookupTableAccount,
   Connection,
@@ -261,9 +261,7 @@ async function sendSolFromFunder(
   return sig;
 }
 
-async function getEvmBalances(
-  address: string,
-): Promise<{
+async function getEvmBalances(address: string): Promise<{
   base: { usdc: number; native: number };
   bnb: { usdc: number; native: number };
 }> {
@@ -395,11 +393,9 @@ async function depositQuoteHandler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (e: unknown) {
     console.error("deposit-quote error:", e);
-    return res
-      .status(500)
-      .json({
-        error: e instanceof Error ? e.message : "Internal server error",
-      });
+    return res.status(500).json({
+      error: e instanceof Error ? e.message : "Internal server error",
+    });
   }
 }
 
@@ -463,11 +459,9 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
         amount: !!amount,
         userWallet: !!userWallet,
       });
-      return res
-        .status(400)
-        .json({
-          error: "Missing inputMint, outputMint, amount, or userWallet",
-        });
+      return res.status(400).json({
+        error: "Missing inputMint, outputMint, amount, or userWallet",
+      });
     }
     console.log("[swap-quote] start", {
       userId,
@@ -526,11 +520,9 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json(quote);
   } catch (e: unknown) {
     console.error("[swap-quote] error", e);
-    return res
-      .status(500)
-      .json({
-        error: e instanceof Error ? e.message : "Internal server error",
-      });
+    return res.status(500).json({
+      error: e instanceof Error ? e.message : "Internal server error",
+    });
   }
 }
 
@@ -561,11 +553,9 @@ async function withdrawQuoteHandler(req: VercelRequest, res: VercelResponse) {
       destinationNetwork !== "bnb" &&
       destinationNetwork !== "solana"
     )
-      return res
-        .status(400)
-        .json({
-          error: "Invalid destinationNetwork; use base, bnb, or solana",
-        });
+      return res.status(400).json({
+        error: "Invalid destinationNetwork; use base, bnb, or solana",
+      });
     if (!Number.isFinite(amount) || amount <= 0)
       return res.status(400).json({ error: "Invalid amount" });
     if (!destinationAddress || destinationAddress.length < 20)
@@ -613,11 +603,9 @@ async function withdrawQuoteHandler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json(quote);
   } catch (e: unknown) {
     console.error("withdraw-quote error:", e);
-    return res
-      .status(500)
-      .json({
-        error: e instanceof Error ? e.message : "Internal server error",
-      });
+    return res.status(500).json({
+      error: e instanceof Error ? e.message : "Internal server error",
+    });
   }
 }
 
@@ -799,7 +787,12 @@ async function buildVersionedTxFromRelayInstructions(
     lookupAddrs,
   );
 
-  console.log("[ALT] relaySent", lookupAddrs.length, "loaded", lookupAccounts.length);
+  console.log(
+    "[ALT] relaySent",
+    lookupAddrs.length,
+    "loaded",
+    lookupAccounts.length,
+  );
   if (lutFails.length) console.warn("[ALT] loadFails", lutFails);
 
   const { blockhash } = await connection.getLatestBlockhash("confirmed");
@@ -839,11 +832,18 @@ async function buildVersionedTxFromRelayInstructions(
   try {
     const txUnsigned = new VersionedTransaction(messageV0);
     unsignedSerializedLength = txUnsigned.serialize().length;
-    console.log("[relay] unsigned tx serialized length", unsignedSerializedLength);
+    console.log(
+      "[relay] unsigned tx serialized length",
+      unsignedSerializedLength,
+    );
   } catch (serialErr) {
-    console.error("[relay] unsigned serialize failed (likely encoding overrun)", {
-      error: serialErr instanceof Error ? serialErr.message : String(serialErr),
-    });
+    console.error(
+      "[relay] unsigned serialize failed (likely encoding overrun)",
+      {
+        error:
+          serialErr instanceof Error ? serialErr.message : String(serialErr),
+      },
+    );
   }
 
   return new VersionedTransaction(messageV0);
@@ -895,29 +895,29 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       const d = data as Record<string, unknown>;
       const dataKeys = Object.keys(d);
       if (Array.isArray(d.instructions)) {
-        (d.instructions as Array<{ data?: string; programId?: string }>).forEach(
-          (ix, idx) => {
-            const raw = ix.data ?? "";
-            const trimmed = raw.startsWith("0x") ? raw.slice(2) : raw;
-            const isHexLike =
-              trimmed.length > 0 &&
-              trimmed.length % 2 === 0 &&
-              /^[0-9a-fA-F]+$/.test(trimmed);
-            const isBase64Like =
-              raw.length > 0 &&
-              raw.length % 4 === 0 &&
-              /^[A-Za-z0-9+/]+=*$/.test(raw);
-            const hasBase64Chars = /[+/=]/.test(raw);
-            console.log(`[execute-step] instruction ${idx} data inspect`, {
-              programId: ix.programId,
-              dataLength: raw.length,
-              preview: raw.slice(0, 64),
-              isHexLike,
-              isBase64Like,
-              hasBase64Chars,
-            });
-          },
-        );
+        (
+          d.instructions as Array<{ data?: string; programId?: string }>
+        ).forEach((ix, idx) => {
+          const raw = ix.data ?? "";
+          const trimmed = raw.startsWith("0x") ? raw.slice(2) : raw;
+          const isHexLike =
+            trimmed.length > 0 &&
+            trimmed.length % 2 === 0 &&
+            /^[0-9a-fA-F]+$/.test(trimmed);
+          const isBase64Like =
+            raw.length > 0 &&
+            raw.length % 4 === 0 &&
+            /^[A-Za-z0-9+/]+=*$/.test(raw);
+          const hasBase64Chars = /[+/=]/.test(raw);
+          console.log(`[execute-step] instruction ${idx} data inspect`, {
+            programId: ix.programId,
+            dataLength: raw.length,
+            preview: raw.slice(0, 64),
+            isHexLike,
+            isBase64Like,
+            hasBase64Chars,
+          });
+        });
       }
       const serializedKeys = [
         "serializedTransaction",
@@ -1015,9 +1015,13 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
     );
     const msgPreSign = transaction.message;
     const staticCountPre =
-      "staticAccountKeys" in msgPreSign ? msgPreSign.staticAccountKeys.length : 0;
+      "staticAccountKeys" in msgPreSign
+        ? msgPreSign.staticAccountKeys.length
+        : 0;
     const lookupCountPre =
-      "addressTableLookups" in msgPreSign ? msgPreSign.addressTableLookups.length : 0;
+      "addressTableLookups" in msgPreSign
+        ? msgPreSign.addressTableLookups.length
+        : 0;
     console.log("[execute-step] tx accounts (static)", {
       userId,
       stepIndex,
@@ -1027,7 +1031,11 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
     console.log("[execute-step] pre-sign message stats", {
       staticKeyCount: staticCountPre,
       lookupCount: lookupCountPre,
-      instructionCount: "instructions" in msgPreSign ? (msgPreSign as { instructions?: unknown[] }).instructions?.length ?? null : null,
+      instructionCount:
+        "instructions" in msgPreSign
+          ? ((msgPreSign as { instructions?: unknown[] }).instructions
+              ?.length ?? null)
+          : null,
     });
 
     transaction.sign([wallet]);
@@ -1038,7 +1046,16 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       "staticAccountKeys" in msg ? msg.staticAccountKeys.length : 0;
     const lookupCount =
       "addressTableLookups" in msg ? msg.addressTableLookups.length : 0;
-    console.log("[TX] staticKeys", staticCount, "lookupsUsed", lookupCount, "rawLen", rawLen, "b64Len", b64Len);
+    console.log(
+      "[TX] staticKeys",
+      staticCount,
+      "lookupsUsed",
+      lookupCount,
+      "rawLen",
+      rawLen,
+      "b64Len",
+      b64Len,
+    );
 
     if (rawLen > 1232) {
       throw new Error(`SOL_TX_TOO_LARGE:${rawLen}`);
@@ -1083,27 +1100,65 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       errMsg,
     );
     if (isEncodingOverrun || isInvalidInstructionData) {
-      const body = (req as any)?.body as { quoteResponse?: { steps?: Array<{ items?: Array<{ data?: unknown }> }> } };
+      const body = (req as any)?.body as {
+        quoteResponse?: {
+          steps?: Array<{ items?: Array<{ data?: unknown }> }>;
+        };
+      };
       const steps = body?.quoteResponse?.steps;
       const firstItem = steps?.[stepIndex]?.items?.[0];
       const stepData = firstItem?.data;
-      const dataKeys = stepData && typeof stepData === "object" ? Object.keys(stepData as object) : [];
-      const usedSerializedTx = !!(stepData && typeof stepData === "object" && (stepData as Record<string, unknown>).serializedTransaction);
-      const usedInstructions = !!(stepData && typeof stepData === "object" && Array.isArray((stepData as Record<string, unknown>).instructions));
-      const firstIxDataPreview = usedInstructions && Array.isArray((stepData as { instructions?: Array<{ data?: string }> })?.instructions)
-        ? (stepData as { instructions: Array<{ data?: string }> }).instructions[0]?.data?.slice(0, 48)
-        : null;
-      const instructionCount = usedInstructions && typeof stepData === "object" && Array.isArray((stepData as { instructions?: unknown[] }).instructions)
-        ? (stepData as { instructions: unknown[] }).instructions.length
-        : null;
-      const lutCount = stepData && typeof stepData === "object" && Array.isArray((stepData as { addressLookupTableAddresses?: unknown[] }).addressLookupTableAddresses)
-        ? (stepData as { addressLookupTableAddresses: unknown[] }).addressLookupTableAddresses.length
-        : null;
+      const dataKeys =
+        stepData && typeof stepData === "object"
+          ? Object.keys(stepData as object)
+          : [];
+      const usedSerializedTx = !!(
+        stepData &&
+        typeof stepData === "object" &&
+        (stepData as Record<string, unknown>).serializedTransaction
+      );
+      const usedInstructions = !!(
+        stepData &&
+        typeof stepData === "object" &&
+        Array.isArray((stepData as Record<string, unknown>).instructions)
+      );
+      const firstIxDataPreview =
+        usedInstructions &&
+        Array.isArray(
+          (stepData as { instructions?: Array<{ data?: string }> })
+            ?.instructions,
+        )
+          ? (
+              stepData as { instructions: Array<{ data?: string }> }
+            ).instructions[0]?.data?.slice(0, 48)
+          : null;
+      const instructionCount =
+        usedInstructions &&
+        typeof stepData === "object" &&
+        Array.isArray((stepData as { instructions?: unknown[] }).instructions)
+          ? (stepData as { instructions: unknown[] }).instructions.length
+          : null;
+      const lutCount =
+        stepData &&
+        typeof stepData === "object" &&
+        Array.isArray(
+          (stepData as { addressLookupTableAddresses?: unknown[] })
+            .addressLookupTableAddresses,
+        )
+          ? (stepData as { addressLookupTableAddresses: unknown[] })
+              .addressLookupTableAddresses.length
+          : null;
       const txMsgStats =
         transaction && "message" in transaction
           ? {
-              staticKeyCount: "staticAccountKeys" in transaction.message ? transaction.message.staticAccountKeys.length : null,
-              lookupCount: "addressTableLookups" in transaction.message ? transaction.message.addressTableLookups.length : null,
+              staticKeyCount:
+                "staticAccountKeys" in transaction.message
+                  ? transaction.message.staticAccountKeys.length
+                  : null,
+              lookupCount:
+                "addressTableLookups" in transaction.message
+                  ? transaction.message.addressTableLookups.length
+                  : null,
             }
           : null;
       console.error(
@@ -1128,56 +1183,79 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       (Array.isArray(logs) &&
         logs.some((l) => /insufficient lamports|need \d+/.test(String(l))));
 
-    if (isInsufficientSol && getFunderKeypair() && userId) {
-      try {
-        const db = getAdminDb();
-        const snap = await db.collection("users").doc(userId).get();
-        const walletAddress = snap.data()?.walletAddress as string | undefined;
-        if (walletAddress && walletAddress.length >= 32) {
-          let lamportsToSend = SOL_FUNDER_AMOUNT_LAMPORTS;
-          if (transaction && connection) {
-            try {
-              const feeResult = await connection.getFeeForMessage(
-                transaction.message,
-                "confirmed",
-              );
-              const baseFee = feeResult.value ?? 5000;
-              const rentBuffer = 2_000_000; // ~1 ATA rent
-              const computeBuffer = 500_000;
-              const computed = baseFee + rentBuffer + computeBuffer;
-              lamportsToSend = Math.min(
-                Math.max(computed, 1_000_000),
-                10_000_000,
-              );
-              console.log("[execute-step] dynamic funding", {
-                baseFee,
-                lamportsToSend,
-              });
-            } catch {
-              // fall back to fixed amount
-            }
-          }
-          const fundSig = await sendSolFromFunder(
-            walletAddress,
-            lamportsToSend,
+    // Backend retry loop: fund (×2), wait 3s, retry send until success or max attempts
+    if (isInsufficientSol && getFunderKeypair() && userId && transaction && connection) {
+      const db = getAdminDb();
+      const snap = await db.collection("users").doc(userId).get();
+      const walletAddress = snap.data()?.walletAddress as string | undefined;
+      const maxAttempts = 10;
+      let attempt = 0;
+
+      while (walletAddress && walletAddress.length >= 32 && attempt < maxAttempts) {
+        // Compute funding amount: dynamic fee ×2, or fixed 0.005 ×2, capped
+        let lamportsToSend = SOL_FUNDER_AMOUNT_LAMPORTS * 2;
+        try {
+          const feeResult = await connection.getFeeForMessage(
+            transaction.message,
+            "confirmed",
           );
-          if (fundSig) {
-            console.log("[execute-step] funded wallet for retry", {
-              userId,
-              signature: fundSig,
-              lamports: lamportsToSend,
-            });
-            return res.status(200).json({
-              status: "Retry",
-              error: "Retry transaction",
-              retryAfterSeconds: 5,
-              signature: "",
-              funded: true,
-            });
-          }
+          const baseFee = feeResult.value ?? 5000;
+          const rentBuffer = 2_000_000;
+          const computeBuffer = 500_000;
+          const computed = (baseFee + rentBuffer + computeBuffer) * 2;
+          lamportsToSend = Math.min(
+            Math.max(computed, 2_000_000),
+            20_000_000,
+          );
+          console.log("[execute-step] dynamic funding x2", {
+            baseFee,
+            lamportsToSend,
+            attempt: attempt + 1,
+          });
+        } catch {
+          // use fixed ×2
         }
-      } catch (fundErr) {
-        console.warn("[execute-step] funder top-up failed", fundErr);
+
+        const fundSig = await sendSolFromFunder(walletAddress, lamportsToSend);
+        if (!fundSig) {
+          console.warn("[execute-step] funder top-up failed on attempt", attempt + 1);
+          break;
+        }
+        console.log("[execute-step] funded wallet for retry", {
+          userId,
+          signature: fundSig,
+          lamports: lamportsToSend,
+          attempt: attempt + 1,
+        });
+
+        await new Promise((r) => setTimeout(r, 3000));
+
+        try {
+          const serialized = transaction.serialize();
+          const sig = await connection.sendRawTransaction(serialized, {
+            skipPreflight: false,
+            preflightCommitment: "confirmed",
+          });
+          console.log("[execute-step] success after funding retry", {
+            userId,
+            stepIndex,
+            signature: sig,
+            attempt: attempt + 1,
+          });
+          return res.status(200).json({ signature: sig, status: "Success" });
+        } catch (retryErr: unknown) {
+          const retryLogs = (retryErr as Error & { logs?: string[] }).logs;
+          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          const stillInsufficient =
+            /insufficient lamports|Transfer: insufficient/i.test(retryMsg) ||
+            (Array.isArray(retryLogs) &&
+              retryLogs.some((l) => /insufficient lamports|need \d+/.test(String(l))));
+          if (!stillInsufficient) {
+            console.warn("[execute-step] retry failed with non-SOL error", retryMsg);
+            break;
+          }
+          attempt++;
+        }
       }
     }
 
@@ -1237,11 +1315,9 @@ async function evmAddressHandler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ evmAddress: wallet.address });
   } catch (e: unknown) {
     console.error("evm-address error:", e);
-    return res
-      .status(500)
-      .json({
-        error: e instanceof Error ? e.message : "Internal server error",
-      });
+    return res.status(500).json({
+      error: e instanceof Error ? e.message : "Internal server error",
+    });
   }
 }
 
@@ -1266,13 +1342,11 @@ async function evmBalancesHandler(req: VercelRequest, res: VercelResponse) {
     const encryptedSecretKey = userData?.encryptedSecretKey;
     const encryptedMnemonic = userData?.encryptedMnemonic;
     if (!encryptedSecretKey)
-      return res
-        .status(200)
-        .json({
-          evmAddress: null,
-          base: { usdc: 0, native: 0 },
-          bnb: { usdc: 0, native: 0 },
-        });
+      return res.status(200).json({
+        evmAddress: null,
+        base: { usdc: 0, native: 0 },
+        bnb: { usdc: 0, native: 0 },
+      });
     const { mnemonic } = await decryptWalletCredentials(
       userId,
       encryptedMnemonic,
@@ -1280,13 +1354,11 @@ async function evmBalancesHandler(req: VercelRequest, res: VercelResponse) {
       encryptionSecret,
     );
     if (!mnemonic || !mnemonic.trim())
-      return res
-        .status(200)
-        .json({
-          evmAddress: null,
-          base: { usdc: 0, native: 0 },
-          bnb: { usdc: 0, native: 0 },
-        });
+      return res.status(200).json({
+        evmAddress: null,
+        base: { usdc: 0, native: 0 },
+        bnb: { usdc: 0, native: 0 },
+      });
     const wallet = HDNodeWallet.fromPhrase(
       mnemonic.trim(),
       undefined,
@@ -1300,20 +1372,16 @@ async function evmBalancesHandler(req: VercelRequest, res: VercelResponse) {
       // best-effort persist for webhook lookup
     }
     const balances = await getEvmBalances(wallet.address);
-    return res
-      .status(200)
-      .json({
-        evmAddress: wallet.address,
-        base: balances.base,
-        bnb: balances.bnb,
-      });
+    return res.status(200).json({
+      evmAddress: wallet.address,
+      base: balances.base,
+      bnb: balances.bnb,
+    });
   } catch (e: unknown) {
     console.error("evm-balances error:", e);
-    return res
-      .status(500)
-      .json({
-        error: e instanceof Error ? e.message : "Internal server error",
-      });
+    return res.status(500).json({
+      error: e instanceof Error ? e.message : "Internal server error",
+    });
   }
 }
 
@@ -1334,11 +1402,9 @@ async function evmBalancesPublicHandler(
     return res.status(200).json({ base: balances.base, bnb: balances.bnb });
   } catch (e: unknown) {
     console.error("evm-balances-public error:", e);
-    return res
-      .status(500)
-      .json({
-        error: e instanceof Error ? e.message : "Internal server error",
-      });
+    return res.status(500).json({
+      error: e instanceof Error ? e.message : "Internal server error",
+    });
   }
 }
 
@@ -1368,11 +1434,9 @@ async function evmAddressRemoveHandler(
     return res.status(200).json({ success: true });
   } catch (e: unknown) {
     console.error("evm-address-remove error:", e);
-    return res
-      .status(500)
-      .json({
-        error: e instanceof Error ? e.message : "Internal server error",
-      });
+    return res.status(500).json({
+      error: e instanceof Error ? e.message : "Internal server error",
+    });
   }
 }
 
@@ -1488,11 +1552,9 @@ async function currenciesHandler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ raw: data, currencies: normalized });
   } catch (e: unknown) {
     console.error("currencies error:", e);
-    return res
-      .status(500)
-      .json({
-        error: e instanceof Error ? e.message : "Internal server error",
-      });
+    return res.status(500).json({
+      error: e instanceof Error ? e.message : "Internal server error",
+    });
   }
 }
 
@@ -1556,11 +1618,9 @@ async function coingeckoTokensHandler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json(data);
   } catch (e: unknown) {
     console.error("coingecko-tokens error:", e);
-    return res
-      .status(500)
-      .json({
-        error: e instanceof Error ? e.message : "Internal server error",
-      });
+    return res.status(500).json({
+      error: e instanceof Error ? e.message : "Internal server error",
+    });
   }
 }
 
@@ -1624,8 +1684,7 @@ async function bridgeFromEvmQuoteHandler(
     const originChainId =
       CHAIN_IDS[network] ?? (network === "base" ? 8453 : 56);
     const amountUsdc = parseInt(amountRaw, 10);
-    const topupAmount =
-      amountUsdc > 5_000_000 ? "500000" : "200000"; // $0.50 for >=$5, $0.20 for <$5
+    const topupAmount = amountUsdc > 5_000_000 ? "500000" : "200000"; // $0.50 for >=$5, $0.20 for <$5
     const relayBody = {
       user: evmAddress,
       originChainId,
@@ -1678,11 +1737,9 @@ async function bridgeFromEvmQuoteHandler(
     return res.status(200).json(quote);
   } catch (e: unknown) {
     console.error("bridge-from-evm-quote error:", e);
-    return res
-      .status(500)
-      .json({
-        error: e instanceof Error ? e.message : "Internal server error",
-      });
+    return res.status(500).json({
+      error: e instanceof Error ? e.message : "Internal server error",
+    });
   }
 }
 
@@ -1920,51 +1977,9 @@ async function executeBridgeCustodialHandler(
     return res.status(200).json({ status: "Success" });
   } catch (e: unknown) {
     console.error("execute-bridge-custodial error:", e);
-    return res
-      .status(500)
-      .json({
-        error: e instanceof Error ? e.message : "Internal server error",
-      });
-  }
-}
-
-async function fundNewWalletHandler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST")
-    return res.status(405).json({ error: "Method not allowed" });
-  try {
-    ensureFirebase();
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer "))
-      return res.status(401).json({ error: "Unauthorized" });
-    const decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
-    const userId = decoded.uid;
-    console.log("[fund-new-wallet] start", { userId });
-    if (!getFunderKeypair())
-      return res.status(503).json({ error: "SOL funder not configured" });
-    const db = getAdminDb();
-    const userSnap = await db.collection("users").doc(userId).get();
-    const userData = userSnap.data();
-    const walletAddress = userData?.walletAddress as string | undefined;
-    if (!walletAddress || walletAddress.length < 32)
-      return res.status(400).json({ error: "No wallet address" });
-    if (userData?.solFundedAt) {
-      return res.status(200).json({ alreadyFunded: true });
-    }
-    const sig = await sendSolFromFunder(
-      walletAddress,
-      SOL_FUNDER_AMOUNT_LAMPORTS,
-    );
-    if (!sig) return res.status(502).json({ error: "Funding failed" });
-    await userSnap.ref.update({ solFundedAt: FieldValue.serverTimestamp() });
-    console.log("[fund-new-wallet] success", { userId, signature: sig });
-    return res.status(200).json({ signature: sig });
-  } catch (e: unknown) {
-    console.error("[fund-new-wallet] error", e);
-    return res
-      .status(500)
-      .json({
-        error: e instanceof Error ? e.message : "Internal server error",
-      });
+    return res.status(500).json({
+      error: e instanceof Error ? e.message : "Internal server error",
+    });
   }
 }
 
@@ -1999,11 +2014,9 @@ async function notifyWithdrawalCompleteHandler(
     return res.status(200).json({ ok: true });
   } catch (e: unknown) {
     console.error("notify-withdrawal-complete error:", e);
-    return res
-      .status(500)
-      .json({
-        error: e instanceof Error ? e.message : "Internal server error",
-      });
+    return res.status(500).json({
+      error: e instanceof Error ? e.message : "Internal server error",
+    });
   }
 }
 
@@ -2021,7 +2034,6 @@ const ROUTES: Record<
   "evm-address-remove": evmAddressRemoveHandler,
   "evm-balances": evmBalancesHandler,
   "evm-balances-public": evmBalancesPublicHandler,
-  "fund-new-wallet": fundNewWalletHandler,
   "notify-withdrawal-complete": notifyWithdrawalCompleteHandler,
   currencies: currenciesHandler,
   "coingecko-tokens": coingeckoTokensHandler,

@@ -11,6 +11,8 @@ import {
   ArrowLeft,
   TrendingUp,
   Activity,
+  UserPlus,
+  Check,
 } from "lucide-react";
 import { getApiBase } from "@/lib/utils";
 import { shortenAddress } from "@/lib/utils";
@@ -47,7 +49,7 @@ const APPROX_BNB_PRICE = 600;
 export function PublicProfile() {
   const { handle } = useParams<{ handle: string }>();
   const navigate = useNavigate();
-  const { user, watchlist } = useAuth();
+  const { user, watchlist, addToWatchlist, removeFromWatchlist } = useAuth();
   const [profile, setProfile] = useState<PublicProfileByHandle | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,6 +57,7 @@ export function PublicProfile() {
   const [usdcBalanceLoading, setUsdcBalanceLoading] = useState(true);
   const [openPositions, setOpenPositions] = useState<TokenPosition[]>([]);
   const [closedPositions] = useState<TokenPosition[]>([]);
+  const [followLoading, setFollowLoading] = useState(false);
 
   const isFollowed =
     !!profile &&
@@ -369,33 +372,6 @@ export function PublicProfile() {
           <h1 className="text-xl sm:text-2xl font-bold flex-1 truncate">
             Profile
           </h1>
-          {user && !isFollowed && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() =>
-                navigate("/app/watchlist", {
-                  state: {
-                    addTargetUid: profile.uid,
-                    addTargetHandle: profile.xHandle,
-                  },
-                })
-              }
-              className="text-accent-primary hover:text-accent-hover min-h-[44px] min-w-[44px] touch-manipulation"
-            >
-              COPE them
-            </Button>
-          )}
-          {user && isFollowed && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate("/app/watchlist")}
-              className="text-white/70 border-white/20 min-h-[44px] min-w-[44px] touch-manipulation"
-            >
-              Following
-            </Button>
-          )}
         </motion.div>
 
         <motion.div variants={item} className="mb-6">
@@ -434,6 +410,44 @@ export function PublicProfile() {
                         </div>
                       )}
                     </div>
+                    {user && profile?.walletAddress && (
+                      <Button
+                        variant={isFollowed ? "outline" : "primary"}
+                        size="sm"
+                        disabled={followLoading}
+                        onClick={async () => {
+                          if (!profile?.walletAddress) return;
+                          setFollowLoading(true);
+                          try {
+                            if (isFollowed) {
+                              await removeFromWatchlist(profile.walletAddress, {
+                                uid: profile.uid,
+                              });
+                            } else {
+                              await addToWatchlist(profile.walletAddress, {
+                                uid: profile.uid,
+                                onPlatform: true,
+                              });
+                            }
+                          } finally {
+                            setFollowLoading(false);
+                          }
+                        }}
+                        className="min-h-[44px] min-w-[44px] touch-manipulation flex-shrink-0 gap-2"
+                      >
+                        {isFollowed ? (
+                          <>
+                            <Check className="w-4 h-4" />
+                            Following
+                          </>
+                        ) : (
+                          <>
+                            <UserPlus className="w-4 h-4" />
+                            Follow
+                          </>
+                        )}
+                      </Button>
+                    )}
                   </div>
 
                   <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-6 pl-0 sm:pl-4 border-l-0 sm:border-l border-white/10 mt-2 sm:mt-0">

@@ -28,6 +28,7 @@ import {
   ArrowRight,
   Twitter,
   MessageCircle,
+  Plus,
 } from "lucide-react";
 import { getApiBase, shortenAddress } from "@/lib/utils";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -205,7 +206,7 @@ function AnalysisRow({
 
 function DiscoverTabContent() {
   const navigate = useNavigate();
-  const { watchlist } = useAuth();
+  const { user, watchlist, addToWatchlist, removeFromWatchlist } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<UserSearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -434,47 +435,65 @@ function DiscoverTabContent() {
               <div className="space-y-2">
                 {topTraders.map((t) => {
                   const isFollowed = watchedAddresses.has(t.walletAddress);
+                  const percentage = `${Number(t.winRate).toFixed(0)}%`;
                   return (
-                  <button
-                    key={t.uid}
-                    type="button"
-                    onClick={() => goToProfile(t)}
-                    className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-colors text-left min-h-[56px] ${
-                      isFollowed
-                        ? "border-[#12d585]/30 bg-[#12d585]/5 hover:bg-[#12d585]/10"
-                        : "border-white/10 bg-white/5 hover:bg-white/10"
-                    }`}
-                  >
-                    {t.avatar ? (
-                      <img
-                        src={t.avatar}
-                        alt=""
-                        className="w-10 h-10 rounded-xl object-cover flex-shrink-0"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded-xl bg-[#12d585]/20 flex items-center justify-center flex-shrink-0">
-                        <Users className="w-5 h-5 text-[#12d585]" />
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-white truncate">
-                        {t.xHandle || shortenAddress(t.walletAddress)}
-                      </div>
-                      <div className="text-xs text-white/50">
-                        {t.totalTrades} trades
-                      </div>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <div className="text-sm font-semibold text-[#12d585]">
-                        {Number(t.winRate).toFixed(0)}% win
-                      </div>
-                      {t.realizedPnL != null && (
-                        <div className={`text-xs ${t.realizedPnL >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                          {t.realizedPnL >= 0 ? "+" : ""}{t.realizedPnL.toFixed(0)}%
-                        </div>
+                    <div
+                      key={t.uid}
+                      className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-colors min-h-[56px] ${
+                        isFollowed
+                          ? "border-[#12d585]/30 bg-[#12d585]/5"
+                          : "border-white/10 bg-white/5"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => goToProfile(t)}
+                        className="flex-1 min-w-0 flex items-center gap-3 text-left hover:opacity-90"
+                      >
+                        <span className="font-medium text-white truncate">
+                          {t.xHandle || shortenAddress(t.walletAddress)}
+                        </span>
+                      </button>
+                      <span className="text-sm font-semibold text-[#12d585] flex-shrink-0 tabular-nums">
+                        {percentage}
+                      </span>
+                      {user && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isFollowed) {
+                              removeFromWatchlist(t.walletAddress, { uid: t.uid });
+                            } else {
+                              addToWatchlist(t.walletAddress, { uid: t.uid, onPlatform: true });
+                            }
+                          }}
+                          className="relative flex-shrink-0 w-10 h-10 rounded-full ring-2 ring-white/20 flex items-center justify-center min-w-[44px] min-h-[44px] touch-manipulation"
+                          aria-label={isFollowed ? "Unfollow" : "Follow"}
+                        >
+                          {t.avatar ? (
+                            <img
+                              src={t.avatar}
+                              alt=""
+                              className="w-10 h-10 rounded-full object-cover absolute inset-0"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-[#12d585]/20 flex items-center justify-center absolute inset-0">
+                              <Users className="w-5 h-5 text-[#12d585]" />
+                            </div>
+                          )}
+                          {isFollowed ? (
+                            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#12d585] flex items-center justify-center">
+                              <Check className="w-2.5 h-2.5 text-black" strokeWidth={3} />
+                            </span>
+                          ) : (
+                            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#12d585] flex items-center justify-center">
+                              <Plus className="w-2.5 h-2.5 text-black" strokeWidth={3} />
+                            </span>
+                          )}
+                        </button>
                       )}
                     </div>
-                  </button>
                   );
                 })}
               </div>
@@ -490,50 +509,65 @@ function DiscoverTabContent() {
               ) : (
                 accounts.map((a) => {
                   const isFollowed = watchedAddresses.has(a.walletAddress);
+                  const percentage = `${Number(a.winRate ?? 0).toFixed(0)}%`;
                   return (
-                  <button
-                    key={a.uid}
-                    type="button"
-                    onClick={() => goToProfile(a)}
-                    className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-colors text-left min-h-[56px] ${
-                      isFollowed
-                        ? "border-[#12d585]/30 bg-[#12d585]/5 hover:bg-[#12d585]/10"
-                        : "border-white/10 bg-white/5 hover:bg-white/10"
-                    }`}
-                  >
-                    {a.avatar ? (
-                      <img
-                        src={a.avatar}
-                        alt=""
-                        className="w-10 h-10 rounded-xl object-cover flex-shrink-0"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center flex-shrink-0">
-                        <Users className="w-5 h-5 text-white/50" />
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-white truncate">
-                        {a.xHandle || a.displayName || shortenAddress(a.walletAddress)}
-                      </div>
-                      <div className="text-xs text-white/50 font-mono truncate">
-                        {shortenAddress(a.walletAddress)}
-                      </div>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <div className="text-sm font-semibold text-[#12d585]">
-                        {Number(a.winRate ?? 0).toFixed(0)}% win
-                      </div>
-                      <div className="text-xs text-white/50">
-                        {a.totalTrades ?? 0} trades
-                      </div>
-                      {a.realizedPnL != null && (
-                        <div className={`text-xs ${a.realizedPnL >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                          {a.realizedPnL >= 0 ? "+" : ""}{a.realizedPnL.toFixed(0)}%
-                        </div>
+                    <div
+                      key={a.uid}
+                      className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-colors min-h-[56px] ${
+                        isFollowed
+                          ? "border-[#12d585]/30 bg-[#12d585]/5"
+                          : "border-white/10 bg-white/5"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => goToProfile(a)}
+                        className="flex-1 min-w-0 flex items-center gap-3 text-left hover:opacity-90"
+                      >
+                        <span className="font-medium text-white truncate">
+                          {a.xHandle || a.displayName || shortenAddress(a.walletAddress)}
+                        </span>
+                      </button>
+                      <span className="text-sm font-semibold text-[#12d585] flex-shrink-0 tabular-nums">
+                        {percentage}
+                      </span>
+                      {user && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isFollowed) {
+                              removeFromWatchlist(a.walletAddress, { uid: a.uid });
+                            } else {
+                              addToWatchlist(a.walletAddress, { uid: a.uid, onPlatform: true });
+                            }
+                          }}
+                          className="relative flex-shrink-0 w-10 h-10 rounded-full ring-2 ring-white/20 flex items-center justify-center min-w-[44px] min-h-[44px] touch-manipulation"
+                          aria-label={isFollowed ? "Unfollow" : "Follow"}
+                        >
+                          {a.avatar ? (
+                            <img
+                              src={a.avatar}
+                              alt=""
+                              className="w-10 h-10 rounded-full object-cover absolute inset-0"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center absolute inset-0">
+                              <Users className="w-5 h-5 text-white/50" />
+                            </div>
+                          )}
+                          {isFollowed ? (
+                            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#12d585] flex items-center justify-center">
+                              <Check className="w-2.5 h-2.5 text-black" strokeWidth={3} />
+                            </span>
+                          ) : (
+                            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#12d585] flex items-center justify-center">
+                              <Plus className="w-2.5 h-2.5 text-black" strokeWidth={3} />
+                            </span>
+                          )}
+                        </button>
                       )}
                     </div>
-                  </button>
                   );
                 })
               )}

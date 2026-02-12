@@ -739,16 +739,35 @@ async function buildVersionedTxFromRelayInstructions(
   payerKey: PublicKey,
   connection: Connection,
 ): Promise<VersionedTransaction> {
-  const ixs: TransactionInstruction[] = data.instructions.map((ix) => {
+  const ixs: TransactionInstruction[] = data.instructions.map((ix, idx) => {
     const keys = (ix.keys ?? []).map((k) => ({
       pubkey: new PublicKey(k.pubkey),
       isSigner: !!k.isSigner,
       isWritable: !!k.isWritable,
     }));
+    const raw = ix.data ?? "";
+    const decoded = decodeRelayInstructionData(raw);
+    const discriminator = decoded.slice(0, 8).toString("hex");
+    const head = decoded.slice(0, 16).toString("hex");
+    const tail =
+      decoded.length > 16
+        ? decoded.slice(-16).toString("hex")
+        : decoded.toString("hex");
+    console.log("[relay] instruction decode", {
+      idx,
+      programId: ix.programId,
+      rawLen: raw.length,
+      decodedLen: decoded.length,
+      isHexLike: isHexLike(raw),
+      isBase64Like: isBase64Like(raw),
+      discriminator,
+      head,
+      tail,
+    });
     return new TransactionInstruction({
       programId: new PublicKey(ix.programId),
       keys,
-      data: decodeRelayInstructionData(ix.data ?? ""),
+      data: decoded,
     });
   });
 

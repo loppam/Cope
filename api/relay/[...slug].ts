@@ -421,6 +421,8 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
       userWallet?: string;
       outputChainId?: number;
       outputChain?: string;
+      inputChainId?: number;
+      inputChain?: string;
       recipient?: string;
     };
     const inputMint = (body?.inputMint || "").trim();
@@ -429,13 +431,30 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
     const slippageBps =
       typeof body?.slippageBps === "number" ? body.slippageBps : 100;
     const userWallet = (body?.userWallet || "").trim();
-    let destinationChainId = CHAIN_IDS.solana;
-    if (typeof body?.outputChainId === "number")
-      destinationChainId = body.outputChainId;
-    else if (body?.outputChain)
-      destinationChainId =
-        CHAIN_IDS[(body.outputChain as string).toLowerCase()] ??
-        destinationChainId;
+    // Trade Terminal: BUY = SOL USDC (Solana) → any token; SELL = any token → SOL USDC (Solana).
+    // So: BUY → origin Solana, destination = token chain; SELL → origin = token chain, destination Solana.
+    const tradeDir = outputMint === SOLANA_USDC_MINT ? "sell" : "buy";
+    // Resolve chain IDs by direction (client may pass outputChainId for buy, inputChainId/inputChain for sell).
+    let originChainId: number;
+    let destinationChainId: number;
+    if (tradeDir === "buy") {
+      originChainId = CHAIN_IDS.solana;
+      destinationChainId = CHAIN_IDS.solana;
+      if (typeof body?.outputChainId === "number")
+        destinationChainId = body.outputChainId;
+      else if (body?.outputChain)
+        destinationChainId =
+          CHAIN_IDS[(body.outputChain as string).toLowerCase()] ??
+          destinationChainId;
+    } else {
+      destinationChainId = CHAIN_IDS.solana;
+      originChainId = CHAIN_IDS.solana;
+      if (typeof body?.inputChainId === "number")
+        originChainId = body.inputChainId;
+      else if (body?.inputChain)
+        originChainId =
+          CHAIN_IDS[(body.inputChain as string).toLowerCase()] ?? originChainId;
+    }
     if (!inputMint || !outputMint || !amount || !userWallet) {
       console.warn("[swap-quote] missing params", {
         userId,
@@ -450,10 +469,11 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
           error: "Missing inputMint, outputMint, amount, or userWallet",
         });
     }
-    const tradeDir = outputMint === SOLANA_USDC_MINT ? "sell" : "buy";
     console.log("[swap-quote] start", {
       userId,
       tradeDir,
+      originChainId,
+      destinationChainId,
       inputMint: inputMint.slice(0, 8) + "…",
       outputMint: outputMint.slice(0, 8) + "…",
       amount,
@@ -470,7 +490,7 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
       },
       body: JSON.stringify({
         user: userWallet,
-        originChainId: CHAIN_IDS.solana,
+        originChainId,
         destinationChainId,
         originCurrency: inputMint,
         destinationCurrency: outputMint,
@@ -789,6 +809,20 @@ async function buildVersionedTxFromRelayInstructions(
     instructions: ixs,
   }).compileToV0Message(lookupAccounts);
 
+  const staticKeyCount = messageV0.staticAccountKeys.length;
+  const lutTotalAccounts = messageV0.addressTableLookups.reduce(
+    (sum, lut) => sum + lut.writableIndexes.length + lut.readonlyIndexes.length,
+    0,
+  );
+  const totalIxDataBytes = ixs.reduce((sum, ix) => sum + ix.data.length, 0);
+  console.log("[relay] message shape", {
+    instructionCount: ixs.length,
+    staticKeyCount,
+    lutCount: messageV0.addressTableLookups.length,
+    lutTotalAccounts,
+    totalIxDataBytes,
+  });
+
   console.log("[ALT] lookupsUsed", messageV0.addressTableLookups.length);
   messageV0.addressTableLookups.forEach((l, i) => {
     console.log(
@@ -800,6 +834,17 @@ async function buildVersionedTxFromRelayInstructions(
       l.readonlyIndexes.length,
     );
   });
+
+  let unsignedSerializedLength: number | null = null;
+  try {
+    const txUnsigned = new VersionedTransaction(messageV0);
+    unsignedSerializedLength = txUnsigned.serialize().length;
+    console.log("[relay] unsigned tx serialized length", unsignedSerializedLength);
+  } catch (serialErr) {
+    console.error("[relay] unsigned serialize failed (likely encoding overrun)", {
+      error: serialErr instanceof Error ? serialErr.message : String(serialErr),
+    });
+  }
 
   return new VersionedTransaction(messageV0);
 }
@@ -968,11 +1013,21 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
     const txAccountKeys = transaction.message.staticAccountKeys.map((pk) =>
       pk.toBase58(),
     );
+    const msgPreSign = transaction.message;
+    const staticCountPre =
+      "staticAccountKeys" in msgPreSign ? msgPreSign.staticAccountKeys.length : 0;
+    const lookupCountPre =
+      "addressTableLookups" in msgPreSign ? msgPreSign.addressTableLookups.length : 0;
     console.log("[execute-step] tx accounts (static)", {
       userId,
       stepIndex,
       accountCount: txAccountKeys.length,
       accountKeys: txAccountKeys,
+    });
+    console.log("[execute-step] pre-sign message stats", {
+      staticKeyCount: staticCountPre,
+      lookupCount: lookupCountPre,
+      instructionCount: "instructions" in msgPreSign ? (msgPreSign as { instructions?: unknown[] }).instructions?.length ?? null : null,
     });
 
     transaction.sign([wallet]);
@@ -1038,6 +1093,19 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       const firstIxDataPreview = usedInstructions && Array.isArray((stepData as { instructions?: Array<{ data?: string }> })?.instructions)
         ? (stepData as { instructions: Array<{ data?: string }> }).instructions[0]?.data?.slice(0, 48)
         : null;
+      const instructionCount = usedInstructions && typeof stepData === "object" && Array.isArray((stepData as { instructions?: unknown[] }).instructions)
+        ? (stepData as { instructions: unknown[] }).instructions.length
+        : null;
+      const lutCount = stepData && typeof stepData === "object" && Array.isArray((stepData as { addressLookupTableAddresses?: unknown[] }).addressLookupTableAddresses)
+        ? (stepData as { addressLookupTableAddresses: unknown[] }).addressLookupTableAddresses.length
+        : null;
+      const txMsgStats =
+        transaction && "message" in transaction
+          ? {
+              staticKeyCount: "staticAccountKeys" in transaction.message ? transaction.message.staticAccountKeys.length : null,
+              lookupCount: "addressTableLookups" in transaction.message ? transaction.message.addressTableLookups.length : null,
+            }
+          : null;
       console.error(
         "[execute-step] encoding/instruction error - Relay step data diagnostic",
         {
@@ -1048,6 +1116,9 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
           usedSerializedTx,
           usedInstructions,
           firstIxDataPreview: firstIxDataPreview ?? "(none)",
+          instructionCountFromStep: instructionCount,
+          lutCountFromStep: lutCount,
+          txMessageStats: txMsgStats,
         },
       );
     }

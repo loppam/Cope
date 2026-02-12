@@ -500,6 +500,9 @@ export function Trade() {
           slippageBps: slippage,
           userWallet: userProfile.walletAddress,
           tradeType: "sell",
+          // Chain from token card (Birdeye/Relay); Relay uses it for sell origin. Default Solana for SPL.
+          inputChainId: token.chainId ?? 792703809,
+          inputChain: token.chain ?? "solana",
         }),
       });
       const data = await res.json();

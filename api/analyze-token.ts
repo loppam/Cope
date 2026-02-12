@@ -25,6 +25,15 @@ function toBirdeyeChain(c: string): string {
   return c === "bnb" ? "bsc" : c;
 }
 
+// Birdeye free tier is 1 req/sec; serialize calls with spacing so we avoid 429s
+const BIRDEYE_MIN_INTERVAL_MS = 1100;
+let birdeyeLastCall = 0;
+let birdeyeTail: Promise<unknown> = Promise.resolve();
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 async function birdeyeFetch<T>(
   path: string,
   params: Record<string, string>,
@@ -36,21 +45,32 @@ async function birdeyeFetch<T>(
   const url = new URL(`${BIRDEYE_API_BASE}${path}`);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
 
-  const res = await fetch(url.toString(), {
-    method: "GET",
-    headers: {
-      "X-API-KEY": apiKey,
-      "x-chain": chain,
-      accept: "application/json",
-    },
+  const prev = birdeyeTail;
+  const myJob = prev.then(async (): Promise<unknown> => {
+    const now = Date.now();
+    const elapsed = now - birdeyeLastCall;
+    const wait = elapsed >= BIRDEYE_MIN_INTERVAL_MS ? 0 : BIRDEYE_MIN_INTERVAL_MS - elapsed;
+    if (wait > 0) await sleep(wait);
+    birdeyeLastCall = Date.now();
+
+    const res = await fetch(url.toString(), {
+      method: "GET",
+      headers: {
+        "X-API-KEY": apiKey,
+        "x-chain": chain,
+        accept: "application/json",
+      },
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Birdeye API error ${res.status}: ${text.slice(0, 200)}`);
+    }
+
+    return res.json();
   });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Birdeye API error ${res.status}: ${text.slice(0, 200)}`);
-  }
-
-  return res.json();
+  birdeyeTail = myJob;
+  return myJob as Promise<T>;
 }
 
 interface BirdeyeOverviewData {
@@ -621,9 +641,13 @@ export default async function handler(
     });
   } catch (err) {
     console.error("Analysis error:", err);
-    res.status(500).json({
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    const isBirdeye429 = msg.includes("Birdeye API error 429");
+    res.status(isBirdeye429 ? 429 : 500).json({
       error: "Analysis failed",
-      message: err instanceof Error ? err.message : "Unknown error",
+      message: isBirdeye429
+        ? "Hold on – COPE is waiting in line for Birdeye data. Someone's right in front of you. Please try again in a few seconds."
+        : msg,
     });
   }
 }

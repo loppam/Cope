@@ -148,14 +148,15 @@ interface BirdeyeTxItem {
 async function fetchTokenTransactions(
   address: string,
   chain: string,
-  limit = 150
+  limit = 100
 ): Promise<BirdeyeTxItem[]> {
   try {
+    const clampedLimit = Math.min(100, Math.max(1, limit));
     const res = await birdeyeFetch<unknown>(
       "/defi/v3/token/txs",
       {
         address,
-        limit: String(Math.min(limit, 150)),
+        limit: String(clampedLimit),
         offset: "0",
         sort_by: "block_unix_time",
         sort_type: "desc",
@@ -601,7 +602,7 @@ export default async function handler(
       await fetchTokenData(addr, body.chain);
 
     const birdeyeChain = toBirdeyeChain(chain);
-    const txs = await fetchTokenTransactions(addr, birdeyeChain, 150);
+    const txs = await fetchTokenTransactions(addr, birdeyeChain, 100);
     const bundleCount = detectBundles(txs);
 
     const metrics = calculateMetrics(

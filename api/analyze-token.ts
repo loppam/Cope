@@ -25,19 +25,10 @@ function toBirdeyeChain(c: string): string {
   return c === "bnb" ? "bsc" : c;
 }
 
-// Birdeye free tier is 1 req/sec; serialize calls with spacing so we avoid 429s
-const BIRDEYE_MIN_INTERVAL_MS = 1100;
-let birdeyeLastCall = 0;
-let birdeyeTail: Promise<unknown> = Promise.resolve();
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 async function birdeyeFetch<T>(
   path: string,
   params: Record<string, string>,
-  chain: string
+  chain: string,
 ): Promise<T> {
   const apiKey = process.env.BIRDEYE_API_KEY;
   if (!apiKey) throw new Error("BIRDEYE_API_KEY not configured");
@@ -45,32 +36,21 @@ async function birdeyeFetch<T>(
   const url = new URL(`${BIRDEYE_API_BASE}${path}`);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
 
-  const prev = birdeyeTail;
-  const myJob = prev.then(async (): Promise<unknown> => {
-    const now = Date.now();
-    const elapsed = now - birdeyeLastCall;
-    const wait = elapsed >= BIRDEYE_MIN_INTERVAL_MS ? 0 : BIRDEYE_MIN_INTERVAL_MS - elapsed;
-    if (wait > 0) await sleep(wait);
-    birdeyeLastCall = Date.now();
-
-    const res = await fetch(url.toString(), {
-      method: "GET",
-      headers: {
-        "X-API-KEY": apiKey,
-        "x-chain": chain,
-        accept: "application/json",
-      },
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Birdeye API error ${res.status}: ${text.slice(0, 200)}`);
-    }
-
-    return res.json();
+  const res = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      "X-API-KEY": apiKey,
+      "x-chain": chain,
+      accept: "application/json",
+    },
   });
-  birdeyeTail = myJob;
-  return myJob as Promise<T>;
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Birdeye API error ${res.status}: ${text.slice(0, 200)}`);
+  }
+
+  return res.json();
 }
 
 interface BirdeyeOverviewData {
@@ -120,7 +100,7 @@ interface BirdeyeHolderItem {
 
 async function fetchTokenSecurity(
   address: string,
-  chain: string
+  chain: string,
 ): Promise<BirdeyeSecurityData | null> {
   try {
     const res = await birdeyeFetch<{
@@ -134,7 +114,12 @@ async function fetchTokenSecurity(
 }
 
 function extractHolderItems(res: unknown): BirdeyeHolderItem[] {
-  const d = res as { data?: { items?: BirdeyeHolderItem[]; data?: { items?: BirdeyeHolderItem[] } } };
+  const d = res as {
+    data?: {
+      items?: BirdeyeHolderItem[];
+      data?: { items?: BirdeyeHolderItem[] };
+    };
+  };
   return d?.data?.items ?? d?.data?.data?.items ?? [];
 }
 
@@ -148,21 +133,20 @@ interface BirdeyeTxItem {
 async function fetchTokenTransactions(
   address: string,
   chain: string,
-  limit = 100
+  limit = 150,
 ): Promise<BirdeyeTxItem[]> {
   try {
-    const clampedLimit = Math.min(100, Math.max(1, limit));
     const res = await birdeyeFetch<unknown>(
       "/defi/v3/token/txs",
       {
         address,
-        limit: String(clampedLimit),
+        limit: String(Math.min(limit, 150)),
         offset: "0",
         sort_by: "block_unix_time",
         sort_type: "desc",
         tx_type: "all",
       },
-      chain
+      chain,
     );
     const d = res as { data?: { items?: BirdeyeTxItem[] } };
     const items = d?.data?.items ?? [];
@@ -186,7 +170,7 @@ function detectBundles(txs: BirdeyeTxItem[], threshold = 3): number {
 
 async function fetchTokenData(
   address: string,
-  chain?: string
+  chain?: string,
 ): Promise<{
   chain: string;
   metadata: Record<string, unknown>;
@@ -194,7 +178,9 @@ async function fetchTokenData(
   securityData: BirdeyeSecurityData | null;
   holders: BirdeyeHolderItem[];
 }> {
-  const chainsToTry = chain ? [toBirdeyeChain(chain)] : inferChain(address).map(toBirdeyeChain);
+  const chainsToTry = chain
+    ? [toBirdeyeChain(chain)]
+    : inferChain(address).map(toBirdeyeChain);
 
   let lastError: Error | null = null;
   for (const c of chainsToTry) {
@@ -203,13 +189,15 @@ async function fetchTokenData(
         birdeyeFetch<{ success?: boolean; data?: BirdeyeOverviewData }>(
           "/defi/token_overview",
           { address, ui_amount_mode: "scaled" },
-          c
+          c,
         ),
-        birdeyeFetch<{ success?: boolean; data?: { items?: BirdeyeHolderItem[] } }>(
-          "/defi/v3/token/holder",
-          { address, limit: "20" },
-          c
-        ).catch(() => ({ success: false, data: { items: [] } })),
+        birdeyeFetch<{
+          success?: boolean;
+          data?: { items?: BirdeyeHolderItem[] };
+        }>("/defi/v3/token/holder", { address, limit: "20" }, c).catch(() => ({
+          success: false,
+          data: { items: [] },
+        })),
         fetchTokenSecurity(address, c),
       ]);
 
@@ -217,8 +205,7 @@ async function fetchTokenData(
       const holderItems = extractHolderItems(holderRes);
       const security = securityRes;
 
-      const supply =
-        security?.totalSupply ?? data?.supply ?? 0;
+      const supply = security?.totalSupply ?? data?.supply ?? 0;
       const mintAuthority = security?.ownerAddress ?? null;
       const freezeAuthority =
         security?.freezeAuthority != null && security.freezeAuthority !== false
@@ -263,14 +250,17 @@ function calculateMetrics(
   marketData: BirdeyeOverviewData | null,
   holders: BirdeyeHolderItem[],
   securityData: BirdeyeSecurityData | null,
-  bundleCountOverride?: number
+  bundleCountOverride?: number,
 ): Record<string, unknown> {
   let top10Concentration: number;
   const holderBased = holders.length >= 2;
   if (holderBased) {
     const top10ExclPool = holders
       .slice(1, 11)
-      .reduce((sum, h) => sum + normalizeHolderPercentage(h.percentage ?? 0), 0);
+      .reduce(
+        (sum, h) => sum + normalizeHolderPercentage(h.percentage ?? 0),
+        0,
+      );
     top10Concentration = Math.round(top10ExclPool * 100) / 100;
   } else {
     const securityPct =
@@ -288,7 +278,8 @@ function calculateMetrics(
   const liquidityUSD = marketData?.liquidity ?? 0;
   const volume24h =
     marketData?.v24hUSD ?? marketData?.v24h ?? marketData?.volume ?? 0;
-  const marketCap = marketData?.marketCap ?? marketData?.mc ?? liquidityUSD * 10;
+  const marketCap =
+    marketData?.marketCap ?? marketData?.mc ?? liquidityUSD * 10;
   const price = marketData?.price ?? 0;
   const priceChange24h =
     marketData?.priceChange24hPercent ?? marketData?.priceChange24h ?? 0;
@@ -297,12 +288,12 @@ function calculateMetrics(
   const sell24h = marketData?.sell24h ?? 0;
   const devSold = sell24h > buy24h * 1.5 ? "Yes" : "No";
 
-  const totalSupply =
-    securityData?.totalSupply ?? marketData?.supply ?? 0;
+  const totalSupply = securityData?.totalSupply ?? marketData?.supply ?? 0;
   const hasMintAuthority = securityData?.ownerAddress != null;
   const hasFreeze =
     securityData?.freezeable === true ||
-    (securityData?.freezeAuthority != null && securityData?.freezeAuthority !== false);
+    (securityData?.freezeAuthority != null &&
+      securityData?.freezeAuthority !== false);
 
   return {
     top10Concentration,
@@ -323,8 +314,7 @@ function calculateMetrics(
   };
 }
 
-const EXCEPTION_ADDRESS =
-  "73iDnLaQDL84PDDubzTFSa2awyHFQYHbBRU9tfTopump";
+const EXCEPTION_ADDRESS = "73iDnLaQDL84PDDubzTFSa2awyHFQYHbBRU9tfTopump";
 
 async function analyzeWithClaude(data: {
   tokenAddress: string;
@@ -491,7 +481,7 @@ Use Bundle Buys Detected count: 0 = likely Safe, 1-2 = review, 3+ = Not Safe. Re
 }
 
 function buildFallbackAnalysis(
-  metrics: Record<string, unknown>
+  metrics: Record<string, unknown>,
 ): Record<string, unknown> {
   const mcap =
     (metrics.marketCap as number) ||
@@ -529,7 +519,8 @@ function buildFallbackAnalysis(
       reason: "Developer activity check limited.",
     },
     lore: {
-      value: "Token analysis run without AI. Please verify fundamentals manually.",
+      value:
+        "Token analysis run without AI. Please verify fundamentals manually.",
       status: "neutral",
     },
     socials: {
@@ -570,7 +561,7 @@ function buildFallbackAnalysis(
 
 export default async function handler(
   req: VercelRequest,
-  res: VercelResponse
+  res: VercelResponse,
 ): Promise<void> {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -602,14 +593,14 @@ export default async function handler(
       await fetchTokenData(addr, body.chain);
 
     const birdeyeChain = toBirdeyeChain(chain);
-    const txs = await fetchTokenTransactions(addr, birdeyeChain, 100);
+    const txs = await fetchTokenTransactions(addr, birdeyeChain, 150);
     const bundleCount = detectBundles(txs);
 
     const metrics = calculateMetrics(
       marketData,
       holders,
       securityData,
-      bundleCount
+      bundleCount,
     );
 
     const analysis = await analyzeWithClaude({
@@ -642,13 +633,9 @@ export default async function handler(
     });
   } catch (err) {
     console.error("Analysis error:", err);
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    const isBirdeye429 = msg.includes("Birdeye API error 429");
-    res.status(isBirdeye429 ? 429 : 500).json({
+    res.status(500).json({
       error: "Analysis failed",
-      message: isBirdeye429
-        ? "Hold on – COPE is waiting in line for Birdeye data. Someone's right in front of you. Please try again in a few seconds."
-        : msg,
+      message: err instanceof Error ? err.message : "Unknown error",
     });
   }
 }

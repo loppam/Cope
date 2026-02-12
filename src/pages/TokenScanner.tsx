@@ -620,15 +620,7 @@ export function TokenScanner() {
       const json = await res.json();
 
       if (!res.ok) {
-        const rawMsg = json.message || json.error || "";
-        const isRateLimit =
-          res.status === 429 || /Birdeye API error 429/i.test(String(rawMsg));
-        if (isRateLimit) {
-          throw new Error(
-            "Hold on – COPE is waiting in line for Birdeye data. Someone's right in front of you. Please try again in a few seconds."
-          );
-        }
-        throw new Error(rawMsg || "Analysis failed");
+        throw new Error(json.message || json.error || "Analysis failed");
       }
 
       const { metadata, metrics, analysis: a } = json;

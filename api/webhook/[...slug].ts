@@ -300,30 +300,102 @@ async function getTokenSymbol(mint: string): Promise<string> {
   }
 }
 
+type SwapDirection = "BUY" | "SELL" | "SWAP";
+
+interface HeliusTokenTransfer {
+  mint: string;
+  tokenAmount: number;
+  fromUserAccount?: string;
+  toUserAccount?: string;
+}
+
+function formatTokenAmount(value: number): string {
+  if (!Number.isFinite(value)) return "0";
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000) return `${(value / 1_000).toFixed(2)}K`;
+  const maximumFractionDigits = abs >= 1 ? 4 : 6;
+  return value.toLocaleString("en-US", { maximumFractionDigits });
+}
+
+function getNativeBalanceChangeLamports(tx: HeliusWebhookPayload, actorWallet: string): number | null {
+  const entry = tx.accountData?.find((acc) => acc.account === actorWallet);
+  if (!entry || typeof entry.nativeBalanceChange !== "number") return null;
+  return entry.nativeBalanceChange;
+}
+
+function getDirectionalTokenNetByMint(tokenTransfers: HeliusTokenTransfer[], actorWallet: string): { netByMint: Map<string, number>; hasDirectional: boolean } {
+  const netByMint = new Map<string, number>();
+  let hasDirectional = false;
+  const actor = actorWallet.toLowerCase();
+  for (const transfer of tokenTransfers) {
+    const from = transfer.fromUserAccount?.toLowerCase();
+    const to = transfer.toUserAccount?.toLowerCase();
+    if (from !== actor && to !== actor) continue;
+    const amount = Math.abs(transfer.tokenAmount || 0);
+    if (amount === 0) continue;
+    hasDirectional = true;
+    const delta = from === actor ? -amount : amount;
+    netByMint.set(transfer.mint, (netByMint.get(transfer.mint) || 0) + delta);
+  }
+  return { netByMint, hasDirectional };
+}
+
+function getPrimaryNetEntry(netByMint: Map<string, number>, direction: "in" | "out"): { mint: string; amount: number } | null {
+  let bestMint: string | null = null;
+  let bestAmount = 0;
+  for (const [mint, net] of netByMint.entries()) {
+    if (direction === "in" && net > 0 && net > bestAmount) {
+      bestMint = mint;
+      bestAmount = net;
+    }
+    if (direction === "out" && net < 0 && Math.abs(net) > bestAmount) {
+      bestMint = mint;
+      bestAmount = Math.abs(net);
+    }
+  }
+  return bestMint ? { mint: bestMint, amount: bestAmount } : null;
+}
+
+function getTokenTransferAmountByMint(tokenTransfers: HeliusTokenTransfer[], mint: string): number | null {
+  const matches = tokenTransfers.filter((t) => t.mint === mint && Number.isFinite(t.tokenAmount));
+  if (matches.length === 0) return null;
+  return matches.reduce((max, t) => Math.max(max, Math.abs(t.tokenAmount || 0)), 0);
+}
+
 interface HeliusWebhookPayload {
   accountData?: Array<{ account: string; nativeBalanceChange?: number }>;
   feePayer: string;
   nativeTransfers?: Array<{ amount: number }>;
   signature: string;
-  tokenTransfers?: Array<{ mint: string; tokenAmount: number }>;
+  tokenTransfers?: HeliusTokenTransfer[];
   type: string;
   events?: { swap?: { tokenInputs: Array<{ mint: string }>; tokenOutputs: Array<{ mint: string }> } };
 }
 
-function getEffectiveSwapDirection(tx: HeliusWebhookPayload): "BUY" | "SELL" | "SWAP" {
-  if (tx.type !== "SWAP") return tx.type as "BUY" | "SELL" | "SWAP";
+function getEffectiveSwapDirection(tx: HeliusWebhookPayload, actorWallet?: string): SwapDirection {
+  if (tx.type !== "SWAP") return tx.type as SwapDirection;
   const swap = tx.events?.swap;
-  if (!swap) return "SWAP";
-  if ((swap.tokenOutputs || []).some((t) => t.mint !== WRAPPED_SOL_MINT)) return "BUY";
-  if ((swap.tokenInputs || []).some((t) => t.mint !== WRAPPED_SOL_MINT)) return "SELL";
+  if (swap) {
+    if ((swap.tokenOutputs || []).some((t) => t.mint !== WRAPPED_SOL_MINT)) return "BUY";
+    if ((swap.tokenInputs || []).some((t) => t.mint !== WRAPPED_SOL_MINT)) return "SELL";
+  }
+  if (!actorWallet) return "SWAP";
+  const { netByMint, hasDirectional } = getDirectionalTokenNetByMint(tx.tokenTransfers || [], actorWallet);
+  if (!hasDirectional) return "SWAP";
+  const primaryIn = getPrimaryNetEntry(netByMint, "in");
+  const primaryOut = getPrimaryNetEntry(netByMint, "out");
+  if (primaryIn?.mint && primaryIn.mint !== WRAPPED_SOL_MINT) return "BUY";
+  if (primaryOut?.mint && primaryOut.mint !== WRAPPED_SOL_MINT) return "SELL";
   return "SWAP";
 }
 
-function getPrimaryTokenMint(tx: HeliusWebhookPayload): string | undefined {
+function getPrimaryTokenMint(tx: HeliusWebhookPayload, direction?: SwapDirection): string | undefined {
+  const effectiveType = direction || (tx.type as SwapDirection);
   const swap = tx.events?.swap;
   if (swap) {
-    if (tx.type === "BUY") return (swap.tokenOutputs || []).filter((t) => t.mint !== WRAPPED_SOL_MINT)[0]?.mint ?? swap.tokenOutputs?.[0]?.mint;
-    if (tx.type === "SELL") return (swap.tokenInputs || []).filter((t) => t.mint !== WRAPPED_SOL_MINT)[0]?.mint ?? swap.tokenInputs?.[0]?.mint;
+    if (effectiveType === "BUY") return (swap.tokenOutputs || []).filter((t) => t.mint !== WRAPPED_SOL_MINT)[0]?.mint ?? swap.tokenOutputs?.[0]?.mint;
+    if (effectiveType === "SELL") return (swap.tokenInputs || []).filter((t) => t.mint !== WRAPPED_SOL_MINT)[0]?.mint ?? swap.tokenInputs?.[0]?.mint;
     const fromOut = (swap.tokenOutputs || []).filter((t) => t.mint !== WRAPPED_SOL_MINT)[0];
     if (fromOut) return fromOut.mint;
     return (swap.tokenInputs || [])[0]?.mint ?? (swap.tokenOutputs || [])[0]?.mint;
@@ -431,9 +503,23 @@ async function transactionHandler(req: VercelRequest, res: VercelResponse) {
     const payload = req.body as HeliusWebhookPayload[] | HeliusWebhookPayload;
     const transactions = Array.isArray(payload) ? payload : [payload];
     const processableTx = transactions.filter((tx) => tx.type === "SWAP");
-    const uniqueMints = [...new Set(processableTx.map((tx) => getPrimaryTokenMint(tx)).filter((m): m is string => !!m))];
+    const uniqueMints = new Set<string>();
+    for (const tx of processableTx) {
+      for (const transfer of tx.tokenTransfers || []) {
+        if (transfer.mint) uniqueMints.add(transfer.mint);
+      }
+      const swap = tx.events?.swap;
+      for (const input of swap?.tokenInputs || []) {
+        if (input.mint) uniqueMints.add(input.mint);
+      }
+      for (const output of swap?.tokenOutputs || []) {
+        if (output.mint) uniqueMints.add(output.mint);
+      }
+      const primaryMint = getPrimaryTokenMint(tx);
+      if (primaryMint) uniqueMints.add(primaryMint);
+    }
     const symbolByMint = new Map<string, string>();
-    await Promise.all(uniqueMints.map(async (mint) => { symbolByMint.set(mint, await getTokenSymbol(mint)); }));
+    await Promise.all([...uniqueMints].map(async (mint) => { symbolByMint.set(mint, await getTokenSymbol(mint)); }));
     const actorAddresses = new Set(processableTx.map((tx) => tx.feePayer).filter((a): a is string => !!a));
     const watchedSnaps = actorAddresses.size > 0 ? await Promise.all([...actorAddresses].map((addr) => db.collection("watchedWallets").doc(addr).get())) : [];
     const watchedByAddr = new Map<string, Record<string, { nickname?: string }>>();
@@ -449,37 +535,68 @@ async function transactionHandler(req: VercelRequest, res: VercelResponse) {
     for (const tx of processableTx) {
       const actorWallet = tx.feePayer;
       if (!actorWallet) continue;
-      const effectiveType = getEffectiveSwapDirection(tx);
+      const effectiveType = getEffectiveSwapDirection(tx, actorWallet);
       const isBuy = effectiveType === "BUY";
       const isSell = effectiveType === "SELL";
       const isSwap = effectiveType === "SWAP";
       const tokenTransfers = tx.tokenTransfers || [];
       const nativeTransfers = tx.nativeTransfers || [];
-      let amountUsd = 0;
-      if (tokenTransfers.length > 0) {
-        const tokenPrices = await getJupiterPrices(tokenTransfers.map((t) => t.mint));
-        for (const transfer of tokenTransfers) {
-          const price = priceCache.get(transfer.mint)?.price ?? tokenPrices[transfer.mint] ?? 0;
-          if (price > 0) priceCache.set(transfer.mint, { price, timestamp: Date.now() });
-          amountUsd += price * (transfer.tokenAmount || 0);
+      const swap = tx.events?.swap;
+      const nativeChangeLamports = getNativeBalanceChangeLamports(tx, actorWallet);
+      const { netByMint, hasDirectional } = getDirectionalTokenNetByMint(tokenTransfers, actorWallet);
+      const primaryIn = hasDirectional ? getPrimaryNetEntry(netByMint, "in") : null;
+      const primaryOut = hasDirectional ? getPrimaryNetEntry(netByMint, "out") : null;
+      const paidMint = isBuy
+        ? (primaryOut?.mint ?? swap?.tokenInputs?.[0]?.mint)
+        : isSell
+          ? (primaryIn?.mint ?? swap?.tokenOutputs?.[0]?.mint)
+          : (primaryOut?.mint ?? swap?.tokenInputs?.[0]?.mint);
+      let paidAmount: number | null = null;
+      let paidSymbol: string | null = null;
+      if (paidMint) {
+        if (paidMint === WRAPPED_SOL_MINT) {
+          if (nativeChangeLamports != null) {
+            const solChange = nativeChangeLamports / 1e9;
+            paidAmount = isSell ? Math.max(0, solChange) : Math.max(0, -solChange);
+          }
+          if (!paidAmount || paidAmount === 0) {
+            const fallback = getTokenTransferAmountByMint(tokenTransfers, WRAPPED_SOL_MINT);
+            if (fallback != null) paidAmount = fallback;
+          }
+          paidSymbol = "SOL";
+        } else {
+          if (hasDirectional) {
+            const net = netByMint.get(paidMint) ?? 0;
+            const derived = isSell ? Math.max(0, net) : Math.max(0, -net);
+            if (derived > 0) paidAmount = derived;
+          }
+          if (!paidAmount || paidAmount === 0) {
+            const fallback = getTokenTransferAmountByMint(tokenTransfers, paidMint);
+            if (fallback != null) paidAmount = fallback;
+          }
+          paidSymbol = symbolByMint.get(paidMint) ?? paidMint;
         }
       }
-      if (nativeTransfers.length > 0) {
-        const solPrice = await getSolPrice();
-        amountUsd += (nativeTransfers.reduce((sum, t) => sum + t.amount, 0) / 1e9) * solPrice;
+      if ((!paidAmount || paidAmount === 0) && nativeChangeLamports != null) {
+        const solChange = nativeChangeLamports / 1e9;
+        const fallbackSol = isSell ? Math.max(0, solChange) : Math.max(0, -solChange);
+        if (fallbackSol > 0) {
+          paidAmount = fallbackSol;
+          paidSymbol = "SOL";
+        }
       }
-      if (isSwap && tx.feePayer && tx.accountData) {
-        const feePayerEntry = tx.accountData.find((acc) => acc.account === tx.feePayer);
-        const nativeChange = feePayerEntry?.nativeBalanceChange;
-        if (nativeChange != null && nativeChange < 0) {
-          amountUsd = (Math.abs(nativeChange) / 1e9) * (await getSolPrice());
+      if ((!paidAmount || paidAmount === 0) && nativeTransfers.length > 0) {
+        const lamportsTotal = nativeTransfers.reduce((sum, t) => sum + (t.amount || 0), 0);
+        if (lamportsTotal > 0) {
+          paidAmount = lamportsTotal / 1e9;
+          paidSymbol = "SOL";
         }
       }
       const notificationType = effectiveType === "BUY" ? "buy" : effectiveType === "SELL" ? "sell" : effectiveType === "SWAP" ? "swap" : "transaction";
-      const tokenAddress = getPrimaryTokenMint(tx) ?? undefined;
+      const tokenAddress = getPrimaryTokenMint(tx, effectiveType) ?? undefined;
       const primaryTransfer = tokenTransfers.length > 0 ? (tokenTransfers.find((t) => t.mint === tokenAddress) || tokenTransfers[0]) : null;
-      const tokenSymbol = tokenAddress ? (symbolByMint.get(tokenAddress) ?? "SOL") : "SOL";
-      const amountUsdFormatted = amountUsd >= 1 ? amountUsd.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 }) : amountUsd.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const tokenSymbol = tokenAddress ? (tokenAddress === WRAPPED_SOL_MINT ? "SOL" : (symbolByMint.get(tokenAddress) ?? "SOL")) : "SOL";
+      const amountLabel = paidAmount != null && paidSymbol ? `${formatTokenAmount(paidAmount)} ${paidSymbol}` : null;
       const watchersMap = watchedByAddr.get(actorWallet) || null;
       if (!watchersMap || Object.keys(watchersMap).length === 0) continue;
       const notifiedUserIds = new Set<string>();
@@ -492,16 +609,24 @@ async function transactionHandler(req: VercelRequest, res: VercelResponse) {
         let notificationMessage: string;
         if (isBuy) {
           notificationTitle = "Buy Transaction";
-          notificationMessage = `${displayName} bought ${amountUsdFormatted} of ${tokenSymbol}`;
+          notificationMessage = amountLabel
+            ? `${displayName} bought ${amountLabel} of ${tokenSymbol}`
+            : `${displayName} bought ${tokenSymbol}`;
         } else if (isSell) {
           notificationTitle = "Sell Transaction";
-          notificationMessage = `${displayName} sold ${amountUsdFormatted} of ${tokenSymbol}`;
+          notificationMessage = amountLabel
+            ? `${displayName} sold ${tokenSymbol} for ${amountLabel}`
+            : `${displayName} sold ${tokenSymbol}`;
         } else if (isSwap) {
           notificationTitle = "Swap Transaction";
-          notificationMessage = `${displayName} swapped ${amountUsdFormatted} (${tokenSymbol})`;
+          notificationMessage = amountLabel
+            ? `${displayName} swapped ${amountLabel} for ${tokenSymbol}`
+            : `${displayName} made a swap`;
         } else {
           notificationTitle = "Transaction";
-          notificationMessage = `${displayName} had a transaction (${amountUsdFormatted})`;
+          notificationMessage = amountLabel
+            ? `${displayName} had a transaction (${amountLabel})`
+            : `${displayName} had a transaction`;
         }
         const notificationId = createHash("sha256").update(`${tx.signature}:${uid}`).digest("hex");
         const notificationRef = db.collection("notifications").doc(notificationId);
@@ -517,8 +642,8 @@ async function transactionHandler(req: VercelRequest, res: VercelResponse) {
           message: notificationMessage,
           txHash: tx.signature,
           tokenAddress: tokenAddress ?? null,
-          amount: primaryTransfer?.tokenAmount ?? nativeTransfers[0]?.amount,
-          amountUsd,
+          amount: paidAmount ?? primaryTransfer?.tokenAmount ?? null,
+          amountSymbol: paidSymbol ?? null,
           read: false,
           createdAt: new Date(),
         };

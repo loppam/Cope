@@ -182,6 +182,26 @@ export function Alerts() {
     return `$${numValue.toFixed(2)}`;
   };
 
+  const formatTokenAmount = (value: number | undefined | null) => {
+    if (value == null || Number.isNaN(value)) return null;
+    const abs = Math.abs(value);
+    if (abs >= 1000000) return `${(value / 1000000).toFixed(2)}M`;
+    if (abs >= 1000) return `${(value / 1000).toFixed(2)}K`;
+    const maximumFractionDigits = abs >= 1 ? 4 : 6;
+    return value.toLocaleString("en-US", { maximumFractionDigits });
+  };
+
+  const getAmountLabel = (notification: WalletNotification) => {
+    if (notification.amount != null && notification.amountSymbol) {
+      const formatted = formatTokenAmount(notification.amount);
+      return formatted ? `${formatted} ${notification.amountSymbol}` : null;
+    }
+    if (notification.amountUsd != null) {
+      return formatCurrency(notification.amountUsd);
+    }
+    return null;
+  };
+
   const formatTime = (timestamp: any) => {
     if (!timestamp) return "Just now";
 
@@ -328,91 +348,93 @@ export function Alerts() {
               <div>
                 <h2 className="text-sm font-medium text-white mb-3">Unread</h2>
                 <div className="space-y-2">
-                  {unreadNotifications.map((notification) => (
-                    <Card
-                      key={notification.id}
-                      glass
-                      className={`overflow-hidden border-l-4 ${
-                        notification.type === "buy"
-                          ? "border-[#12d585]"
-                          : notification.type === "sell"
-                            ? "border-[#FF6B6B]"
-                            : "border-[#54A0FF]"
-                      }`}
-                    >
-                      <div className="p-4 sm:p-5">
-                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <h3 className="font-semibold text-white truncate">
-                                {notification.title}
-                              </h3>
-                              {!notification.read && (
-                                <span className="w-2 h-2 rounded-full bg-[#12d585]"></span>
-                              )}
+                  {unreadNotifications.map((notification) => {
+                    const amountLabel = getAmountLabel(notification);
+                    return (
+                      <Card
+                        key={notification.id}
+                        glass
+                        className={`overflow-hidden border-l-4 ${
+                          notification.type === "buy"
+                            ? "border-[#12d585]"
+                            : notification.type === "sell"
+                              ? "border-[#FF6B6B]"
+                              : "border-[#54A0FF]"
+                        }`}
+                      >
+                        <div className="p-4 sm:p-5">
+                          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <h3 className="font-semibold text-white truncate">
+                                  {notification.title}
+                                </h3>
+                                {!notification.read && (
+                                  <span className="w-2 h-2 rounded-full bg-[#12d585]"></span>
+                                )}
+                              </div>
+                              <p className="text-sm text-white mb-2 line-clamp-2">
+                                {notification.message}
+                              </p>
+                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-white/90">
+                                <code className="font-mono">
+                                  {shortenAddress(notification.walletAddress)}
+                                </code>
+                                {amountLabel && (
+                                  <span>
+                                    {amountLabel}
+                                  </span>
+                                )}
+                                <span>{formatTime(notification.createdAt)}</span>
+                              </div>
                             </div>
-                            <p className="text-sm text-white mb-2 line-clamp-2">
-                              {notification.message}
-                            </p>
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-white/90">
-                              <code className="font-mono">
-                                {shortenAddress(notification.walletAddress)}
-                              </code>
-                              {notification.amountUsd && (
-                                <span>
-                                  {formatCurrency(notification.amountUsd)}
-                                </span>
+                            <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+                              {notification.tokenAddress && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    navigate("/app/trade", {
+                                      state: {
+                                        mint: notification.tokenAddress,
+                                        fromFeed: true,
+                                      },
+                                    });
+                                  }}
+                                  className="text-accent-primary hover:text-accent-hover"
+                                  title="Copy Trade"
+                                >
+                                  <Copy className="w-4 h-4" />
+                                </Button>
                               )}
-                              <span>{formatTime(notification.createdAt)}</span>
-                            </div>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
-                            {notification.tokenAddress && (
+                              {notification.txHash && (
+                                <a
+                                  href={`https://solscan.io/tx/${notification.txHash}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[#12d585] hover:text-[#08b16b] p-1 hover:bg-white/10 rounded transition-colors"
+                                  title="View on Solscan"
+                                >
+                                  <ExternalLink className="w-4 h-4" />
+                                </a>
+                              )}
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => {
-                                  navigate("/app/trade", {
-                                    state: {
-                                      mint: notification.tokenAddress,
-                                      fromFeed: true,
-                                    },
-                                  });
-                                }}
-                                className="text-accent-primary hover:text-accent-hover"
-                                title="Copy Trade"
+                                onClick={() => handleMarkAsRead(notification.id)}
+                                title="Mark as read"
                               >
-                                <Copy className="w-4 h-4" />
+                                <Check className="w-4 h-4" />
                               </Button>
-                            )}
-                            {notification.txHash && (
-                              <a
-                                href={`https://solscan.io/tx/${notification.txHash}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-[#12d585] hover:text-[#08b16b] p-1 hover:bg-white/10 rounded transition-colors"
-                                title="View on Solscan"
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDelete(notification.id)}
+                                className="text-[#FF4757] hover:text-[#FF4757] hover:bg-[#FF4757]/10"
+                                title="Delete"
                               >
-                                <ExternalLink className="w-4 h-4" />
-                              </a>
-                            )}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleMarkAsRead(notification.id)}
-                              title="Mark as read"
-                            >
-                              <Check className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDelete(notification.id)}
-                              className="text-[#FF4757] hover:text-[#FF4757] hover:bg-[#FF4757]/10"
-                              title="Delete"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
                           </div>
                         </div>
                       </div>
@@ -427,78 +449,80 @@ export function Alerts() {
               <div>
                 <h2 className="text-sm font-medium text-white mb-3">Read</h2>
                 <div className="space-y-2">
-                  {readNotifications.map((notification) => (
-                    <Card
-                      key={notification.id}
-                      glass
-                      className={`opacity-60 overflow-hidden border-l-4 ${
-                        notification.type === "buy"
-                          ? "border-[#12d585]"
-                          : notification.type === "sell"
-                            ? "border-[#FF6B6B]"
-                            : "border-[#54A0FF]"
-                      }`}
-                    >
-                      <div className="p-4 sm:p-5">
-                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0">
-                            <h3 className="font-semibold mb-1 text-white truncate">
-                              {notification.title}
-                            </h3>
-                            <p className="text-sm text-white mb-2 line-clamp-2">
-                              {notification.message}
-                            </p>
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-white/90">
-                              <code className="font-mono">
-                                {shortenAddress(notification.walletAddress)}
-                              </code>
-                              {notification.amountUsd && (
-                                <span>
-                                  {formatCurrency(notification.amountUsd)}
-                                </span>
-                              )}
-                              <span>{formatTime(notification.createdAt)}</span>
+                  {readNotifications.map((notification) => {
+                    const amountLabel = getAmountLabel(notification);
+                    return (
+                      <Card
+                        key={notification.id}
+                        glass
+                        className={`opacity-60 overflow-hidden border-l-4 ${
+                          notification.type === "buy"
+                            ? "border-[#12d585]"
+                            : notification.type === "sell"
+                              ? "border-[#FF6B6B]"
+                              : "border-[#54A0FF]"
+                        }`}
+                      >
+                        <div className="p-4 sm:p-5">
+                          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <h3 className="font-semibold mb-1 text-white truncate">
+                                {notification.title}
+                              </h3>
+                              <p className="text-sm text-white mb-2 line-clamp-2">
+                                {notification.message}
+                              </p>
+                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-white/90">
+                                <code className="font-mono">
+                                  {shortenAddress(notification.walletAddress)}
+                                </code>
+                                {amountLabel && (
+                                  <span>
+                                    {amountLabel}
+                                  </span>
+                                )}
+                                <span>{formatTime(notification.createdAt)}</span>
+                              </div>
                             </div>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
-                            {notification.tokenAddress && (
+                            <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+                              {notification.tokenAddress && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    navigate("/app/trade", {
+                                      state: {
+                                        mint: notification.tokenAddress,
+                                        fromFeed: true,
+                                      },
+                                    });
+                                  }}
+                                  className="text-accent-primary hover:text-accent-hover"
+                                  title="Copy Trade"
+                                >
+                                  <Copy className="w-4 h-4" />
+                                </Button>
+                              )}
+                              {notification.txHash && (
+                                <a
+                                  href={`https://solscan.io/tx/${notification.txHash}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[#12d585] hover:text-[#08b16b] p-1 hover:bg-white/10 rounded transition-colors"
+                                  title="View on Solscan"
+                                >
+                                  <ExternalLink className="w-4 h-4" />
+                                </a>
+                              )}
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => {
-                                  navigate("/app/trade", {
-                                    state: {
-                                      mint: notification.tokenAddress,
-                                      fromFeed: true,
-                                    },
-                                  });
-                                }}
-                                className="text-accent-primary hover:text-accent-hover"
-                                title="Copy Trade"
+                                onClick={() => handleDelete(notification.id)}
+                                className="text-[#FF4757] hover:text-[#FF4757] hover:bg-[#FF4757]/10"
+                                title="Delete"
                               >
-                                <Copy className="w-4 h-4" />
+                                <Trash2 className="w-4 h-4" />
                               </Button>
-                            )}
-                            {notification.txHash && (
-                              <a
-                                href={`https://solscan.io/tx/${notification.txHash}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-[#12d585] hover:text-[#08b16b] p-1 hover:bg-white/10 rounded transition-colors"
-                                title="View on Solscan"
-                              >
-                                <ExternalLink className="w-4 h-4" />
-                              </a>
-                            )}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDelete(notification.id)}
-                              className="text-[#FF4757] hover:text-[#FF4757] hover:bg-[#FF4757]/10"
-                              title="Delete"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
                           </div>
                         </div>
                       </div>

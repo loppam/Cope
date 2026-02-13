@@ -38,6 +38,7 @@ export interface WalletNotification {
   txHash?: string;
   tokenAddress?: string;
   amount?: number;
+  amountSymbol?: string;
   amountUsd?: number;
   read: boolean;
   deleted?: boolean;
@@ -348,6 +349,7 @@ export async function createNotification(
     txHash?: string;
     tokenAddress?: string;
     amount?: number;
+    amountSymbol?: string;
     amountUsd?: number;
   },
 ): Promise<void> {

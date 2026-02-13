@@ -18,6 +18,7 @@ import {
   HDNodeWallet,
   JsonRpcProvider,
   Contract,
+  Wallet,
   type TransactionRequest,
 } from "ethers";
 import bs58 from "bs58";
@@ -259,6 +260,42 @@ async function sendSolFromFunder(
     lastValidBlockHeight,
   });
   return sig;
+}
+
+// EVM funder: top-up ETH (Base) or BNB (BNB) on insufficient funds
+const EVM_FUNDER_AMOUNT_WEI = BigInt(5e14); // 0.0005 ETH/BNB per top-up
+
+function getEvmFunderWallet(chainId: number): Wallet | null {
+  const raw = process.env.EVM_FUNDER_PRIVATE_KEY;
+  if (!raw || typeof raw !== "string" || raw.trim() === "") return null;
+  try {
+    const key = raw.trim().startsWith("0x") ? raw.trim() : `0x${raw.trim()}`;
+    const provider = getEvmProvider(chainId);
+    return new Wallet(key, provider);
+  } catch {
+    return null;
+  }
+}
+
+async function sendNativeFromEvmFunder(
+  toAddress: string,
+  amountWei: bigint,
+  chainId: number,
+): Promise<string | null> {
+  const funder = getEvmFunderWallet(chainId);
+  if (!funder) return null;
+  try {
+    const tx = await funder.sendTransaction({
+      to: toAddress,
+      value: amountWei,
+      chainId,
+    });
+    await tx.wait();
+    return tx.hash;
+  } catch (e) {
+    console.warn("[sendNativeFromEvmFunder]", e);
+    return null;
+  }
 }
 
 const NATIVE_ETH_PLACEHOLDER = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
@@ -1104,18 +1141,83 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       };
       const provider = getEvmProvider(chainId);
       const connected = evmWallet.connect(provider);
-      const tx = await connected.sendTransaction(txRequest);
-      console.log("[execute-step] EVM tx sent", {
-        userId,
-        stepIndex,
-        chainId,
-        hash: tx.hash,
-      });
-      await tx.wait();
-      return res.status(200).json({
-        signature: tx.hash,
-        chainId,
-        status: "Success",
+      const userAddress = (d?.from as string) || "";
+
+      // Retry loop: on INSUFFICIENT_FUNDS, fund from EVM funder, wait, retry (like Solana)
+      const maxAttempts = 10;
+      let attempt = 0;
+
+      while (attempt < maxAttempts) {
+        try {
+          const tx = await connected.sendTransaction(txRequest);
+          console.log("[execute-step] EVM tx sent", {
+            userId,
+            stepIndex,
+            chainId,
+            hash: tx.hash,
+            attempt: attempt + 1,
+          });
+          await tx.wait();
+          return res.status(200).json({
+            signature: tx.hash,
+            chainId,
+            status: "Success",
+          });
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          const errCode = (err as { code?: string })?.code;
+          const isInsufficientFunds =
+            /insufficient funds|INSUFFICIENT_FUNDS/i.test(errMsg) ||
+            errCode === "INSUFFICIENT_FUNDS";
+
+          if (
+            !isInsufficientFunds ||
+            !getEvmFunderWallet(chainId) ||
+            !userAddress ||
+            userAddress.length < 20
+          ) {
+            console.warn("[execute-step] EVM send failed (no retry)", {
+              errMsg: errMsg.slice(0, 120),
+              hasFunder: !!getEvmFunderWallet(chainId),
+            });
+            return res.status(500).json({
+              error: errMsg.slice(0, 200) || "Transaction failed. Please try again.",
+              signature: "",
+              status: "Failed",
+            });
+          }
+
+          const amountWei = EVM_FUNDER_AMOUNT_WEI * 2n;
+          const fundHash = await sendNativeFromEvmFunder(
+            userAddress,
+            amountWei,
+            chainId,
+          );
+          if (!fundHash) {
+            console.warn("[execute-step] EVM funder top-up failed on attempt", attempt + 1);
+            return res.status(500).json({
+              error: "Insufficient funds. Top-up failed. Please try again.",
+              signature: "",
+              status: "Failed",
+            });
+          }
+          console.log("[execute-step] EVM funded for retry", {
+            userId,
+            userAddress,
+            fundHash,
+            amountWei: amountWei.toString(),
+            attempt: attempt + 1,
+          });
+
+          await new Promise((r) => setTimeout(r, 3000));
+          attempt++;
+        }
+      }
+
+      return res.status(500).json({
+        error: "Transaction failed after retries. Please try again.",
+        signature: "",
+        status: "Failed",
       });
     }
 

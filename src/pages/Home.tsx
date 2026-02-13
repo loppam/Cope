@@ -129,6 +129,26 @@ export function Home() {
     return date.toLocaleDateString();
   };
 
+  const formatTokenAmount = (value: number | undefined | null) => {
+    if (value == null || Number.isNaN(value)) return null;
+    const abs = Math.abs(value);
+    if (abs >= 1000000) return `${(value / 1000000).toFixed(2)}M`;
+    if (abs >= 1000) return `${(value / 1000).toFixed(2)}K`;
+    const maximumFractionDigits = abs >= 1 ? 4 : 6;
+    return value.toLocaleString("en-US", { maximumFractionDigits });
+  };
+
+  const getAmountLabel = (notification: WalletNotification) => {
+    if (notification.amount != null && notification.amountSymbol) {
+      const formatted = formatTokenAmount(notification.amount);
+      return formatted ? `${formatted} ${notification.amountSymbol}` : null;
+    }
+    if (notification.amountUsd != null) {
+      return formatCurrency(notification.amountUsd);
+    }
+    return null;
+  };
+
   const getWalletNickname = (walletAddress: string) => {
     const watched = watchlist.find((w) => w.address === walletAddress);
     return watched?.nickname || shortenAddress(walletAddress);
@@ -275,18 +295,20 @@ export function Home() {
             },
           }}
         >
-          {notifications.map((notification) => (
-            <motion.div
-              key={notification.id}
-              variants={{
-                initial: { opacity: 0, y: 12 },
-                animate: {
-                  opacity: 1,
-                  y: 0,
-                  transition: { duration: 0.35, ease: "easeOut" },
-                },
-              }}
-            >
+          {notifications.map((notification) => {
+            const amountLabel = getAmountLabel(notification);
+            return (
+              <motion.div
+                key={notification.id}
+                variants={{
+                  initial: { opacity: 0, y: 12 },
+                  animate: {
+                    opacity: 1,
+                    y: 0,
+                    transition: { duration: 0.35, ease: "easeOut" },
+                  },
+                }}
+              >
               <Card
                 glass
                 className="hover:border-white/20 transition-colors duration-200 overflow-hidden"
@@ -311,9 +333,9 @@ export function Home() {
                       </p>
 
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-white/50 mb-2">
-                        {notification.amountUsd && (
+                        {amountLabel && (
                           <span className="font-medium text-white/70">
-                            {formatCurrency(notification.amountUsd)}
+                            {amountLabel}
                           </span>
                         )}
                         {notification.tokenAddress && (
@@ -351,8 +373,9 @@ export function Home() {
                   </div>
                 </div>
               </Card>
-            </motion.div>
-          ))}
+              </motion.div>
+            );
+          })}
         </motion.div>
       )}
 

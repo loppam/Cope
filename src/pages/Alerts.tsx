@@ -439,7 +439,8 @@ export function Alerts() {
                         </div>
                       </div>
                     </Card>
-                  ))}
+                  );
+                  })}
                 </div>
               </div>
             )}
@@ -527,7 +528,8 @@ export function Alerts() {
                         </div>
                       </div>
                     </Card>
-                  ))}
+                  );
+                  })}
                 </div>
               </div>
             )}

@@ -1059,7 +1059,7 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       console.warn("[execute-step] wallet credentials not found", { userId });
       return res.status(400).json({ error: "Wallet credentials not found" });
     }
-    const { secretKey } = await decryptWalletCredentials(
+    const { secretKey, mnemonic } = await decryptWalletCredentials(
       userId,
       encryptedMnemonic,
       encryptedSecretKey,
@@ -1067,6 +1067,58 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
     );
     const wallet = Keypair.fromSecretKey(secretKey);
     const storedWalletAddress = userData?.walletAddress as string | undefined;
+
+    // EVM step: chainId 8453 (Base) or 56 (BNB)
+    const d = data && typeof data === "object" ? (data as Record<string, unknown>) : null;
+    const chainId = typeof d?.chainId === "number" ? d.chainId : undefined;
+    if (chainId === 8453 || chainId === 56) {
+      if (!mnemonic?.trim()) {
+        console.warn("[execute-step] EVM step but no mnemonic", { userId, stepIndex });
+        return res.status(400).json({ error: "EVM step requires mnemonic backup" });
+      }
+      const evmWallet = HDNodeWallet.fromPhrase(
+        mnemonic.trim(),
+        undefined,
+        ETH_DERIVATION_PATH,
+      );
+      const txRequest: TransactionRequest = {
+        from: d?.from as string,
+        to: d?.to as string,
+        data: d?.data as string,
+        value: typeof d?.value === "string" ? BigInt(d.value) : undefined,
+        gasLimit:
+          typeof d?.gas === "string"
+            ? BigInt(d.gas)
+            : typeof d?.gas === "number"
+              ? BigInt(d.gas)
+              : undefined,
+        maxFeePerGas:
+          typeof d?.maxFeePerGas === "string"
+            ? BigInt(d.maxFeePerGas)
+            : undefined,
+        maxPriorityFeePerGas:
+          typeof d?.maxPriorityFeePerGas === "string"
+            ? BigInt(d.maxPriorityFeePerGas)
+            : undefined,
+        chainId,
+      };
+      const provider = getEvmProvider(chainId);
+      const connected = evmWallet.connect(provider);
+      const tx = await connected.sendTransaction(txRequest);
+      console.log("[execute-step] EVM tx sent", {
+        userId,
+        stepIndex,
+        chainId,
+        hash: tx.hash,
+      });
+      await tx.wait();
+      return res.status(200).json({
+        signature: tx.hash,
+        chainId,
+        status: "Success",
+      });
+    }
+
     console.log("[execute-step] wallet loaded, signing", {
       userId,
       stepIndex,

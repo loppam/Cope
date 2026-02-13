@@ -724,6 +724,12 @@ export function Trade() {
     }
   };
 
+  const getExplorerTxUrl = (signature: string, chainId?: number) => {
+    if (chainId === 8453) return `https://basescan.org/tx/${signature}`;
+    if (chainId === 56) return `https://bscscan.com/tx/${signature}`;
+    return `https://solscan.io/tx/${signature}`;
+  };
+
   const handleConfirmSwap = async () => {
     if (!relayQuote || !user) return;
 
@@ -733,33 +739,48 @@ export function Trade() {
     try {
       const tokenId = await user.getIdToken();
       const base = getApiBase();
-      const res = await fetch(`${base}/api/relay/execute-step`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${tokenId}`,
-        },
-        body: JSON.stringify({
-          quoteResponse: relayQuote,
-          stepIndex: 0,
-        }),
-      });
-      const result = await res.json();
+      const steps = Array.isArray((relayQuote as { steps?: unknown[] })?.steps)
+        ? (relayQuote as { steps: unknown[] }).steps
+        : [];
+      let lastSignature: string | null = null;
+      let lastChainId: number | undefined;
 
-      if (result.status === "Success" && result.signature) {
-        toast.success("Swap successful!", {
-          description: "Your transaction has been confirmed",
-          action: {
-            label: "View",
-            onClick: () =>
-              window.open(
-                `https://solscan.io/tx/${result.signature}`,
-                "_blank",
-              ),
+      for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
+        const res = await fetch(`${base}/api/relay/execute-step`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${tokenId}`,
           },
+          body: JSON.stringify({
+            quoteResponse: relayQuote,
+            stepIndex,
+          }),
         });
+        const result = await res.json();
 
-        if (userProfile?.walletAddress) {
+        if (result.status === "Success" && result.signature) {
+          lastSignature = result.signature;
+          lastChainId = result.chainId;
+        } else {
+          throw new Error(result.error || "Swap failed");
+        }
+      }
+
+      if (!lastSignature) {
+        throw new Error("Swap failed");
+      }
+
+      toast.success("Swap successful!", {
+        description: "Your transaction has been confirmed",
+        action: {
+          label: "View",
+          onClick: () =>
+            window.open(getExplorerTxUrl(lastSignature!, lastChainId), "_blank"),
+        },
+      });
+
+      if (userProfile?.walletAddress) {
           const newBalance = await getSolBalance(userProfile.walletAddress);
           await updateBalance(newBalance);
           // Refetch positions so "your position" / sell balance and USDC balance update
@@ -807,13 +828,10 @@ export function Trade() {
           }
         }
 
-        setAmount("");
-        setSellAmount("");
-        setSwapQuote(null);
-        setRelayQuote(null);
-      } else {
-        throw new Error(result.error || "Swap failed");
-      }
+      setAmount("");
+      setSellAmount("");
+      setSwapQuote(null);
+      setRelayQuote(null);
     } catch (error: unknown) {
       console.error("Error executing swap:", error);
       toast.error("Swap failed", {

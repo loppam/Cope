@@ -41,6 +41,7 @@ interface TokenPosition {
   value: number;
   pnl?: number;
   pnlPercent?: number;
+  chain?: "solana" | "base" | "bnb";
 }
 
 const APPROX_ETH_PRICE = 3000;
@@ -187,6 +188,7 @@ export function PublicProfile() {
               value: baseBal.usdc,
               pnl: evmPnl?.pnl,
               pnlPercent: evmPnl?.pnlPercent,
+              chain: "base",
             });
           }
           if (baseBal.native > 0) {
@@ -199,6 +201,7 @@ export function PublicProfile() {
               value: baseBal.native * APPROX_ETH_PRICE,
               pnl: evmPnl?.pnl,
               pnlPercent: evmPnl?.pnlPercent,
+              chain: "base",
             });
           }
           if (bnbBal.usdc > 0) {
@@ -211,6 +214,7 @@ export function PublicProfile() {
               value: bnbBal.usdc,
               pnl: evmPnl?.pnl,
               pnlPercent: evmPnl?.pnlPercent,
+              chain: "bnb",
             });
           }
           if (bnbBal.native > 0) {
@@ -223,6 +227,7 @@ export function PublicProfile() {
               value: bnbBal.native * APPROX_BNB_PRICE,
               pnl: evmPnl?.pnl,
               pnlPercent: evmPnl?.pnlPercent,
+              chain: "bnb",
             });
           }
         }
@@ -566,11 +571,18 @@ export function PublicProfile() {
                               data-tap-haptic
                               className="tap-press flex items-center gap-3 py-3 px-2 rounded-lg min-h-[44px] hover:bg-white/5 active:bg-white/10 touch-manipulation cursor-pointer"
                               role="button"
-                              onClick={() =>
-                                navigate(
-                                  `/app/trade?mint=${encodeURIComponent(pos.mint)}`,
-                                )
-                              }
+                              onClick={() => {
+                                const params = new URLSearchParams({
+                                  mint: pos.mint,
+                                });
+                                if (
+                                  pos.chain === "base" ||
+                                  pos.chain === "bnb"
+                                ) {
+                                  params.set("chain", pos.chain);
+                                }
+                                navigate(`/app/trade?${params.toString()}`);
+                              }}
                             >
                               {pos.image ? (
                                 <img

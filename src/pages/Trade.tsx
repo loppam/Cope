@@ -40,7 +40,7 @@ import {
   Loader2,
   Settings,
 } from "lucide-react";
-import { shortenAddress, getApiBase } from "@/lib/utils";
+import { shortenAddress, getApiBase, toRawAmountString } from "@/lib/utils";
 import { getChainId } from "@/lib/relay";
 import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
 import { toast } from "sonner";
@@ -119,11 +119,23 @@ export function Trade() {
     }
   }, [searchParams, location.state?.mint]);
 
-  // Resolve effective chain for the selected token (from URL/state or token card)
-  const isEvmMint = /^0x[a-fA-F0-9]{40}$/.test(mint?.trim() ?? "") || mint === "base-eth" || mint === "bnb-bnb" || mint === "base-usdc" || mint === "bnb-usdc";
+  // Resolve effective chain (prefer URL over state to avoid race when landing from Profile/Positions)
+  const urlChain = searchParams.get("chain")?.toLowerCase();
+  const evmChain =
+    urlChain === "base" || urlChain === "bnb"
+      ? urlChain
+      : tradeChain === "base" || tradeChain === "bnb"
+        ? tradeChain
+        : null;
+  const isEvmMint =
+    /^0x[a-fA-F0-9]{40}$/.test(mint?.trim() ?? "") ||
+    mint === "base-eth" ||
+    mint === "bnb-bnb" ||
+    mint === "base-usdc" ||
+    mint === "bnb-usdc";
   const effectiveChain: TradeChain =
-    mint && isEvmMint && (tradeChain === "base" || tradeChain === "bnb")
-      ? tradeChain
+    mint && isEvmMint && evmChain
+      ? (evmChain as TradeChain)
       : mint
         ? "solana"
         : tradeChain;
@@ -626,7 +638,7 @@ export function Trade() {
 
     setSwapping(true);
     try {
-      const amountRaw = Math.floor(amountNum * Math.pow(10, token.decimals));
+      const amountRaw = toRawAmountString(amountNum, token.decimals);
       const tokenId = await user.getIdToken();
       const base = getApiBase();
       const res = await fetch(`${base}/api/relay/swap-quote`, {
@@ -638,7 +650,7 @@ export function Trade() {
         body: JSON.stringify({
           inputMint: token.mint,
           outputMint: SOLANA_USDC_MINT,
-          amount: amountRaw.toString(),
+          amount: amountRaw,
           slippageBps: slippage,
           userWallet: userProfile.walletAddress,
           tradeType: "sell",
@@ -654,7 +666,8 @@ export function Trade() {
       const details = data?.details || {};
       const currencyIn = details.currencyIn || {};
       const currencyOut = details.currencyOut || {};
-      const inputAmount = parseInt(currencyIn.amount || "0", 10) || amountRaw;
+      const inputAmount =
+        parseInt(currencyIn.amount || "0", 10) || parseInt(amountRaw, 10);
       const outputAmount = parseInt(currencyOut.amount || "0", 10);
       const inputAmountUi =
         parseFloat(currencyIn.amountFormatted || "0") || amountNum;

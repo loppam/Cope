@@ -35,3 +35,16 @@ export function formatCurrency(num: number, decimals = 2): string {
 export function formatPercentage(num: number, decimals = 2): string {
   return `${num > 0 ? '+' : ''}${num.toFixed(decimals)}%`;
 }
+
+/**
+ * Convert UI amount to raw integer string for APIs (Relay, etc).
+ * Avoids scientific notation for large values (e.g. EVM 18-decimals).
+ */
+export function toRawAmountString(uiAmount: number, decimals: number): string {
+  const [whole = "0", frac = ""] = uiAmount
+    .toFixed(Math.min(decimals, 20))
+    .split(".");
+  const fracPadded = frac.padEnd(decimals, "0").slice(0, decimals);
+  const multiplier = BigInt(10) ** BigInt(decimals);
+  return (BigInt(whole) * multiplier + BigInt(fracPadded || "0")).toString();
+}

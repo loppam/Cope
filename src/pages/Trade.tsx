@@ -619,6 +619,14 @@ export function Trade() {
       return;
     }
 
+    const isEvmSell = token.chain === "base" || token.chain === "bnb";
+    if (isEvmSell && !evmAddress) {
+      toast.error("EVM wallet not ready", {
+        description: "Please wait a moment and try again",
+      });
+      return;
+    }
+
     const amountNum = parseFloat(sellAmount);
     if (isNaN(amountNum) || amountNum <= 0) {
       toast.error("Invalid amount", {
@@ -652,7 +660,9 @@ export function Trade() {
           outputMint: SOLANA_USDC_MINT,
           amount: amountRaw,
           slippageBps: slippage,
-          userWallet: userProfile.walletAddress,
+          // For EVM sell: user = EVM address (origin), recipient = Solana (destination)
+          userWallet: isEvmSell ? evmAddress : userProfile.walletAddress,
+          recipient: isEvmSell ? userProfile.walletAddress : undefined,
           tradeType: "sell",
           // Chain from token card (Birdeye/Relay); Relay uses it for sell origin. Default Solana for SPL.
           inputChainId: token.chainId ?? 792703809,

@@ -175,3 +175,14 @@ html {
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
+
+/* Tap / press feedback: snappy scale, GPU-accelerated to avoid lag */
+.tap-press {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  will-change: transform;
+  transition: transform 0.1s ease-out;
+}
+.tap-press:active {
+  transform: scale(0.97);
+}

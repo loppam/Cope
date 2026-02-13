@@ -364,7 +364,8 @@ export function PublicProfile() {
         <motion.div className="mb-6 flex items-center gap-3" variants={item}>
           <button
             onClick={() => navigate(-1)}
-            className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white min-w-[44px] min-h-[44px] flex items-center justify-center touch-manipulation"
+            data-tap-haptic
+            className="tap-press p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white min-w-[44px] min-h-[44px] flex items-center justify-center touch-manipulation"
             aria-label="Back"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -562,7 +563,8 @@ export function PublicProfile() {
                           {displayedOpenPositions.map((pos) => (
                             <li
                               key={pos.mint}
-                              className="flex items-center gap-3 py-3 px-2 rounded-lg min-h-[44px] hover:bg-white/5 active:bg-white/10 touch-manipulation cursor-pointer"
+                              data-tap-haptic
+                              className="tap-press flex items-center gap-3 py-3 px-2 rounded-lg min-h-[44px] hover:bg-white/5 active:bg-white/10 touch-manipulation cursor-pointer"
                               role="button"
                               onClick={() =>
                                 navigate(
@@ -660,7 +662,8 @@ export function PublicProfile() {
                         href={`https://solscan.io/account/${profile.walletAddress}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-xs text-accent-primary hover:text-accent-hover flex items-center gap-1 min-h-[44px] items-center touch-manipulation"
+                        data-tap-haptic
+                        className="tap-press text-xs text-accent-primary hover:text-accent-hover flex items-center gap-1 min-h-[44px] items-center touch-manipulation"
                       >
                         View on Explorer
                         <ExternalLink className="w-3 h-3" />

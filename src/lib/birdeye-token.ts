@@ -67,6 +67,67 @@ function looksLikeAddress(s: string): boolean {
   return false;
 }
 
+interface UnifiedSearchToken {
+  address?: string;
+  mint?: string;
+  name?: string;
+  symbol?: string;
+  logoURI?: string;
+  decimals?: number;
+  price?: number;
+  mc?: number;
+  liquidity?: number;
+  v24hUSD?: number;
+  chain?: string;
+  chainId?: number;
+}
+
+function unifiedToTokenResult(t: UnifiedSearchToken): TokenSearchResult {
+  const chain = (t.chain === "bsc" ? "bnb" : t.chain ?? "solana") as "solana" | "base" | "bnb";
+  const chainId = t.chainId ?? CHAIN_IDS[chain] ?? CHAIN_IDS.solana;
+  const address = (t.address ?? t.mint ?? "").toString().trim();
+  return {
+    id: `${chainId}-${address}`,
+    name: (t.name ?? "").toString() || "Unknown",
+    symbol: (t.symbol ?? "").toString() || "???",
+    mint: address,
+    image: t.logoURI,
+    decimals: typeof t.decimals === "number" ? t.decimals : 6,
+    hasSocials: false,
+    chain,
+    chainId,
+    priceUsd: typeof t.price === "number" ? t.price : undefined,
+    marketCapUsd: typeof t.mc === "number" ? t.mc : undefined,
+    liquidityUsd: typeof t.liquidity === "number" ? t.liquidity : undefined,
+    volume_24h: typeof t.v24hUSD === "number" ? t.v24hUSD : undefined,
+  };
+}
+
+/**
+ * Unified token search: Moralis for EVM (Base, BNB), Birdeye for Solana.
+ * For text queries, runs both in parallel and merges results.
+ */
+export async function searchTokensUnified(
+  term: string,
+  limit = 20,
+): Promise<TokenSearchResult[]> {
+  const apiBase = getApiBase();
+  const params = new URLSearchParams({
+    term: term.trim(),
+    limit: String(limit),
+  });
+  const res = await fetch(`${apiBase}/api/token-search?${params.toString()}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(
+      (err as { error?: string }).error || `Token search failed: ${res.status}`,
+    );
+  }
+  const json = await res.json();
+  const tokens = Array.isArray(json?.tokens) ? json.tokens : [];
+  return tokens.map((t: UnifiedSearchToken) => unifiedToTokenResult(t));
+}
+
 /**
  * Search tokens via Birdeye API (proxied through our backend).
  * Returns tokens from Solana, Base, and BNB merged and sorted by liquidity.

@@ -33,8 +33,9 @@ export function BottomNav() {
             <button
               key={tab.path}
               onClick={() => navigate(tab.path)}
+              data-tap-haptic
               className={cn(
-                "relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 active:scale-95",
+                "tap-press relative flex items-center justify-center w-10 h-10 rounded-full transition-[transform,background-color,color] duration-100 ease-out active:scale-95",
                 isActive
                   ? "bg-accent-primary text-[#000000]"
                   : "text-text-secondary hover:text-white hover:bg-white/5",
@@ -53,7 +54,8 @@ export function BottomNav() {
         {isLopam && (
           <button
             onClick={() => navigate("/lopam/push")}
-            className="relative flex items-center justify-center h-10 px-3 rounded-full text-xs tracking-wide bg-white/5 text-white hover:bg-white/10 transition-colors"
+            data-tap-haptic
+            className="tap-press relative flex items-center justify-center h-10 px-3 rounded-full text-xs tracking-wide bg-white/5 text-white hover:bg-white/10 transition-colors"
           >
             Admin Push
           </button>

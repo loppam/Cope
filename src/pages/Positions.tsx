@@ -156,67 +156,87 @@ export function Positions() {
           });
           const data = await res.json();
           if (res.ok && data.evmAddress) {
-            if (data.base?.usdc > 0) {
-              positionsData.push({
-                mint: "base-usdc",
-                symbol: "USDC",
-                name: "USD Coin (Base)",
-                amount: data.base.usdc,
-                value: data.base.usdc,
-                pnl: 0,
-                pnlPercent: 0,
-                realized: 0,
-                unrealized: 0,
-                costBasis: 0,
-                chain: "base",
-              });
-            }
-            if (data.base?.native > 0) {
-              const value = data.base.native * APPROX_ETH_PRICE;
-              positionsData.push({
-                mint: "base-eth",
-                symbol: "ETH",
-                name: "Ethereum (Base)",
-                amount: data.base.native,
-                value,
-                pnl: 0,
-                pnlPercent: 0,
-                realized: 0,
-                unrealized: 0,
-                costBasis: 0,
-                chain: "base",
-              });
-            }
-            if (data.bnb?.usdc > 0) {
-              positionsData.push({
-                mint: "bnb-usdc",
-                symbol: "USDC",
-                name: "USD Coin (BNB)",
-                amount: data.bnb.usdc,
-                value: data.bnb.usdc,
-                pnl: 0,
-                pnlPercent: 0,
-                realized: 0,
-                unrealized: 0,
-                costBasis: 0,
-                chain: "bnb",
-              });
-            }
-            if (data.bnb?.native > 0) {
-              const value = data.bnb.native * APPROX_BNB_PRICE;
-              positionsData.push({
-                mint: "bnb-bnb",
-                symbol: "BNB",
-                name: "BNB",
-                amount: data.bnb.native,
-                value,
-                pnl: 0,
-                pnlPercent: 0,
-                realized: 0,
-                unrealized: 0,
-                costBasis: 0,
-                chain: "bnb",
-              });
+            if (Array.isArray(data.tokens) && data.tokens.length > 0) {
+              for (const t of data.tokens) {
+                if (t.value > 0) {
+                  positionsData.push({
+                    mint: t.mint,
+                    symbol: t.symbol ?? "???",
+                    name: t.name ?? "Unknown Token",
+                    image: t.image,
+                    amount: t.amount ?? 0,
+                    value: t.value ?? 0,
+                    pnl: 0,
+                    pnlPercent: 0,
+                    realized: 0,
+                    unrealized: 0,
+                    costBasis: 0,
+                    chain: t.chain ?? "base",
+                  });
+                }
+              }
+            } else {
+              // Fallback to legacy base/bnb structure when Moralis tokens not available
+              if (data.base?.usdc > 0) {
+                positionsData.push({
+                  mint: "base-usdc",
+                  symbol: "USDC",
+                  name: "USD Coin (Base)",
+                  amount: data.base.usdc,
+                  value: data.base.usdc,
+                  pnl: 0,
+                  pnlPercent: 0,
+                  realized: 0,
+                  unrealized: 0,
+                  costBasis: 0,
+                  chain: "base",
+                });
+              }
+              if (data.base?.native > 0) {
+                positionsData.push({
+                  mint: "base-eth",
+                  symbol: "ETH",
+                  name: "Ethereum (Base)",
+                  amount: data.base.native,
+                  value: data.base.native * APPROX_ETH_PRICE,
+                  pnl: 0,
+                  pnlPercent: 0,
+                  realized: 0,
+                  unrealized: 0,
+                  costBasis: 0,
+                  chain: "base",
+                });
+              }
+              if (data.bnb?.usdc > 0) {
+                positionsData.push({
+                  mint: "bnb-usdc",
+                  symbol: "USDC",
+                  name: "USD Coin (BNB)",
+                  amount: data.bnb.usdc,
+                  value: data.bnb.usdc,
+                  pnl: 0,
+                  pnlPercent: 0,
+                  realized: 0,
+                  unrealized: 0,
+                  costBasis: 0,
+                  chain: "bnb",
+                });
+              }
+              if (data.bnb?.native > 0) {
+                positionsData.push({
+                  mint: "bnb-bnb",
+                  symbol: "BNB",
+                  name: "BNB",
+                  amount: data.bnb.native,
+                  value: data.bnb.native * APPROX_BNB_PRICE,
+                  pnl: 0,
+                  pnlPercent: 0,
+                  realized: 0,
+                  unrealized: 0,
+                  costBasis: 0,
+                  chain: "bnb",
+                });
+              }
             }
           }
         } catch (err) {
@@ -412,7 +432,6 @@ export function Positions() {
               position.mint === SOL_MINT ||
               position.mint === "So11111111111111111111111111111111111111111";
             const isUSDC = position.mint === SOLANA_USDC_MINT;
-            const isSolanaPosition = !position.chain || position.chain === "solana";
             const chainLabel = position.chain === "base" ? "Base" : position.chain === "bnb" ? "BNB" : "Solana";
 
             return (
@@ -421,13 +440,9 @@ export function Positions() {
                 glass
                 className="cursor-pointer hover:border-white/20 transition-colors overflow-hidden active:scale-[0.99]"
                 onClick={() => {
-                  if (isSolanaPosition) {
-                    navigate("/app/trade", {
-                      state: { mint: position.mint },
-                    });
-                  } else {
-                    navigate("/wallet/withdraw");
-                  }
+                  navigate("/app/trade", {
+                    state: { mint: position.mint, chain: position.chain },
+                  });
                 }}
               >
                 <div className="h-0.5 bg-gradient-to-r from-[#12d585]/20 via-transparent to-transparent" />

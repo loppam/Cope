@@ -195,14 +195,16 @@ export function Home() {
       <div className="mb-6 flex flex-wrap gap-2">
         <button
           onClick={() => navigate("/cope/wallet")}
-          className="inline-flex items-center gap-2 px-3 sm:px-4 py-2.5 min-h-[44px] rounded-xl bg-accent-primary/20 text-accent-primary border border-accent-primary/30 hover:bg-accent-primary/30 hover:border-accent-primary/50 active:scale-[0.98] transition-all duration-200 text-sm font-medium"
+          data-tap-haptic
+          className="tap-press inline-flex items-center gap-2 px-3 sm:px-4 py-2.5 min-h-[44px] rounded-xl bg-accent-primary/20 text-accent-primary border border-accent-primary/30 hover:bg-accent-primary/30 hover:border-accent-primary/50 text-sm font-medium"
         >
           <Search className="w-4 h-4 flex-shrink-0" />
           <span className="truncate">COPE a Wallet</span>
         </button>
         <button
           onClick={() => navigate("/scanner")}
-          className="inline-flex items-center gap-2 px-3 sm:px-4 py-2.5 min-h-[44px] rounded-xl bg-white/5 text-white border border-white/10 hover:bg-white/10 hover:border-white/20 active:scale-[0.98] transition-all duration-200 text-sm font-medium"
+          data-tap-haptic
+          className="tap-press inline-flex items-center gap-2 px-3 sm:px-4 py-2.5 min-h-[44px] rounded-xl bg-white/5 text-white border border-white/10 hover:bg-white/10 hover:border-white/20 text-sm font-medium"
         >
           <ScanLine className="w-4 h-4 text-accent-purple flex-shrink-0" />
           <span className="truncate">Run Scanner</span>

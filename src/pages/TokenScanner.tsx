@@ -48,13 +48,22 @@ function formatMarketCap(value: number): string {
   return `$${value.toFixed(0)}`;
 }
 
-const ANALYSIS_STEPS = [
+const ANALYSIS_STEPS_SOLANA = [
   { key: "bundles", icon: Target, label: "Bundle Detection" },
   { key: "devHistory", icon: UserCircle, label: "Developer History" },
   { key: "topHolders", icon: Users, label: "Top Holders" },
   { key: "chart", icon: TrendingUp, label: "Chart Pattern" },
   { key: "freshWallets", icon: Sparkles, label: "Fresh Wallets" },
   { key: "devSold", icon: Activity, label: "Dev Activity" },
+  { key: "lore", icon: BookOpen, label: "Lore & Narrative" },
+  { key: "socials", icon: Globe, label: "Socials" },
+] as const;
+
+const ANALYSIS_STEPS_EVM = [
+  { key: "contractCheck", icon: Shield, label: "Contract Verification" },
+  { key: "bundles", icon: Target, label: "Bundle Detection" },
+  { key: "topHolders", icon: Users, label: "Top Holders" },
+  { key: "chart", icon: TrendingUp, label: "Chart Pattern" },
   { key: "lore", icon: BookOpen, label: "Lore & Narrative" },
   { key: "socials", icon: Globe, label: "Socials" },
 ] as const;
@@ -89,6 +98,7 @@ interface MarketCapPrediction {
 }
 
 interface AnalysisResult {
+  contractCheck?: AnalysisItem;
   bundles?: AnalysisItem;
   devHistory?: AnalysisItem;
   topHolders?: AnalysisItem;
@@ -376,7 +386,8 @@ function DiscoverTabContent() {
                   key={user.uid}
                   type="button"
                   onClick={() => handleSelectUser(user)}
-                  className="w-full p-3 rounded-lg hover:bg-white/5 transition-colors text-left flex items-center gap-3 min-h-[44px]"
+                  data-tap-haptic
+                  className="tap-press w-full p-3 rounded-lg hover:bg-white/5 transition-colors text-left flex items-center gap-3 min-h-[44px]"
                 >
                   {user.avatar ? (
                     <img
@@ -416,7 +427,8 @@ function DiscoverTabContent() {
         type="button"
         onClick={handleSearchSubmit}
         disabled={!searchQuery.trim()}
-        className="w-full min-h-[44px] flex items-center justify-center gap-2 rounded-xl bg-[#12d585] font-semibold text-black px-4 py-3 disabled:opacity-50"
+        data-tap-haptic
+        className="tap-press w-full min-h-[44px] flex items-center justify-center gap-2 rounded-xl bg-[#12d585] font-semibold text-black px-4 py-3 disabled:opacity-50"
       >
         <Search className="w-4 h-4" />
         Search
@@ -448,7 +460,8 @@ function DiscoverTabContent() {
                       <button
                         type="button"
                         onClick={() => goToProfile(t)}
-                        className="flex-1 min-w-0 flex items-center gap-3 text-left hover:opacity-90"
+                        data-tap-haptic
+                        className="tap-press flex-1 min-w-0 flex items-center gap-3 text-left hover:opacity-90"
                       >
                         <span className="font-medium text-white truncate">
                           {t.xHandle || shortenAddress(t.walletAddress)}
@@ -468,7 +481,8 @@ function DiscoverTabContent() {
                               addToWatchlist(t.walletAddress, { uid: t.uid, onPlatform: true });
                             }
                           }}
-                          className="relative flex-shrink-0 w-10 h-10 rounded-full ring-2 ring-white/20 flex items-center justify-center min-w-[44px] min-h-[44px] touch-manipulation"
+                          data-tap-haptic
+                          className="tap-press relative flex-shrink-0 w-10 h-10 rounded-full ring-2 ring-white/20 flex items-center justify-center min-w-[44px] min-h-[44px] touch-manipulation"
                           aria-label={isFollowed ? "Unfollow" : "Follow"}
                         >
                           {t.avatar ? (
@@ -522,7 +536,8 @@ function DiscoverTabContent() {
                       <button
                         type="button"
                         onClick={() => goToProfile(a)}
-                        className="flex-1 min-w-0 flex items-center gap-3 text-left hover:opacity-90"
+                        data-tap-haptic
+                        className="tap-press flex-1 min-w-0 flex items-center gap-3 text-left hover:opacity-90"
                       >
                         <span className="font-medium text-white truncate">
                           {a.xHandle || a.displayName || shortenAddress(a.walletAddress)}
@@ -542,7 +557,8 @@ function DiscoverTabContent() {
                               addToWatchlist(a.walletAddress, { uid: a.uid, onPlatform: true });
                             }
                           }}
-                          className="relative flex-shrink-0 w-10 h-10 rounded-full ring-2 ring-white/20 flex items-center justify-center min-w-[44px] min-h-[44px] touch-manipulation"
+                          data-tap-haptic
+                          className="tap-press relative flex-shrink-0 w-10 h-10 rounded-full ring-2 ring-white/20 flex items-center justify-center min-w-[44px] min-h-[44px] touch-manipulation"
                           aria-label={isFollowed ? "Unfollow" : "Follow"}
                         >
                           {a.avatar ? (
@@ -592,10 +608,14 @@ export function TokenScanner() {
   const [error, setError] = useState<string | null>(null);
   const [tokenData, setTokenData] = useState<TokenData | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [chainType, setChainType] = useState<"evm" | "solana">("solana");
   const [copied, setCopied] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
   const [showPredictions, setShowPredictions] = useState(false);
   const [showVerdict, setShowVerdict] = useState(false);
+
+  const analysisSteps =
+    chainType === "evm" ? ANALYSIS_STEPS_EVM : ANALYSIS_STEPS_SOLANA;
 
   const analyzeToken = useCallback(async () => {
     const addr = tokenAddress.trim();
@@ -605,6 +625,7 @@ export function TokenScanner() {
     setError(null);
     setTokenData(null);
     setAnalysis(null);
+    setChainType("solana");
     setCurrentStep(0);
     setShowPredictions(false);
     setShowVerdict(false);
@@ -623,7 +644,9 @@ export function TokenScanner() {
         throw new Error(json.message || json.error || "Analysis failed");
       }
 
-      const { metadata, metrics, analysis: a } = json;
+      const { metadata, metrics, analysis: a, chainType: ct } = json;
+
+      setChainType(ct === "evm" ? "evm" : "solana");
 
       const ext = (metrics?.extensions || {}) as Record<string, string>;
       const twitter = ext.twitter || metadata?.twitter || null;
@@ -654,20 +677,21 @@ export function TokenScanner() {
   useEffect(() => {
     if (!analysis || loading) return;
     setCurrentStep(0);
+    const steps = chainType === "evm" ? ANALYSIS_STEPS_EVM : ANALYSIS_STEPS_SOLANA;
     const id = setInterval(() => {
       setCurrentStep((prev) => {
         const next = prev + 1;
-        if (next >= ANALYSIS_STEPS.length) {
+        if (next >= steps.length) {
           clearInterval(id);
           setShowPredictions(true);
           setTimeout(() => setShowVerdict(true), 1800);
-          return ANALYSIS_STEPS.length;
+          return steps.length;
         }
         return next;
       });
     }, 650);
     return () => clearInterval(id);
-  }, [analysis, loading]);
+  }, [analysis, loading, chainType]);
 
   const handleCopy = () => {
     if (!tokenData?.contractAddress) return;
@@ -693,7 +717,7 @@ export function TokenScanner() {
     <>
       <DocumentHead
         title="Token Scanner"
-        description="Scan and analyze Solana tokens on COPE"
+        description="Scan and analyze Solana, Base, and BNB tokens on COPE"
       />
       <div className="min-h-screen p-4 sm:p-6 pb-16 max-w-[720px] mx-auto overflow-visible">
       <h1 className="mb-4 text-xl font-bold text-white">Token Scanner</h1>
@@ -731,7 +755,8 @@ export function TokenScanner() {
             type="button"
             onClick={analyzeToken}
             disabled={!tokenAddress.trim() || loading}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center gap-2 rounded-lg bg-[#12d585] px-6 py-3 font-semibold text-black transition-opacity disabled:opacity-50"
+            data-tap-haptic
+            className="tap-press flex min-h-[44px] min-w-[44px] items-center justify-center gap-2 rounded-lg bg-[#12d585] px-6 py-3 font-semibold text-black transition-opacity disabled:opacity-50"
           >
             {loading ? (
               <>
@@ -857,7 +882,8 @@ export function TokenScanner() {
               <button
                 type="button"
                 onClick={handleCopy}
-                className="min-h-[44px] min-w-[44px] shrink-0 rounded p-2 hover:bg-white/10"
+                data-tap-haptic
+                className="tap-press min-h-[44px] min-w-[44px] shrink-0 rounded p-2 hover:bg-white/10"
               >
                 {copied ? (
                   <Check className="h-4 w-4 text-emerald-400" />
@@ -873,13 +899,13 @@ export function TokenScanner() {
             <div>
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-base font-semibold text-white">
-                  {currentStep >= ANALYSIS_STEPS.length
+                  {currentStep >= analysisSteps.length
                     ? "Analysis Complete"
                     : "AI Analysis in Progress…"}
                 </h2>
-                {currentStep < ANALYSIS_STEPS.length && (
+                {currentStep < analysisSteps.length && (
                   <span className="text-xs text-white/50">
-                    {currentStep}/{ANALYSIS_STEPS.length}
+                    {currentStep}/{analysisSteps.length}
                   </span>
                 )}
               </div>
@@ -888,13 +914,13 @@ export function TokenScanner() {
                   className="h-full bg-[#12d585]"
                   initial={{ width: "0%" }}
                   animate={{
-                    width: `${Math.min((currentStep / ANALYSIS_STEPS.length) * 100, 100)}%`,
+                    width: `${Math.min((currentStep / analysisSteps.length) * 100, 100)}%`,
                   }}
                   transition={{ duration: 0.4 }}
                 />
               </div>
               <div className="space-y-3">
-                {ANALYSIS_STEPS.map(({ key, icon, label }, index) => {
+                {analysisSteps.map(({ key, icon, label }, index) => {
                   if (index >= currentStep) return null;
                   const data = getAnalysisItem(key);
                   return (
@@ -903,7 +929,7 @@ export function TokenScanner() {
                       data={data}
                       icon={icon}
                       label={label}
-                      isAnalyzing={index === currentStep - 1 && currentStep < ANALYSIS_STEPS.length}
+                      isAnalyzing={index === currentStep - 1 && currentStep < analysisSteps.length}
                     />
                   );
                 })}
@@ -996,7 +1022,8 @@ export function TokenScanner() {
               )}
               <button
                 type="button"
-                className={`mt-6 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl font-bold text-white ${
+                data-tap-haptic
+                className={`tap-press mt-6 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl font-bold text-white ${
                   isLowRisk
                     ? "bg-emerald-500 hover:bg-emerald-400"
                     : "bg-amber-500 hover:bg-amber-400"

@@ -67,6 +67,7 @@ interface TokenPosition {
   value: number;
   pnl?: number;
   pnlPercent?: number;
+  chain?: "solana" | "base" | "bnb";
 }
 
 export function Profile() {
@@ -222,53 +223,76 @@ export function Profile() {
           });
         }
         if (evmData?.evmAddress) {
-          if (evmData.base?.usdc > 0) {
-            const evmPnl = evmPnlByMint.get("base-usdc");
-            combined.push({
-              mint: "base-usdc",
-              symbol: "USDC",
-              name: "USD Coin (Base)",
-              amount: evmData.base.usdc,
-              value: evmData.base.usdc,
-              pnl: evmPnl?.pnl,
-              pnlPercent: evmPnl?.pnlPercent,
-            });
-          }
-          if (evmData.base?.native > 0) {
-            const evmPnl = evmPnlByMint.get("base-eth");
-            combined.push({
-              mint: "base-eth",
-              symbol: "ETH",
-              name: "Ethereum (Base)",
-              amount: evmData.base.native,
-              value: evmData.base.native * APPROX_ETH_PRICE,
-              pnl: evmPnl?.pnl,
-              pnlPercent: evmPnl?.pnlPercent,
-            });
-          }
-          if (evmData.bnb?.usdc > 0) {
-            const evmPnl = evmPnlByMint.get("bnb-usdc");
-            combined.push({
-              mint: "bnb-usdc",
-              symbol: "USDC",
-              name: "USD Coin (BNB)",
-              amount: evmData.bnb.usdc,
-              value: evmData.bnb.usdc,
-              pnl: evmPnl?.pnl,
-              pnlPercent: evmPnl?.pnlPercent,
-            });
-          }
-          if (evmData.bnb?.native > 0) {
-            const evmPnl = evmPnlByMint.get("bnb-bnb");
-            combined.push({
-              mint: "bnb-bnb",
-              symbol: "BNB",
-              name: "BNB",
-              amount: evmData.bnb.native,
-              value: evmData.bnb.native * APPROX_BNB_PRICE,
-              pnl: evmPnl?.pnl,
-              pnlPercent: evmPnl?.pnlPercent,
-            });
+          if (Array.isArray(evmData.tokens) && evmData.tokens.length > 0) {
+            for (const t of evmData.tokens) {
+              if (t.value > 0) {
+                const evmPnl = evmPnlByMint.get(t.mint);
+                combined.push({
+                  mint: t.mint,
+                  symbol: t.symbol ?? "???",
+                  name: t.name ?? "Unknown Token",
+                  image: t.image,
+                  amount: t.amount ?? 0,
+                  value: t.value ?? 0,
+                  pnl: evmPnl?.pnl,
+                  pnlPercent: evmPnl?.pnlPercent,
+                  chain: t.chain ?? "base",
+                });
+              }
+            }
+          } else {
+            if (evmData.base?.usdc > 0) {
+              const evmPnl = evmPnlByMint.get("base-usdc");
+              combined.push({
+                mint: "base-usdc",
+                symbol: "USDC",
+                name: "USD Coin (Base)",
+                amount: evmData.base.usdc,
+                value: evmData.base.usdc,
+                pnl: evmPnl?.pnl,
+                pnlPercent: evmPnl?.pnlPercent,
+                chain: "base",
+              });
+            }
+            if (evmData.base?.native > 0) {
+              const evmPnl = evmPnlByMint.get("base-eth");
+              combined.push({
+                mint: "base-eth",
+                symbol: "ETH",
+                name: "Ethereum (Base)",
+                amount: evmData.base.native,
+                value: evmData.base.native * APPROX_ETH_PRICE,
+                pnl: evmPnl?.pnl,
+                pnlPercent: evmPnl?.pnlPercent,
+                chain: "base",
+              });
+            }
+            if (evmData.bnb?.usdc > 0) {
+              const evmPnl = evmPnlByMint.get("bnb-usdc");
+              combined.push({
+                mint: "bnb-usdc",
+                symbol: "USDC",
+                name: "USD Coin (BNB)",
+                amount: evmData.bnb.usdc,
+                value: evmData.bnb.usdc,
+                pnl: evmPnl?.pnl,
+                pnlPercent: evmPnl?.pnlPercent,
+                chain: "bnb",
+              });
+            }
+            if (evmData.bnb?.native > 0) {
+              const evmPnl = evmPnlByMint.get("bnb-bnb");
+              combined.push({
+                mint: "bnb-bnb",
+                symbol: "BNB",
+                name: "BNB",
+                amount: evmData.bnb.native,
+                value: evmData.bnb.native * APPROX_BNB_PRICE,
+                pnl: evmPnl?.pnl,
+                pnlPercent: evmPnl?.pnlPercent,
+                chain: "bnb",
+              });
+            }
           }
         }
         const pnlByMint = pnlRes?.tokens ?? {};
@@ -592,7 +616,8 @@ export function Profile() {
         <h1 className="text-2xl font-bold">Profile</h1>
         <button
           onClick={() => setSettingsOpen(true)}
-          className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white"
+          data-tap-haptic
+          className="tap-press p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white"
           aria-label="Settings"
         >
           <Settings className="w-5 h-5" />
@@ -723,7 +748,8 @@ export function Profile() {
                           setDepositStep("chain");
                           setDepositSheetOpen(true);
                         }}
-                        className="w-9 h-9 min-w-[44px] min-h-[44px] rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center text-lg font-medium touch-manipulation"
+                        data-tap-haptic
+                        className="tap-press w-9 h-9 min-w-[44px] min-h-[44px] rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center text-lg font-medium touch-manipulation"
                         aria-label="Deposit"
                       >
                         +
@@ -737,7 +763,8 @@ export function Profile() {
                           setWithdrawQuote(null);
                           setWithdrawSheetOpen(true);
                         }}
-                        className="w-9 h-9 min-w-[44px] min-h-[44px] rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center text-white/70 touch-manipulation"
+                        data-tap-haptic
+                        className="tap-press w-9 h-9 min-w-[44px] min-h-[44px] rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center text-white/70 touch-manipulation"
                         aria-label="Withdraw"
                       >
                         …
@@ -747,7 +774,8 @@ export function Profile() {
                   <div className="mt-4 pt-4 border-t border-white/10">
                     <button
                       onClick={() => navigate("/app/trade")}
-                      className="text-sm font-medium mb-2 block w-full text-left py-2 -mx-2 px-2 rounded-lg min-h-[44px] flex items-center hover:bg-white/5 active:bg-white/10 hover:text-accent-primary transition-colors touch-manipulation"
+                      data-tap-haptic
+                      className="tap-press text-sm font-medium mb-2 block w-full text-left py-2 -mx-2 px-2 rounded-lg min-h-[44px] flex items-center hover:bg-white/5 active:bg-white/10 hover:text-accent-primary transition-colors touch-manipulation"
                     >
                       Open positions
                     </button>
@@ -758,9 +786,14 @@ export function Profile() {
                         {displayedOpenPositions.map((pos) => (
                           <li
                             key={pos.mint}
-                            className="flex items-center gap-3 py-3 px-2 rounded-lg min-h-[44px] hover:bg-white/5 active:bg-white/10 touch-manipulation"
+                            data-tap-haptic
+                            className="tap-press flex items-center gap-3 py-3 px-2 rounded-lg min-h-[44px] hover:bg-white/5 active:bg-white/10 touch-manipulation"
                             role="button"
-                            onClick={() => navigate(`/app/trade?mint=${encodeURIComponent(pos.mint)}`)}
+                            onClick={() => {
+                              const params = new URLSearchParams({ mint: pos.mint });
+                              if (pos.chain === "base" || pos.chain === "bnb") params.set("chain", pos.chain);
+                              navigate(`/app/trade?${params.toString()}`);
+                            }}
                           >
                             {pos.image ? (
                               <img src={pos.image} alt="" className="w-8 h-8 rounded-full object-cover" />

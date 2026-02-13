@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { RouterProvider } from "react-router";
 import { router } from "@/routes";
 import { Toaster } from "sonner";
@@ -5,10 +6,24 @@ import { InstallPrompt } from "@/components/pwa/InstallPrompt";
 import { OfflineIndicator } from "@/components/pwa/OfflineIndicator";
 import { PushForegroundHandler } from "@/components/pwa/PushForegroundHandler";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { triggerHaptic } from "@/lib/haptic";
+
+function TapHapticListener() {
+  useEffect(() => {
+    const handler = (e: PointerEvent) => {
+      const target = (e.target as Element).closest("[data-tap-haptic]");
+      if (target) triggerHaptic();
+    };
+    document.addEventListener("pointerdown", handler);
+    return () => document.removeEventListener("pointerdown", handler);
+  }, []);
+  return null;
+}
 
 export default function App() {
   return (
     <AuthProvider>
+      <TapHapticListener />
       <PushForegroundHandler />
       <OfflineIndicator />
       <RouterProvider router={router} />

@@ -450,14 +450,16 @@ export function Watchlist() {
                                       disabled={
                                         savingNickname || !displayAddress
                                       }
-                                      className="p-1 text-accent-primary hover:bg-accent-primary/20 rounded"
+                                      data-tap-haptic
+                                      className="tap-press p-1 text-accent-primary hover:bg-accent-primary/20 rounded"
                                     >
                                       <Check className="w-4 h-4" />
                                     </button>
                                     <button
                                       type="button"
                                       onClick={(e) => handleCancelEdit(e)}
-                                      className="p-1 text-white/60 hover:bg-white/10 rounded"
+                                      data-tap-haptic
+                                      className="tap-press p-1 text-white/60 hover:bg-white/10 rounded"
                                     >
                                       <X className="w-4 h-4" />
                                     </button>
@@ -477,7 +479,8 @@ export function Watchlist() {
                                             e,
                                           )
                                         }
-                                        className="p-1 text-white/40 hover:text-accent-primary hover:bg-white/5 rounded shrink-0"
+                                        data-tap-haptic
+                                        className="tap-press p-1 text-white/40 hover:text-accent-primary hover:bg-white/5 rounded shrink-0"
                                         aria-label="Edit name"
                                       >
                                         <Pencil className="w-3.5 h-3.5" />
@@ -604,14 +607,16 @@ export function Watchlist() {
                                     handleSaveNickname(wallet.address);
                                   }}
                                   disabled={savingNickname}
-                                  className="p-1 text-accent-primary hover:bg-accent-primary/20 rounded"
+                                  data-tap-haptic
+                                  className="tap-press p-1 text-accent-primary hover:bg-accent-primary/20 rounded"
                                 >
                                   <Check className="w-4 h-4" />
                                 </button>
                                 <button
                                   type="button"
                                   onClick={(e) => handleCancelEdit(e)}
-                                  className="p-1 text-white/60 hover:bg-white/10 rounded"
+                                  data-tap-haptic
+                                  className="tap-press p-1 text-white/60 hover:bg-white/10 rounded"
                                 >
                                   <X className="w-4 h-4" />
                                 </button>
@@ -630,7 +635,8 @@ export function Watchlist() {
                                       e,
                                     )
                                   }
-                                  className="p-1 text-white/40 hover:text-accent-primary hover:bg-white/5 rounded shrink-0"
+                                  data-tap-haptic
+                                  className="tap-press p-1 text-white/40 hover:text-accent-primary hover:bg-white/5 rounded shrink-0"
                                   aria-label="Edit name"
                                 >
                                   <Pencil className="w-3.5 h-3.5" />

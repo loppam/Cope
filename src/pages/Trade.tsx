@@ -15,6 +15,11 @@ import {
   fetchBirdeyeTokenOverview,
   birdeyeOverviewToTokenFields,
 } from "@/lib/birdeye-token";
+import {
+  isEvmAddress,
+  fetchMoralisTokenOverview,
+  moralisOverviewToTokenFields,
+} from "@/lib/moralis-token";
 import type { SwapQuote } from "@/lib/jupiter-swap";
 import {
   formatTokenAmount,
@@ -87,34 +92,89 @@ export function Trade() {
       : tokenBalance;
   const fetchDetailsMintRef = useRef<string | null>(null);
 
-  // Check if mint was passed from navigation state (e.g., from Positions page or feed)
+  // Check if mint + chain were passed from navigation state (e.g., from Positions page)
   useEffect(() => {
     if (location.state?.mint) {
       const passedMint = (location.state.mint as string).trim();
+      const passedChain = (location.state?.chain as string)?.toLowerCase();
       setMint(passedMint);
+      if (passedChain === "base" || passedChain === "bnb") {
+        setTradeChain(passedChain as TradeChain);
+      }
       window.history.replaceState({}, document.title);
-      setSearchParams({ mint: passedMint }, { replace: true });
+      const params: Record<string, string> = { mint: passedMint };
+      if (passedChain) params.chain = passedChain;
+      setSearchParams(params, { replace: true });
     }
   }, [location.state, setSearchParams]);
 
-  // Read mint from URL (e.g. /app/trade?mint=...) so links are shareable
+  // Read mint + chain from URL (e.g. /app/trade?mint=...&chain=base) so links are shareable
   useEffect(() => {
     if (location.state?.mint) return;
     const urlMint = searchParams.get("mint")?.trim();
+    const urlChain = searchParams.get("chain")?.toLowerCase();
     if (urlMint) setMint(urlMint);
+    if (urlChain === "base" || urlChain === "bnb") {
+      setTradeChain(urlChain as TradeChain);
+    }
   }, [searchParams, location.state?.mint]);
 
-  // Fetch token details when we have a selected token (Solana: mint; Base/BNB: crossChainToken)
+  // Resolve effective chain for the selected token (from URL/state or token card)
+  const isEvmMint = /^0x[a-fA-F0-9]{40}$/.test(mint?.trim() ?? "") || mint === "base-eth" || mint === "bnb-bnb" || mint === "base-usdc" || mint === "bnb-usdc";
+  const effectiveChain: TradeChain =
+    mint && isEvmMint && (tradeChain === "base" || tradeChain === "bnb")
+      ? tradeChain
+      : mint
+        ? "solana"
+        : tradeChain;
+
+  // Auto-detect EVM chain when user pastes 0x address without chain (parallel probe via token-search)
+  useEffect(() => {
+    if (!mint?.trim() || !isEvmMint || (tradeChain === "base" || tradeChain === "bnb")) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const base = getApiBase();
+        const res = await fetch(
+          `${base}/api/token-search?term=${encodeURIComponent(mint.trim())}&limit=1`,
+        );
+        const json = await res.json().catch(() => ({}));
+        const tokens = Array.isArray(json?.tokens) ? json.tokens : [];
+        const first = tokens[0];
+        const ch = first?.chain === "bsc" ? "bnb" : first?.chain;
+        if (!cancelled && (ch === "base" || ch === "bnb")) {
+          setTradeChain(ch as TradeChain);
+          setSearchParams(
+            (p) => {
+              const next = new URLSearchParams(p);
+              next.set("chain", ch);
+              return next;
+            },
+            { replace: true },
+          );
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mint, isEvmMint, tradeChain, setSearchParams]);
+
+  // Fetch token details when we have a selected token (Solana: mint; Base/BNB: mint + chain or crossChainToken)
+  // Skip when EVM mint but chain unknown (effectiveChain=solana) - wait for auto-detect to set chain
   useEffect(() => {
     if (mint) {
-      fetchTokenDetails(mint, "solana", token);
+      if (isEvmMint && effectiveChain === "solana") return; // wait for chain resolution
+      fetchTokenDetails(mint, effectiveChain, token);
     } else if (
       crossChainToken &&
       (tradeChain === "base" || tradeChain === "bnb")
     ) {
       fetchTokenDetails(crossChainToken.address, tradeChain, token);
     }
-  }, [mint, crossChainToken, tradeChain]);
+  }, [mint, effectiveChain, crossChainToken, tradeChain]);
 
   // Refresh cooldown timer
   useEffect(() => {
@@ -166,6 +226,7 @@ export function Trade() {
   }, [tradeChain, user, userProfile?.evmAddress]);
 
   // Fetch user's token balance for the selected token (for Sell section)
+  const isEvmToken = token?.chain === "base" || token?.chain === "bnb";
   useEffect(() => {
     if (!token?.mint || !userProfile?.walletAddress) {
       setTokenBalance(0);
@@ -175,15 +236,31 @@ export function Trade() {
     const fetchBalance = async () => {
       setLoadingBalance(true);
       try {
-        const positions = await getWalletPositions(
-          userProfile.walletAddress,
-          true,
-        );
-        const position = positions.tokens.find(
-          (t) => t.token.mint === token.mint,
-        );
-        const balance = position?.balance ?? 0;
-        setTokenBalance(balance);
+        if (isEvmToken && user) {
+          const tokenId = await user.getIdToken();
+          const base = getApiBase();
+          const res = await fetch(`${base}/api/relay/evm-balances`, {
+            headers: { Authorization: `Bearer ${tokenId}` },
+          });
+          const data = await res.json();
+          if (res.ok && data.tokens) {
+            const match = (data.tokens as Array<{ mint: string; amount: number }>).find(
+              (t) => t.mint === token.mint
+            );
+            setTokenBalance(match?.amount ?? 0);
+          } else {
+            setTokenBalance(0);
+          }
+        } else {
+          const positions = await getWalletPositions(
+            userProfile.walletAddress,
+            true,
+          );
+          const position = positions.tokens.find(
+            (t) => t.token.mint === token.mint,
+          );
+          setTokenBalance(position?.balance ?? 0);
+        }
         setSellAmount("");
       } catch (err) {
         console.warn("Failed to fetch token balance:", err);
@@ -193,7 +270,7 @@ export function Trade() {
       }
     };
     fetchBalance();
-  }, [token?.mint, userProfile?.walletAddress]);
+  }, [token?.mint, token?.chain, userProfile?.walletAddress, user, isEvmToken]);
 
   // Fetch USDC balance for Buy section (same wallet positions, find SOL USDC)
   useEffect(() => {
@@ -255,6 +332,38 @@ export function Trade() {
               chainId,
             };
     const isStale = () => fetchDetailsMintRef.current !== address;
+    const useMoralis = isEvmAddress(address) && (chain === "base" || chain === "bnb");
+
+    if (useMoralis) {
+      try {
+        const overview = await fetchMoralisTokenOverview(address, chain);
+        if (isStale()) return;
+        const fields = moralisOverviewToTokenFields(overview.data);
+        if (Object.keys(fields).length > 0) {
+          setToken({
+            ...base,
+            name: base.name || fields.name || "",
+            symbol: base.symbol || fields.symbol || "",
+            image: base.image || fields.image,
+            decimals: fields.decimals ?? base.decimals,
+            priceUsd: fields.priceUsd,
+            marketCapUsd: fields.marketCapUsd,
+            liquidityUsd: fields.liquidityUsd,
+            holders: fields.holders,
+            socials: fields.socials ?? base.socials,
+          });
+          setLoading(false);
+          return;
+        }
+      } catch (e) {
+        if (isStale()) return;
+        console.warn("Moralis token details failed:", e);
+      }
+      if (!isStale()) setToken(base);
+      setLoading(false);
+      return;
+    }
+
     try {
       const overview = await fetchBirdeyeTokenOverview(address, chain);
       if (isStale()) return;
@@ -326,13 +435,17 @@ export function Trade() {
 
     setLastRefresh(Date.now());
     setRefreshCooldown(15);
-    const chain = mint ? "solana" : (tradeChain as TradeChain);
+    const chain = mint ? effectiveChain : (tradeChain as TradeChain);
     await fetchTokenDetails(address, chain, token);
   };
 
   const handleCopyShareLink = async () => {
     if (!mint) return;
-    const url = `${window.location.origin}${window.location.pathname}?mint=${encodeURIComponent(mint)}`;
+    const params = new URLSearchParams({ mint });
+    if (effectiveChain === "base" || effectiveChain === "bnb") {
+      params.set("chain", effectiveChain);
+    }
+    const url = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
     try {
       await navigator.clipboard.writeText(url);
       toast.success("Link copied", {
@@ -627,28 +740,44 @@ export function Trade() {
           const newBalance = await getSolBalance(userProfile.walletAddress);
           await updateBalance(newBalance);
           // Refetch positions so "your position" / sell balance and USDC balance update
+          const wasEvmSell = swapDirection === "sell" && (token?.chain === "base" || token?.chain === "bnb");
           try {
-            const positions = await getWalletPositions(
-              userProfile.walletAddress,
-              false,
-            );
-            if (swapDirection === "sell" && token?.mint) {
-              const position = positions.tokens.find(
-                (t) => t.token.mint === token.mint,
+            if (wasEvmSell && token?.mint && user) {
+              const tokenId = await user.getIdToken();
+              const base = getApiBase();
+              const res = await fetch(`${base}/api/relay/evm-balances`, {
+                headers: { Authorization: `Bearer ${tokenId}` },
+              });
+              const data = await res.json();
+              if (res.ok && data.tokens) {
+                const match = (data.tokens as Array<{ mint: string; amount: number }>).find(
+                  (t) => t.mint === token.mint
+                );
+                setTokenBalance(match?.amount ?? 0);
+              }
+            } else {
+              const positions = await getWalletPositions(
+                userProfile.walletAddress,
+                false,
               );
-              setTokenBalance(position?.balance ?? 0);
-            } else if (swapDirection === "buy") {
-              const boughtMint = token?.mint ?? crossChainToken?.address;
-              if (boughtMint) {
+              if (swapDirection === "sell" && token?.mint) {
                 const position = positions.tokens.find(
-                  (t) => t.token.mint === boughtMint,
+                  (t) => t.token.mint === token.mint,
                 );
                 setTokenBalance(position?.balance ?? 0);
+              } else if (swapDirection === "buy") {
+                const boughtMint = token?.mint ?? crossChainToken?.address;
+                if (boughtMint) {
+                  const position = positions.tokens.find(
+                    (t) => t.token.mint === boughtMint,
+                  );
+                  setTokenBalance(position?.balance ?? 0);
+                }
+                const usdcPosition = positions.tokens.find(
+                  (t) => t.token.mint === SOLANA_USDC_MINT,
+                );
+                if (usdcPosition) setUsdcBalance(usdcPosition.balance ?? 0);
               }
-              const usdcPosition = positions.tokens.find(
-                (t) => t.token.mint === SOLANA_USDC_MINT,
-              );
-              if (usdcPosition) setUsdcBalance(usdcPosition.balance ?? 0);
             }
           } catch {
             // ignore
@@ -949,15 +1078,31 @@ export function Trade() {
 
                     {/* Social Links */}
                     <div className="flex flex-wrap gap-2 mb-4">
-                      <a
-                        href={`https://solscan.io/token/${token.mint}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs flex items-center gap-1 transition-colors"
-                      >
-                        <span>🔍</span> Solscan
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
+                      {(() => {
+                        const explorerUrl =
+                          token.chain === "base"
+                            ? `https://basescan.org/token/${token.mint}`
+                            : token.chain === "bnb"
+                              ? `https://bscscan.com/token/${token.mint}`
+                              : `https://solscan.io/token/${token.mint}`;
+                        const explorerLabel =
+                          token.chain === "base"
+                            ? "Basescan"
+                            : token.chain === "bnb"
+                              ? "BscScan"
+                              : "Solscan";
+                        return (
+                          <a
+                            href={explorerUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs flex items-center gap-1 transition-colors"
+                          >
+                            <span>🔍</span> {explorerLabel}
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        );
+                      })()}
                       {token.socials?.twitter && (
                         <a
                           href={token.socials.twitter}

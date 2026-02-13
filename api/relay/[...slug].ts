@@ -261,6 +261,8 @@ async function sendSolFromFunder(
   return sig;
 }
 
+const NATIVE_ETH_PLACEHOLDER = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+
 async function getEvmBalances(address: string): Promise<{
   base: { usdc: number; native: number };
   bnb: { usdc: number; native: number };
@@ -293,6 +295,102 @@ async function getEvmBalances(address: string): Promise<{
     console.warn("BNB balance fetch failed:", e);
   }
   return result;
+}
+
+/** Fetch all ERC-20 + native token balances from Moralis for Base and BNB. */
+async function getEvmTokenPositions(
+  address: string
+): Promise<
+  Array<{
+    mint: string;
+    symbol: string;
+    name: string;
+    amount: number;
+    value: number;
+    chain: "base" | "bnb";
+    image?: string;
+    decimals: number;
+  }>
+> {
+  const apiKey =
+    process.env.MORALIS_API_KEY || process.env.VITE_MORALIS_API_KEY;
+  if (!apiKey) return [];
+
+  const tokens: Array<{
+    mint: string;
+    symbol: string;
+    name: string;
+    amount: number;
+    value: number;
+    chain: "base" | "bnb";
+    image?: string;
+    decimals: number;
+  }> = [];
+
+  const chains: Array<{ chain: "base" | "bnb"; param: string }> = [
+    { chain: "base", param: "base" },
+    { chain: "bnb", param: "bsc" },
+  ];
+
+  await Promise.all(
+    chains.map(async ({ chain, param }) => {
+      try {
+        const url = `https://deep-index.moralis.io/api/v2.2/wallets/${address}/tokens?chain=${param}&limit=100&exclude_spam=true`;
+        const res = await fetch(url, {
+          headers: {
+            accept: "application/json",
+            "X-API-Key": apiKey,
+          },
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          result?: Array<{
+            token_address?: string;
+            name?: string;
+            symbol?: string;
+            logo?: string;
+            decimals?: number;
+            balance?: string;
+            balance_formatted?: string;
+            usd_value?: number;
+            native_token?: boolean;
+          }>;
+        };
+        const list = Array.isArray(data?.result) ? data.result : [];
+        for (const t of list) {
+          const bal = parseFloat(t.balance_formatted ?? t.balance ?? "0");
+          const value = t.usd_value ?? 0;
+          if (bal <= 0 && value <= 0) continue;
+
+          const addr = (t.token_address ?? "").toLowerCase();
+          const isNative =
+            t.native_token || !addr || addr === NATIVE_ETH_PLACEHOLDER;
+          const mint = isNative
+            ? chain === "base"
+              ? "base-eth"
+              : "bnb-bnb"
+            : addr;
+
+          tokens.push({
+            mint,
+            symbol: (
+              t.symbol ?? (chain === "base" ? "ETH" : "BNB")
+            ).toUpperCase(),
+            name: t.name ?? (chain === "base" ? "Ethereum (Base)" : "BNB"),
+            amount: bal,
+            value,
+            chain,
+            image: t.logo,
+            decimals: typeof t.decimals === "number" ? t.decimals : 18,
+          });
+        }
+      } catch (e) {
+        console.warn(`Moralis token fetch failed for ${chain}:`, e);
+      }
+    })
+  );
+
+  return tokens;
 }
 
 async function depositQuoteHandler(req: VercelRequest, res: VercelResponse) {
@@ -463,6 +561,11 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
         error: "Missing inputMint, outputMint, amount, or userWallet",
       });
     }
+    const NATIVE_ADDRESS = "0x0000000000000000000000000000000000000000";
+    const originCurrency =
+      inputMint === "base-eth" || inputMint === "bnb-bnb"
+        ? NATIVE_ADDRESS
+        : inputMint;
     console.log("[swap-quote] start", {
       userId,
       tradeDir,
@@ -486,7 +589,7 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
         user: userWallet,
         originChainId,
         destinationChainId,
-        originCurrency: inputMint,
+        originCurrency,
         destinationCurrency: outputMint,
         amount,
         tradeType: "EXACT_INPUT",
@@ -1371,11 +1474,15 @@ async function evmBalancesHandler(req: VercelRequest, res: VercelResponse) {
     } catch {
       // best-effort persist for webhook lookup
     }
-    const balances = await getEvmBalances(wallet.address);
+    const [balances, tokenPositions] = await Promise.all([
+      getEvmBalances(wallet.address),
+      getEvmTokenPositions(wallet.address),
+    ]);
     return res.status(200).json({
       evmAddress: wallet.address,
       base: balances.base,
       bnb: balances.bnb,
+      tokens: tokenPositions,
     });
   } catch (e: unknown) {
     console.error("evm-balances error:", e);

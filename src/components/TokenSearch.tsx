@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Search, X, Loader2 } from 'lucide-react';
 import { TokenSearchResult } from '@/lib/solanatracker';
-import { searchBirdeyeTokens } from '@/lib/birdeye-token';
+import { searchTokensUnified } from '@/lib/birdeye-token';
 import { shortenAddress } from '@/lib/utils';
 
 interface TokenSearchProps {
@@ -45,11 +45,11 @@ export function TokenSearch({ onSelect, placeholder = "Search token by name or s
     setLoading(true);
     searchTimeoutRef.current = setTimeout(async () => {
       try {
-        const list = await searchBirdeyeTokens(query.trim(), 20);
+        const list = await searchTokensUnified(query.trim(), 20);
         setResults(list);
         setShowResults(true);
       } catch (error) {
-        console.error('Error searching tokens (Birdeye):', error);
+        console.error('Error searching tokens:', error);
         setResults([]);
       } finally {
         setLoading(false);
@@ -151,23 +151,23 @@ export function TokenSearch({ onSelect, placeholder = "Search token by name or s
                       </div>
                       <div className="flex flex-wrap gap-x-3 gap-y-0 text-xs text-white/50 overflow-hidden">
                         <span className="font-mono truncate">{shortenAddress(token.mint)}</span>
-                        {token.priceUsd != null && (
+                        {token.priceUsd != null && token.priceUsd > 0 && (
                           <span className="truncate">{formatPrice(token.priceUsd)}</span>
                         )}
-                        {token.marketCapUsd != null && (
+                        {token.marketCapUsd != null && token.marketCapUsd > 0 && (
                           <span className="truncate">MCap: {formatCurrency(token.marketCapUsd)}</span>
                         )}
                       </div>
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/60 sm:shrink-0 sm:flex-col sm:items-end">
-                    {token.liquidityUsd != null && (
+                    {token.liquidityUsd != null && token.liquidityUsd > 0 && (
                       <span>Liq: {formatCurrency(token.liquidityUsd)}</span>
                     )}
                     {token.volume_24h != null && token.volume_24h > 0 && (
                       <span>Vol 24h: {formatCurrency(token.volume_24h)}</span>
                     )}
-                    {token.status && (
+                    {token.status != null && token.status !== '' && (
                       <span className={`px-2 py-0.5 rounded text-[10px] ${
                         token.status === 'graduated' ? 'bg-[#12d585]/20 text-[#12d585]' :
                         token.status === 'graduating' ? 'bg-yellow-500/20 text-yellow-500' :

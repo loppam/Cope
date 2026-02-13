@@ -38,25 +38,47 @@ interface BirdeyeSearchToken {
 }
 
 async function searchHandler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "GET")
+    return res.status(405).json({ error: "Method not allowed" });
   try {
     const apiKey = process.env.BIRDEYE_API_KEY;
     if (!apiKey) {
+      console.error("[birdeye search] BIRDEYE_API_KEY not configured");
       return res.status(503).json({ error: "BIRDEYE_API_KEY not configured" });
     }
     const term = (req.query.term ?? "").toString().trim();
-    const limit = Math.min(Math.max(1, parseInt(String(req.query.limit ?? "20"), 10) || 20), 50);
+    const limit = Math.min(
+      Math.max(1, parseInt(String(req.query.limit ?? "20"), 10) || 20),
+      50,
+    );
+    const chainsParam = (req.query.chains ?? "solana,base,bsc").toString().toLowerCase();
+    const allowedChains = new Set(chainsParam.split(",").map((c) => c.trim()));
     if (!term) {
       return res.status(400).json({ error: "Missing term (search query)" });
     }
 
-    const chains: Array<{ chain: string; chainId: number }> = [
+    const allChains: Array<{ chain: string; chainId: number }> = [
       { chain: "solana", chainId: CHAIN_IDS.solana },
       { chain: "base", chainId: CHAIN_IDS.base },
       { chain: "bsc", chainId: CHAIN_IDS.bsc },
     ];
+    const chains = allChains.filter((c) => {
+      const appChain = c.chain === "bsc" ? "bnb" : c.chain;
+      return allowedChains.has(c.chain) || allowedChains.has(appChain);
+    });
+    if (chains.length === 0) {
+      return res.status(400).json({ error: "No valid chains. Use solana, base, bnb" });
+    }
 
-    const results: Array<BirdeyeSearchToken & { chain: string; chainId: number }> = [];
+    console.log("[birdeye search] request", {
+      term: term.slice(0, 42) + (term.length > 42 ? "…" : ""),
+      limit,
+      chains: chains.map((c) => c.chain),
+    });
+
+    const results: Array<
+      BirdeyeSearchToken & { chain: string; chainId: number }
+    > = [];
     const seen = new Set<string>();
 
     await Promise.all(
@@ -82,14 +104,26 @@ async function searchHandler(req: VercelRequest, res: VercelResponse) {
               "x-chain": chain,
             },
           });
-          if (!r.ok) return;
+          if (!r.ok) {
+            const errBody = await r.text().catch(() => "");
+            console.warn("[birdeye search] chain failed", {
+              chain,
+              status: r.status,
+              statusText: r.statusText,
+              body: errBody.slice(0, 150),
+            });
+            return;
+          }
           const data = await r.json();
-          const rawItems = data?.data?.items ?? data?.data ?? data?.tokens ?? [];
+          const rawItems =
+            data?.data?.items ?? data?.data ?? data?.tokens ?? [];
           const items: Array<Record<string, unknown>> = [];
           if (Array.isArray(rawItems)) {
             for (const entry of rawItems) {
               if (entry?.type === "token" && entry?.result != null) {
-                const arr = Array.isArray(entry.result) ? entry.result : [entry.result];
+                const arr = Array.isArray(entry.result)
+                  ? entry.result
+                  : [entry.result];
                 for (const tok of arr) {
                   if (tok && (tok.address ?? tok.mint)) items.push(tok);
                 }
@@ -104,7 +138,8 @@ async function searchHandler(req: VercelRequest, res: VercelResponse) {
             const key = `${chain}:${addr.toLowerCase()}`;
             if (seen.has(key)) continue;
             seen.add(key);
-            const liq = item?.liquidity ?? item?.volume_24h_usd ?? item?.v24hUSD;
+            const liq =
+              item?.liquidity ?? item?.volume_24h_usd ?? item?.v24hUSD;
             const mc = item?.market_cap ?? item?.mc;
             const v24h = item?.volume_24h_usd ?? item?.v24hUSD;
             const logo = item?.logo_uri ?? item?.logoURI;
@@ -112,7 +147,8 @@ async function searchHandler(req: VercelRequest, res: VercelResponse) {
               address: addr,
               symbol: item?.symbol != null ? String(item.symbol) : undefined,
               name: item?.name != null ? String(item.name) : undefined,
-              decimals: typeof item?.decimals === "number" ? item.decimals : undefined,
+              decimals:
+                typeof item?.decimals === "number" ? item.decimals : undefined,
               logoURI: logo != null ? String(logo) : undefined,
               liquidity: typeof liq === "number" ? liq : undefined,
               price: typeof item?.price === "number" ? item.price : undefined,
@@ -122,10 +158,13 @@ async function searchHandler(req: VercelRequest, res: VercelResponse) {
               chainId,
             });
           }
-        } catch {
-          // ignore per-chain failures
+        } catch (chainErr) {
+          console.warn("[birdeye search] chain error", {
+            chain,
+            error: chainErr instanceof Error ? chainErr.message : String(chainErr),
+          });
         }
-      })
+      }),
     );
 
     results.sort((a, b) => {
@@ -134,19 +173,30 @@ async function searchHandler(req: VercelRequest, res: VercelResponse) {
       return liqB - liqA;
     });
 
+    console.log("[birdeye search] result", {
+      totalResults: results.length,
+      returnedCount: Math.min(results.length, limit),
+      chains: [...new Set(results.map((r) => r.chain))],
+    });
     return res.status(200).json({
       tokens: results.slice(0, limit),
     });
   } catch (e: unknown) {
-    console.error("birdeye search error:", e);
+    const err = e instanceof Error ? e : new Error(String(e));
+    console.error("[birdeye search] error", {
+      message: err.message,
+      stack: err.stack,
+      term: (req.query.term ?? "").toString().slice(0, 42),
+    });
     return res.status(500).json({
-      error: e instanceof Error ? e.message : "Internal server error",
+      error: err.message || "Internal server error",
     });
   }
 }
 
 async function tokenOverviewHandler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "GET")
+    return res.status(405).json({ error: "Method not allowed" });
   try {
     const apiKey = process.env.BIRDEYE_API_KEY;
     if (!apiKey) {
@@ -196,12 +246,103 @@ async function tokenOverviewHandler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promise<void | VercelResponse>> = {
+async function ohlcvHandler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "GET")
+    return res.status(405).json({ error: "Method not allowed" });
+  try {
+    const apiKey = process.env.BIRDEYE_API_KEY;
+    if (!apiKey)
+      return res.status(503).json({ error: "BIRDEYE_API_KEY not configured" });
+    const address = (req.query.address ?? "").toString().trim();
+    const chainParam = (req.query.chain ?? "solana").toString().toLowerCase();
+    const chain = chainParam === "bnb" ? "bsc" : chainParam;
+    const type = (req.query.type ?? "1H").toString();
+    const limit = Math.min(
+      Math.max(1, parseInt(String(req.query.limit ?? "100"), 10) || 100),
+      1000,
+    );
+    if (!address) return res.status(400).json({ error: "Missing address" });
+
+    const url = new URL(`${BIRDEYE_API_BASE}/defi/ohlcv`);
+    url.searchParams.set("address", address);
+    url.searchParams.set("type", type);
+    url.searchParams.set("limit", String(limit));
+
+    const r = await fetch(url.toString(), {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": apiKey,
+        "x-chain": chain,
+      },
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok)
+      return res.status(r.status >= 500 ? 502 : 400).json(data?.detail ?? data);
+    return res.status(200).json(data);
+  } catch (e: unknown) {
+    console.error("birdeye ohlcv error:", e);
+    return res
+      .status(500)
+      .json({
+        error: e instanceof Error ? e.message : "Internal server error",
+      });
+  }
+}
+
+async function historyPriceHandler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "GET")
+    return res.status(405).json({ error: "Method not allowed" });
+  try {
+    const apiKey = process.env.BIRDEYE_API_KEY;
+    if (!apiKey)
+      return res.status(503).json({ error: "BIRDEYE_API_KEY not configured" });
+    const address = (req.query.address ?? "").toString().trim();
+    const chainParam = (req.query.chain ?? "solana").toString().toLowerCase();
+    const chain = chainParam === "bnb" ? "bsc" : chainParam;
+    const addressType = (req.query.address_type ?? "token").toString();
+    if (!address) return res.status(400).json({ error: "Missing address" });
+
+    const url = new URL(`${BIRDEYE_API_BASE}/defi/history_price`);
+    url.searchParams.set("address", address);
+    url.searchParams.set("address_type", addressType);
+
+    const r = await fetch(url.toString(), {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": apiKey,
+        "x-chain": chain,
+      },
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok)
+      return res.status(r.status >= 500 ? 502 : 400).json(data?.detail ?? data);
+    return res.status(200).json(data);
+  } catch (e: unknown) {
+    console.error("birdeye history-price error:", e);
+    return res
+      .status(500)
+      .json({
+        error: e instanceof Error ? e.message : "Internal server error",
+      });
+  }
+}
+
+const ROUTES: Record<
+  string,
+  (req: VercelRequest, res: VercelResponse) => Promise<void | VercelResponse>
+> = {
   search: searchHandler,
   "token-overview": tokenOverviewHandler,
+  ohlcv: ohlcvHandler,
+  "history-price": historyPriceHandler,
 };
 
-export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
+export default async function handler(
+  req: VercelRequest,
+  res: VercelResponse,
+): Promise<void> {
   const path = (req.url ?? "").split("?")[0];
   const segments = path.split("/").filter(Boolean);
   const action = segments[segments.length - 1];
@@ -209,7 +350,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   if (!routeHandler) {
     res.status(404).json({
       error: "Not found",
-      message: `Birdeye action '${action || ""}' not found. Use: search, token-overview`,
+      message: `Birdeye action '${action || ""}' not found. Use: search, token-overview, ohlcv, history-price`,
     });
     return;
   }

@@ -374,6 +374,11 @@ async function fetchEvmTokenData(address: string): Promise<{
         : results[1]?.status === "rejected"
           ? results[1].reason
           : null;
+    console.error("[analyze-token] fetchEvmTokenData: token not found on Base or BNB", {
+      address: address.slice(0, 16) + "…",
+      baseError: results[0]?.status === "rejected" ? String(results[0].reason) : null,
+      bnbError: results[1]?.status === "rejected" ? String(results[1].reason) : null,
+    });
     throw err ?? new Error("Token not found on Base or BNB");
   }
 
@@ -1161,12 +1166,19 @@ export default async function handler(
     };
     const addr = (body.tokenAddress || "").trim();
 
+    console.log("[analyze-token] request", {
+      address: addr.slice(0, 16) + (addr.length > 16 ? "…" : ""),
+      chain: body.chain,
+      type: isEvmAddress(addr) ? "evm" : "solana",
+    });
+
     if (!addr || addr.length < 20) {
       res.status(400).json({ error: "Invalid token address" });
       return;
     }
 
     if (isEvmAddress(addr)) {
+      console.log("[analyze-token] evm path start");
       const {
         chain,
         chainType,
@@ -1189,6 +1201,11 @@ export default async function handler(
         chain,
       });
       const ext = (marketData?.extensions || {}) as Record<string, string>;
+      console.log("[analyze-token] evm path success", {
+        chain,
+        name: metadata.name,
+        symbol: metadata.symbol,
+      });
       res.status(200).json({
         chainType,
         chain,
@@ -1210,6 +1227,7 @@ export default async function handler(
       return;
     }
 
+    console.log("[analyze-token] solana path start");
     const { chain, metadata, marketData, securityData, holders } =
       await fetchTokenData(addr, body.chain);
 
@@ -1233,6 +1251,11 @@ export default async function handler(
 
     const ext = (marketData?.extensions || {}) as Record<string, string>;
 
+    console.log("[analyze-token] solana path success", {
+      chain,
+      name: metadata.name,
+      symbol: metadata.symbol,
+    });
     res.status(200).json({
       chainType: "solana",
       chain,
@@ -1255,10 +1278,15 @@ export default async function handler(
       analysis,
     });
   } catch (err) {
-    console.error("Analysis error:", err);
+    const e = err instanceof Error ? err : new Error(String(err));
+    console.error("[analyze-token] error", {
+      message: e.message,
+      stack: e.stack,
+      address: (req.body as { tokenAddress?: string })?.tokenAddress?.slice(0, 16) + "…",
+    });
     res.status(500).json({
       error: "Analysis failed",
-      message: err instanceof Error ? err.message : "Unknown error",
+      message: e.message || "Unknown error",
     });
   }
 }

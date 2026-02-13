@@ -200,6 +200,7 @@ async function tokenOverviewHandler(req: VercelRequest, res: VercelResponse) {
   try {
     const apiKey = process.env.BIRDEYE_API_KEY;
     if (!apiKey) {
+      console.error("[birdeye token-overview] BIRDEYE_API_KEY not configured");
       return res.status(503).json({ error: "BIRDEYE_API_KEY not configured" });
     }
     const address = (req.query.address ?? "").toString().trim();
@@ -229,6 +230,12 @@ async function tokenOverviewHandler(req: VercelRequest, res: VercelResponse) {
       } catch {
         if (raw) message = raw.slice(0, 200);
       }
+      console.error("[birdeye token-overview] Birdeye API error", {
+        status: r.status,
+        address: address.slice(0, 16) + "…",
+        chain,
+        message,
+      });
       return res.status(r.status >= 500 ? 502 : 400).json({ error: message });
     }
     let data: unknown;
@@ -239,9 +246,14 @@ async function tokenOverviewHandler(req: VercelRequest, res: VercelResponse) {
     }
     return res.status(200).json(data);
   } catch (e: unknown) {
-    console.error("birdeye token-overview error:", e);
+    const err = e instanceof Error ? e : new Error(String(e));
+    console.error("[birdeye token-overview] error", {
+      message: err.message,
+      stack: err.stack,
+      address: (req.query.address ?? "").toString().slice(0, 16) + "…",
+    });
     return res.status(500).json({
-      error: e instanceof Error ? e.message : "Internal server error",
+      error: err.message || "Internal server error",
     });
   }
 }

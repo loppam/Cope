@@ -262,8 +262,9 @@ async function sendSolFromFunder(
   return sig;
 }
 
-// EVM funder: top-up ETH (Base) or BNB (BNB) on insufficient funds
-const EVM_FUNDER_AMOUNT_WEI = BigInt(5e14); // 0.0005 ETH/BNB per top-up
+// EVM funder: top-up amounts per chain (gas reserve)
+const EVM_FUNDER_BASE_WEI = BigInt(5e14);  // 0.0005 ETH
+const EVM_FUNDER_BNB_WEI = BigInt(1e15);   // 0.001 BNB
 
 function getEvmFunderWallet(chainId: number): Wallet | null {
   const raw = process.env.EVM_FUNDER_PRIVATE_KEY;
@@ -1187,7 +1188,7 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
             });
           }
 
-          const amountWei = EVM_FUNDER_AMOUNT_WEI * 2n;
+          const amountWei = chainId === 8453 ? EVM_FUNDER_BASE_WEI : EVM_FUNDER_BNB_WEI;
           const fundHash = await sendNativeFromEvmFunder(
             userAddress,
             amountWei,

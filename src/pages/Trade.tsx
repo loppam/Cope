@@ -86,10 +86,16 @@ export function Trade() {
   const slippagePresets = [50, 100, 200]; // 0.5%, 1%, 2%
   const REFRESH_COOLDOWN_MS = 15000; // 15 seconds
   const SOL_RESERVE = 0.005; // Always leave at least this much SOL for gas
+  const BASE_ETH_RESERVE = 0.0005; // Reserve for Base gas
+  const BNB_RESERVE = 0.001; // Reserve for BNB gas
   const sellableBalance =
     token?.mint === SOL_MINT
       ? Math.max(0, tokenBalance - SOL_RESERVE)
-      : tokenBalance;
+      : token?.mint === "base-eth"
+        ? Math.max(0, tokenBalance - BASE_ETH_RESERVE)
+        : token?.mint === "bnb-bnb"
+          ? Math.max(0, tokenBalance - BNB_RESERVE)
+          : tokenBalance;
   const fetchDetailsMintRef = useRef<string | null>(null);
 
   // Check if mint + chain were passed from navigation state (e.g., from Positions page)
@@ -1313,13 +1319,16 @@ export function Trade() {
                             minimumFractionDigits: 0,
                             maximumFractionDigits: 6,
                           })} ${token.symbol}`}
-                      {token.mint === SOL_MINT &&
-                        sellableBalance < tokenBalance && (
-                          <span className="block mt-0.5 text-white/40">
-                            Max sellable: {sellableBalance.toFixed(4)} (0.005
-                            reserved for gas)
-                          </span>
-                        )}
+                      {sellableBalance < tokenBalance && (
+                        <span className="block mt-0.5 text-white/40">
+                          Max sellable: {sellableBalance.toFixed(6)}{" "}
+                          {token?.mint === "base-eth"
+                            ? "(0.0005 reserved for gas)"
+                            : token?.mint === "bnb-bnb"
+                              ? "(0.001 reserved for gas)"
+                              : "(0.005 reserved for gas)"}
+                        </span>
+                      )}
                     </p>
                     <label className="block text-sm font-medium mb-2">
                       Sell Amount ({token.symbol})
@@ -1328,7 +1337,17 @@ export function Trade() {
                       type="number"
                       placeholder="0.0"
                       value={sellAmount}
-                      onChange={(e) => setSellAmount(e.target.value)}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        if (raw === "" || raw === ".") {
+                          setSellAmount(raw);
+                          return;
+                        }
+                        const num = parseFloat(raw);
+                        if (isNaN(num)) return;
+                        const capped = Math.min(num, sellableBalance);
+                        setSellAmount(capped === num ? raw : capped.toFixed(6));
+                      }}
                       disabled={sellableBalance <= 0}
                       className="min-w-0"
                     />

@@ -254,7 +254,7 @@ export function Profile() {
                 chain: "base",
               });
             }
-            if (evmData.base?.native > 0) {
+            if (evmData.base?.native >= 0.0007) {
               const evmPnl = evmPnlByMint.get("base-eth");
               combined.push({
                 mint: "base-eth",
@@ -280,7 +280,7 @@ export function Profile() {
                 chain: "bnb",
               });
             }
-            if (evmData.bnb?.native > 0) {
+            if (evmData.bnb?.native >= 0.0012) {
               const evmPnl = evmPnlByMint.get("bnb-bnb");
               combined.push({
                 mint: "bnb-bnb",

@@ -233,7 +233,7 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 1): P
 
 async function getJupiterPrices(mints: string[]): Promise<Record<string, number>> {
   if (mints.length === 0) return {};
-  const apiKey = process.env.VITE_JUPITER_API_KEY || process.env.JUPITER_API_KEY;
+  const apiKey = process.env.JUPITER_API_KEY;
   if (!apiKey) return {};
   const url = `${JUPITER_API_BASE}/price/v3?ids=${encodeURIComponent([...new Set(mints)].join(","))}`;
   try {

@@ -1,26 +1,13 @@
-// Jupiter Ultra Swap API integration for token swaps
+// Jupiter Ultra Swap API - quote/execute proxied via /api/jupiter so API key stays server-side
 import { Keypair, VersionedTransaction } from "@solana/web3.js";
 import { getEncryptedWalletCredentials } from "./auth";
 import { decryptWalletCredentials, generateEncryptionKey } from "./encryption";
+import { getApiBase } from "./utils";
 
-const JUPITER_API_BASE = "https://api.jup.ag";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 
 /**
- * Get Jupiter API key from environment
- */
-function getApiKey(): string {
-  const apiKey = import.meta.env.VITE_JUPITER_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "Jupiter API key not configured. Add VITE_JUPITER_API_KEY to .env",
-    );
-  }
-  return apiKey;
-}
-
-/**
- * Get Jupiter referral configuration
+ * Get Jupiter referral configuration (referral account is not secret)
  */
 function getReferralConfig(): { account: string; feeBps: number } | null {
   const account = import.meta.env.VITE_JUPITER_REFERRAL_ACCOUNT;
@@ -85,10 +72,9 @@ export async function getSwapQuote(
   outputDecimals?: number,
 ): Promise<SwapQuote> {
   try {
-    const apiKey = getApiKey();
+    const base = getApiBase();
     const referralConfig = getReferralConfig();
 
-    // Build query parameters
     const params = new URLSearchParams({
       inputMint,
       outputMint,
@@ -96,22 +82,14 @@ export async function getSwapQuote(
       taker: userWallet,
       slippageBps: slippage.toString(),
     });
-
-    // Add referral parameters if configured
     if (referralConfig) {
       params.append("referralAccount", referralConfig.account);
       params.append("referralFee", referralConfig.feeBps.toString());
     }
 
     const response = await fetch(
-      `${JUPITER_API_BASE}/ultra/v1/order?${params.toString()}`,
-      {
-        method: "GET",
-        headers: {
-          "x-api-key": apiKey,
-          "Content-Type": "application/json",
-        },
-      },
+      `${base}/api/jupiter/ultra/v1/order?${params.toString()}`,
+      { method: "GET", headers: { "Content-Type": "application/json" } },
     );
 
     if (!response.ok) {
@@ -226,14 +204,11 @@ export async function executeSwap(
       "base64",
     );
 
-    // 7. Execute via Jupiter
-    const apiKey = getApiKey();
-    const response = await fetch(`${JUPITER_API_BASE}/ultra/v1/execute`, {
+    // 7. Execute via Jupiter proxy (key server-side)
+    const base = getApiBase();
+    const response = await fetch(`${base}/api/jupiter/ultra/v1/execute`, {
       method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         signedTransaction,
         requestId: quote.requestId,

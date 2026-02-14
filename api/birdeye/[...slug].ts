@@ -407,6 +407,86 @@ async function historyPriceHandler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+async function pnlSummaryHandler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "GET")
+    return res.status(405).json({ error: "Method not allowed" });
+  try {
+    const apiKey = process.env.BIRDEYE_API_KEY;
+    if (!apiKey)
+      return res.status(503).json({ error: "BIRDEYE_API_KEY not configured" });
+    const wallet = (req.query.wallet ?? "").toString().trim();
+    const duration = (req.query.duration ?? "all").toString();
+    if (!wallet) return res.status(400).json({ error: "Missing wallet" });
+
+    const url = new URL(`${BIRDEYE_API_BASE}/wallet/v2/pnl/summary`);
+    url.searchParams.set("wallet", wallet);
+    url.searchParams.set("duration", duration);
+
+    const r = await fetch(url.toString(), {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": apiKey,
+        "x-chain": "solana",
+      },
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok)
+      return res.status(r.status >= 500 ? 502 : 400).json(data?.detail ?? data);
+    return res.status(200).json(data);
+  } catch (e: unknown) {
+    console.error("birdeye pnl-summary error:", e);
+    return res.status(500).json({
+      error: e instanceof Error ? e.message : "Internal server error",
+    });
+  }
+}
+
+async function tokenTxsHandler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "GET")
+    return res.status(405).json({ error: "Method not allowed" });
+  try {
+    const apiKey = process.env.BIRDEYE_API_KEY;
+    if (!apiKey)
+      return res.status(503).json({ error: "BIRDEYE_API_KEY not configured" });
+    const address = (req.query.address ?? "").toString().trim();
+    const limit = Math.min(Math.max(1, parseInt(String(req.query.limit ?? "100"), 10) || 100), 100);
+    const offset = Math.max(0, parseInt(String(req.query.offset ?? "0"), 10) || 0);
+    const sortBy = (req.query.sort_by ?? "block_unix_time").toString();
+    const sortType = (req.query.sort_type ?? "desc").toString();
+    const txType = (req.query.tx_type ?? "swap").toString();
+    const uiAmountMode = (req.query.ui_amount_mode ?? "scaled").toString();
+    if (!address) return res.status(400).json({ error: "Missing address" });
+
+    const url = new URL(`${BIRDEYE_API_BASE}/defi/v3/token/txs`);
+    url.searchParams.set("address", address);
+    url.searchParams.set("limit", String(limit));
+    url.searchParams.set("offset", String(offset));
+    url.searchParams.set("sort_by", sortBy);
+    url.searchParams.set("sort_type", sortType);
+    url.searchParams.set("tx_type", txType);
+    url.searchParams.set("ui_amount_mode", uiAmountMode);
+
+    const r = await fetch(url.toString(), {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": apiKey,
+        "x-chain": "solana",
+      },
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok)
+      return res.status(r.status >= 500 ? 502 : 400).json(data?.detail ?? data);
+    return res.status(200).json(data);
+  } catch (e: unknown) {
+    console.error("birdeye token-txs error:", e);
+    return res.status(500).json({
+      error: e instanceof Error ? e.message : "Internal server error",
+    });
+  }
+}
+
 const ROUTES: Record<
   string,
   (req: VercelRequest, res: VercelResponse) => Promise<void | VercelResponse>
@@ -416,6 +496,8 @@ const ROUTES: Record<
   "wallet-token-balance": walletTokenBalanceHandler,
   ohlcv: ohlcvHandler,
   "history-price": historyPriceHandler,
+  "pnl-summary": pnlSummaryHandler,
+  "token-txs": tokenTxsHandler,
 };
 
 export default async function handler(
@@ -429,7 +511,7 @@ export default async function handler(
   if (!routeHandler) {
     res.status(404).json({
       error: "Not found",
-      message: `Birdeye action '${action || ""}' not found. Use: search, token-overview, wallet-token-balance, ohlcv, history-price`,
+      message: `Birdeye action '${action || ""}' not found. Use: search, token-overview, wallet-token-balance, ohlcv, history-price, pnl-summary, token-txs`,
     });
     return;
   }

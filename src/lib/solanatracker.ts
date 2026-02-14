@@ -1,20 +1,6 @@
-// SolanaTracker Data API integration for Solana wallet analytics
+// SolanaTracker Data API - all requests proxied via /api/solanatracker so API key stays server-side
 import { apiCache } from "./cache";
-
-const SOLANATRACKER_API_BASE = "https://data.solanatracker.io";
-
-/**
- * Get SolanaTracker API key from environment
- */
-function getApiKey(): string {
-  const apiKey = import.meta.env.VITE_SOLANATRACKER_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "SolanaTracker API key not configured. Add VITE_SOLANATRACKER_API_KEY to .env",
-    );
-  }
-  return apiKey;
-}
+import { getApiBase } from "./utils";
 
 /**
  * Delay helper function
@@ -28,7 +14,7 @@ let lastRequestTime = 0;
 const MIN_INTERVAL_MS = 1000;
 
 /**
- * Make a request to SolanaTracker API with retry logic and exponential backoff.
+ * Make a request to SolanaTracker API via our proxy (no API key in client).
  * All requests go through a shared 1 req/sec throttle to respect rate limits.
  */
 async function solanatrackerRequest<T>(
@@ -49,8 +35,9 @@ async function solanatrackerRequest<T>(
     baseDelay = 1000,
   } = options;
 
-  const apiKey = getApiKey();
-  const url = new URL(`${SOLANATRACKER_API_BASE}${endpoint}`);
+  const base = getApiBase();
+  const path = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
+  const url = new URL(`${base}/api/solanatracker/${path}`);
 
   // Add query params for GET requests
   if (method === "GET" && params) {
@@ -73,10 +60,7 @@ async function solanatrackerRequest<T>(
     try {
       const fetchOptions: RequestInit = {
         method,
-        headers: {
-          "x-api-key": apiKey,
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
       };
 
       // Add body for POST requests

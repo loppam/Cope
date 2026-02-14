@@ -16,7 +16,7 @@ async function tokenOverviewHandler(
     return void res.status(405).json({ error: "Method not allowed" });
   try {
     const apiKey =
-      process.env.MORALIS_API_KEY || process.env.VITE_MORALIS_API_KEY;
+      process.env.MORALIS_API_KEY;
     if (!apiKey) {
       console.error("[moralis token-overview] MORALIS_API_KEY not configured");
       return void res.status(503).json({
@@ -136,7 +136,7 @@ async function searchHandler(
     return void res.status(405).json({ error: "Method not allowed" });
   try {
     const apiKey =
-      process.env.MORALIS_API_KEY || process.env.VITE_MORALIS_API_KEY;
+      process.env.MORALIS_API_KEY;
     if (!apiKey) {
       console.error("[moralis search] MORALIS_API_KEY not configured");
       return void res.status(503).json({
@@ -332,12 +332,58 @@ async function searchHandler(
   }
 }
 
+/** GET /api/moralis/profitability?address=0x...&chain=base|bsc - wallet profitability (PnL) */
+async function profitabilityHandler(
+  req: VercelRequest,
+  res: VercelResponse,
+): Promise<void> {
+  if (req.method !== "GET")
+    return void res.status(405).json({ error: "Method not allowed" });
+  try {
+    const apiKey = process.env.MORALIS_API_KEY;
+    if (!apiKey) {
+      return void res.status(503).json({ error: "MORALIS_API_KEY not configured" });
+    }
+    const address = (req.query.address ?? "").toString().trim();
+    const chainParam = (req.query.chain ?? "base").toString().toLowerCase();
+    const chain = toMoralisChain(chainParam);
+    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
+      return void res.status(400).json({ error: "Missing or invalid address" });
+    }
+    if (chainParam !== "base" && chainParam !== "bnb") {
+      return void res.status(400).json({ error: "Chain must be base or bnb" });
+    }
+    const r = await fetch(
+      `${MORALIS_API_BASE}/wallets/${address}/profitability?chain=${chain}&days=all`,
+      {
+        headers: {
+          accept: "application/json",
+          "X-API-Key": apiKey,
+        },
+      },
+    );
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      if (r.status === 429) {
+        return void res.status(429).json({ error: "Rate limited" });
+      }
+      return void res.status(r.status >= 500 ? 502 : 400).json(data);
+    }
+    return void res.status(200).json(data);
+  } catch (e: unknown) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    console.error("[moralis profitability] error", err.message);
+    return void res.status(500).json({ error: err.message || "Internal server error" });
+  }
+}
+
 const ROUTES: Record<
   string,
   (req: VercelRequest, res: VercelResponse) => Promise<void | VercelResponse>
 > = {
   "token-overview": tokenOverviewHandler,
   search: searchHandler,
+  profitability: profitabilityHandler,
 };
 
 export default async function handler(
@@ -351,7 +397,7 @@ export default async function handler(
   if (!routeHandler) {
     res.status(404).json({
       error: "Not found",
-      message: `Moralis action '${action || ""}' not found. Use: token-overview, search`,
+      message: `Moralis action '${action || ""}' not found. Use: token-overview, search, profitability`,
     });
     return;
   }

@@ -26,6 +26,7 @@ import { db } from "@/lib/firebase";
 import { apiCache, UI_CACHE_TTL_MS } from "@/lib/cache";
 import { toast } from "sonner";
 import { DocumentHead } from "@/components/DocumentHead";
+import { PullToRefresh } from "@/components/PullToRefresh";
 
 export function Alerts() {
   const navigate = useNavigate();
@@ -37,6 +38,7 @@ export function Alerts() {
   const [filter, setFilter] = useState<
     "all" | "unread" | "buy" | "sell" | "swap"
   >("all");
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   // One-time fetch + refetch on focus/interval (cuts Firestore reads vs onSnapshot)
   const REFETCH_INTERVAL_MS = 60 * 1000;
@@ -49,6 +51,7 @@ export function Alerts() {
     }
 
     const cacheKey = `notifications_${user.uid}`;
+    if (refreshTrigger > 0) apiCache.clear(cacheKey);
     const cached = apiCache.get<WalletNotification[]>(cacheKey);
     if (cached) {
       setNotifications(cached);
@@ -118,7 +121,7 @@ export function Alerts() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       clearInterval(intervalId);
     };
-  }, [user, isAuthenticated]);
+  }, [user, isAuthenticated, refreshTrigger]);
 
   // Request push notification permission on first visit
   useEffect(() => {
@@ -266,13 +269,16 @@ export function Alerts() {
   const unreadNotifications = filteredNotifications.filter((n) => !n.read);
   const readNotifications = filteredNotifications.filter((n) => n.read);
 
+  const handlePullRefresh = () => setRefreshTrigger((t) => t + 1);
+
   return (
-    <>
-      <DocumentHead
-        title="Alerts"
-        description="Manage your trading alerts and notifications on COPE"
-      />
-      <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E] p-4 sm:p-6 pb-8">
+    <PullToRefresh onRefresh={handlePullRefresh}>
+      <>
+        <DocumentHead
+          title="Alerts"
+          description="Manage your trading alerts and notifications on COPE"
+        />
+        <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E] p-4 sm:p-6 pb-8">
       <div className="max-w-[720px] mx-auto">
         <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
@@ -546,6 +552,7 @@ export function Alerts() {
         )}
       </div>
     </div>
-    </>
+      </>
+    </PullToRefresh>
   );
 }

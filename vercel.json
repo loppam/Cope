@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/log-balance",
       "schedule": "5 0 * * *"
+    },
+    {
+      "path": "/api/trending-tokens",
+      "schedule": "*/30 * * * *"
     }
   ],
   "rewrites": [

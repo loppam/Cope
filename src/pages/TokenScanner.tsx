@@ -26,6 +26,8 @@ import {
   Shield,
   AlertCircle,
   ArrowRight,
+  ArrowDownRight,
+  ArrowUpRight,
   Twitter,
   MessageCircle,
   Plus,
@@ -589,8 +591,14 @@ function DiscoverTabContent() {
   );
 }
 
+function looksLikeContractAddress(text: string): boolean {
+  const t = text.trim();
+  return t.length >= 32 && /^[A-Za-z0-9_-]+$/.test(t);
+}
+
 export function TokenScanner() {
   const location = useLocation();
+  const navigate = useNavigate();
   const initialState = (location.state as { tab?: ScannerTab })?.tab;
   const searchParams = new URLSearchParams(location.search);
   const tabParam = searchParams.get("tab");
@@ -611,8 +619,8 @@ export function TokenScanner() {
   const analysisSteps =
     chainType === "evm" ? ANALYSIS_STEPS_EVM : ANALYSIS_STEPS_SOLANA;
 
-  const analyzeToken = useCallback(async () => {
-    const addr = tokenAddress.trim();
+  const analyzeToken = useCallback(async (addressOverride?: string) => {
+    const addr = (addressOverride ?? tokenAddress).trim();
     if (!addr || addr.length < 32) return;
 
     setLoading(true);
@@ -668,6 +676,18 @@ export function TokenScanner() {
     }
   }, [tokenAddress]);
 
+  const handleTokenAddressPaste = useCallback(
+    (e: React.ClipboardEvent<HTMLInputElement>) => {
+      const pasted = e.clipboardData.getData("text").trim();
+      if (!pasted || !looksLikeContractAddress(pasted)) return;
+      e.preventDefault();
+      setTokenAddress(pasted);
+      setError(null);
+      setTimeout(() => analyzeToken(pasted), 0);
+    },
+    [analyzeToken],
+  );
+
   useEffect(() => {
     if (!analysis || loading) return;
     setCurrentStep(0);
@@ -717,17 +737,17 @@ export function TokenScanner() {
       <h1 className="mb-4 text-xl font-bold text-white">Token Scanner</h1>
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ScannerTab)} className="w-full">
-        <TabsList className="w-full grid grid-cols-2 mb-4 bg-white/5 border border-white/10 p-1 rounded-xl min-w-0 min-h-[44px] overflow-visible">
+        <TabsList className="w-full grid grid-cols-2 mb-4 bg-white/[0.06] border border-white/15 p-1.5 rounded-2xl min-w-0 min-h-[48px] overflow-visible shadow-inner">
           <TabsTrigger
             value="token"
-            className="data-[state=active]:bg-accent-primary/20 data-[state=active]:text-accent-primary data-[state=active]:border-accent-primary/30 rounded-lg py-2.5 px-2 min-w-0 max-w-full text-xs sm:text-sm overflow-hidden justify-center gap-1 sm:gap-2 min-h-[44px]"
+            className="data-[state=active]:bg-[#12d585]/15 data-[state=active]:text-[#12d585] data-[state=active]:border-[#12d585]/40 data-[state=active]:shadow-sm rounded-xl border border-transparent py-2.5 px-3 min-w-0 max-w-full text-xs sm:text-sm overflow-hidden justify-center gap-1.5 sm:gap-2 min-h-[44px] font-medium transition-all duration-200"
           >
             <Target className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
             <span className="truncate">Token</span>
           </TabsTrigger>
           <TabsTrigger
             value="discover"
-            className="data-[state=active]:bg-accent-primary/20 data-[state=active]:text-accent-primary data-[state=active]:border-accent-primary/30 rounded-lg py-2.5 px-2 min-w-0 max-w-full text-xs sm:text-sm overflow-hidden justify-center gap-1 sm:gap-2 min-h-[44px]"
+            className="data-[state=active]:bg-[#12d585]/15 data-[state=active]:text-[#12d585] data-[state=active]:border-[#12d585]/40 data-[state=active]:shadow-sm rounded-xl border border-transparent py-2.5 px-3 min-w-0 max-w-full text-xs sm:text-sm overflow-hidden justify-center gap-1.5 sm:gap-2 min-h-[44px] font-medium text-white/70 transition-all duration-200"
           >
             <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
             <span className="truncate">Discover</span>
@@ -741,8 +761,9 @@ export function TokenScanner() {
             type="text"
             value={tokenAddress}
             onChange={(e) => setTokenAddress(e.target.value)}
+            onPaste={handleTokenAddressPaste}
             onKeyDown={(e) => e.key === "Enter" && analyzeToken()}
-            placeholder="Token address (Solana, Base, or BNB)"
+            placeholder="Paste token address or enter (Solana, Base, BNB)"
             className="min-h-[44px] flex-1 rounded-lg bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-[#12d585]"
           />
           <button
@@ -884,6 +905,44 @@ export function TokenScanner() {
                 ) : (
                   <Copy className="h-4 w-4 text-white/50" />
                 )}
+              </button>
+            </div>
+
+            <div className="flex gap-3 mt-4">
+              <button
+                type="button"
+                onClick={() =>
+                  navigate("/app/trade", {
+                    state: {
+                      mint: tokenData.contractAddress,
+                      chain: tokenData.chain === "bsc" ? "bnb" : (tokenData.chain || "solana"),
+                      fromFeed: true,
+                    },
+                  })
+                }
+                data-tap-haptic
+                className="tap-press flex-1 min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl bg-[#12d585] font-semibold text-black px-4 py-3"
+              >
+                <ArrowDownRight className="w-4 h-4" />
+                Buy
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate("/app/trade", {
+                    state: {
+                      mint: tokenData.contractAddress,
+                      chain: tokenData.chain === "bsc" ? "bnb" : (tokenData.chain || "solana"),
+                      fromFeed: true,
+                      mode: "sell",
+                    },
+                  })
+                }
+                data-tap-haptic
+                className="tap-press flex-1 min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl border border-white/25 bg-white/10 font-semibold text-white px-4 py-3 hover:bg-white/15 transition-colors"
+              >
+                <ArrowUpRight className="w-4 h-4" />
+                Sell
               </button>
             </div>
           </motion.div>

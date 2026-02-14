@@ -264,35 +264,53 @@ export function Trade() {
             headers: { Authorization: `Bearer ${tokenId}` },
           });
           const data = await res.json();
-          if (res.ok && data.tokens) {
-            const match = (data.tokens as Array<{ mint: string; amount: number }>).find(
-              (t) => t.mint === token.mint
-            );
-            setTokenBalance(match?.amount ?? 0);
-          } else {
-            setTokenBalance(0);
+          let evmBal = 0;
+          if (res.ok && data.evmAddress) {
+            const tokens = (data.tokens as Array<{ mint: string; amount: number }>) ?? [];
+            const match = tokens.find((t) => t.mint === token.mint);
+            evmBal = match?.amount ?? 0;
+            if (evmBal === 0) {
+              if (token.mint === "base-eth") evmBal = data.base?.native ?? 0;
+              else if (token.mint === "bnb-bnb") evmBal = data.bnb?.native ?? 0;
+              else if (token.mint === "base-usdc") evmBal = data.base?.usdc ?? 0;
+              else if (token.mint === "bnb-usdc") evmBal = data.bnb?.usdc ?? 0;
+            }
           }
+          setTokenBalance(evmBal);
           const usdcBalances = await getWalletTokenBalance(
             userProfile.walletAddress,
             [SOLANA_USDC_MINT],
           );
           if (!cancelled) setUsdcBalance(usdcBalances[SOLANA_USDC_MINT] ?? 0);
         } else {
-          const mints =
-            token?.mint && !isEvmToken
-              ? [token.mint, SOLANA_USDC_MINT]
-              : [SOLANA_USDC_MINT];
-          const balances = await getWalletTokenBalance(
-            userProfile.walletAddress,
-            mints,
-          );
-          if (!cancelled) {
-            if (token?.mint && !isEvmToken) {
-              setTokenBalance(balances[token.mint] ?? 0);
-            } else {
-              setTokenBalance(0);
+          // SOL is native – use RPC balance so trade terminal matches open positions. Other SPL tokens use Birdeye.
+          const isSol = token?.mint === SOL_MINT;
+          if (isSol) {
+            const [solBal, usdcBalances] = await Promise.all([
+              getSolBalance(userProfile.walletAddress),
+              getWalletTokenBalance(userProfile.walletAddress, [SOLANA_USDC_MINT]),
+            ]);
+            if (!cancelled) {
+              setTokenBalance(solBal);
+              setUsdcBalance(usdcBalances[SOLANA_USDC_MINT] ?? 0);
             }
-            setUsdcBalance(balances[SOLANA_USDC_MINT] ?? 0);
+          } else {
+            const mints =
+              token?.mint && !isEvmToken
+                ? [token.mint, SOLANA_USDC_MINT]
+                : [SOLANA_USDC_MINT];
+            const balances = await getWalletTokenBalance(
+              userProfile.walletAddress,
+              mints,
+            );
+            if (!cancelled) {
+              if (token?.mint && !isEvmToken) {
+                setTokenBalance(balances[token.mint] ?? 0);
+              } else {
+                setTokenBalance(0);
+              }
+              setUsdcBalance(balances[SOLANA_USDC_MINT] ?? 0);
+            }
           }
         }
         if (!cancelled) setSellAmount("");
@@ -528,6 +546,13 @@ export function Trade() {
     if (isNaN(amountNum) || amountNum <= 0) {
       toast.error("Invalid amount", {
         description: "Please enter a valid amount",
+      });
+      return;
+    }
+
+    if (usdcBalance !== null && amountNum > usdcBalance) {
+      toast.error("Not enough USDC", {
+        description: "Insufficient USDC balance for this buy amount",
       });
       return;
     }
@@ -1322,23 +1347,12 @@ export function Trade() {
                 {token && (
                   <div className="pt-4 border-t border-white/6">
                     <p className="text-sm text-white/60 mb-2 truncate">
-                      Your Position:{" "}
                       {loadingBalance
-                        ? "..."
-                        : `${tokenBalance.toLocaleString(undefined, {
+                        ? "Your position: ..."
+                        : `Your position: ${sellableBalance.toLocaleString(undefined, {
                             minimumFractionDigits: 0,
                             maximumFractionDigits: 6,
                           })} ${token.symbol}`}
-                      {sellableBalance < tokenBalance && (
-                        <span className="block mt-0.5 text-white/40">
-                          Max sellable: {sellableBalance.toFixed(6)}{" "}
-                          {token?.mint === "base-eth"
-                            ? "(0.0005 reserved for gas)"
-                            : token?.mint === "bnb-bnb"
-                              ? "(0.001 reserved for gas)"
-                              : "(0.005 reserved for gas)"}
-                        </span>
-                      )}
                     </p>
                     <label className="block text-sm font-medium mb-2">
                       Sell Amount ({token.symbol})

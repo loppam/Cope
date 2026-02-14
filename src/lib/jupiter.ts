@@ -1,35 +1,19 @@
-// Jupiter API integration for token search, info, and prices
+// Jupiter API - all requests proxied via /api/jupiter so API key stays server-side
 import type {
   TokenSearchResult,
   TokenSearchResponse,
   TokenInfoResponse,
 } from "./solanatracker";
+import { getApiBase } from "./utils";
 
-const JUPITER_API_BASE = "https://api.jup.ag";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 
-/**
- * Get Jupiter API key from environment
- */
-function getApiKey(): string {
-  const apiKey = import.meta.env.VITE_JUPITER_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "Jupiter API key not configured. Add VITE_JUPITER_API_KEY to .env",
-    );
-  }
-  return apiKey;
-}
-
-/**
- * Delay helper function
- */
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
- * Make a request to Jupiter API with retry logic and exponential backoff
+ * Call Jupiter API via our proxy (no API key in client)
  */
 async function jupiterRequest<T>(
   endpoint: string,
@@ -49,10 +33,10 @@ async function jupiterRequest<T>(
     baseDelay = 1000,
   } = options;
 
-  const apiKey = getApiKey();
-  const url = new URL(`${JUPITER_API_BASE}${endpoint}`);
+  const base = getApiBase();
+  const path = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
+  const url = new URL(`${base}/api/jupiter/${path}`);
 
-  // Add query params for GET requests
   if (method === "GET" && params) {
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined && value !== null) {
@@ -65,13 +49,8 @@ async function jupiterRequest<T>(
     try {
       const fetchOptions: RequestInit = {
         method,
-        headers: {
-          "x-api-key": apiKey,
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
       };
-
-      // Add body for POST requests
       if (method === "POST" && body) {
         fetchOptions.body = JSON.stringify(body);
       }

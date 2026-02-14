@@ -1,10 +1,9 @@
 /**
  * Moralis API client for EVM wallet profitability (PnL).
- * Used for Base and BNB chain positions in Profile open positions.
- * @see https://docs.moralis.com/web3-data-api/evm/reference/wallet-api/get-wallet-profitability
+ * Proxied via /api/moralis/profitability so API key stays server-side.
  */
 
-const MORALIS_API_BASE = "https://deep-index.moralis.io/api/v2.2";
+import { getApiBase } from "./utils";
 
 // EVM token addresses (lowercase) mapped to our mint IDs
 const BASE_USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
@@ -39,10 +38,6 @@ export interface EvmPnlByMint {
   unrealized?: number;
 }
 
-function getApiKey(): string | null {
-  return import.meta.env.VITE_MORALIS_API_KEY || null;
-}
-
 function mintFromTokenAddress(
   tokenAddress: string,
   chain: "base" | "bsc",
@@ -57,28 +52,18 @@ function mintFromTokenAddress(
 }
 
 /**
- * Fetch wallet profitability from Moralis for a given EVM chain.
- * Returns PnL data keyed by our mint IDs (base-usdc, base-eth, bnb-usdc, bnb-bnb).
+ * Fetch wallet profitability via /api/moralis/profitability (key server-side).
  */
 export async function getWalletProfitability(
   evmAddress: string,
   chain: "base" | "bsc",
 ): Promise<EvmPnlByMint[]> {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    return [];
-  }
-
   const chainParam = chain === "base" ? "base" : "bsc";
-  const url = `${MORALIS_API_BASE}/wallets/${evmAddress}/profitability?chain=${chainParam}&days=all`;
+  const base = getApiBase();
+  const url = `${base}/api/moralis/profitability?address=${encodeURIComponent(evmAddress)}&chain=${chainParam}`;
 
   try {
-    const res = await fetch(url, {
-      headers: {
-        accept: "application/json",
-        "X-API-Key": apiKey,
-      },
-    });
+    const res = await fetch(url);
 
     if (!res.ok) {
       if (res.status === 429) {
@@ -99,10 +84,7 @@ export async function getWalletProfitability(
       if (!mint) continue;
 
       const realized = t.realized_profit_usd ?? 0;
-      const totalInvested = t.total_usd_invested ?? 0;
       const pnlPercent = t.realized_profit_percentage;
-      // Moralis gives realized; for open positions unrealized may not be in response.
-      // Use realized as primary PnL; pnlPercent is the profit margin.
       const pnl = realized;
 
       output.push({

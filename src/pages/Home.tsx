@@ -42,26 +42,25 @@ import { SOL_MINT, SOLANA_USDC_MINT } from "@/lib/constants";
 import { apiCache, UI_CACHE_TTL_MS } from "@/lib/cache";
 import { toast } from "sonner";
 import { DocumentHead } from "@/components/DocumentHead";
+import { PullToRefresh } from "@/components/PullToRefresh";
 import type { TrendingToken } from "../../api/trending-tokens";
 
 type TabId = "plays" | "trending";
 type FilterId = "star" | "verified" | "trending" | "held";
 
-const TRENDING_PAGE_SIZE = 20;
+const TRENDING_FETCH_CAP = 25;
+const TRENDING_REFETCH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
 export function Home() {
   const navigate = useNavigate();
   const { user, userProfile, watchlist } = useAuth();
   const [notifications, setNotifications] = useState<WalletNotification[]>([]);
   const [trending, setTrending] = useState<TrendingToken[]>([]);
-  const [trendingTotal, setTrendingTotal] = useState<number | null>(null);
-  const [trendingNextOffset, setTrendingNextOffset] = useState(0);
   const [trendingLoading, setTrendingLoading] = useState(true);
-  const [trendingLoadingMore, setTrendingLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>("trending");
   const [activeFilter, setActiveFilter] = useState<FilterId>("trending");
-  const sentinelRef = useRef<HTMLDivElement>(null);
+  const [refreshTrendingTrigger, setRefreshTrendingTrigger] = useState(0);
 
   // Balance header (when wallet connected)
   const [totalBalance, setTotalBalance] = useState<number | null>(null);
@@ -321,92 +320,46 @@ export function Home() {
   const trendingSortBy =
     activeFilter === "verified" || activeFilter === "held" ? "liquidity" : "rank";
 
-  // Fetch trending tokens (Birdeye, multi-chain, paginated). Cache-first for first page.
+  // Fetch trending tokens (Birdeye, multi-chain). Cap at TRENDING_FETCH_CAP. Refetch every 30 mins.
   useEffect(() => {
     let cancelled = false;
     const base = getApiBase();
-    const cacheKey = `trending_tokens_page0_${trendingSortBy}`;
-    const cached = apiCache.get<{
-      tokens: TrendingToken[];
-      total: number;
-      nextOffset: number;
-    }>(cacheKey);
+    const cacheKey = `trending_tokens_${trendingSortBy}`;
+    if (refreshTrendingTrigger > 0) apiCache.clear(cacheKey);
+    const cached = apiCache.get<{ tokens: TrendingToken[] }>(cacheKey);
     if (cached?.tokens?.length) {
       setTrending(cached.tokens);
-      setTrendingTotal(cached.total ?? null);
-      setTrendingNextOffset(cached.nextOffset ?? 0);
       setTrendingLoading(false);
     } else {
       setTrendingLoading(true);
     }
 
-    async function fetchTrending(offset = 0) {
+    async function fetchTrending() {
       try {
         const res = await fetch(
-          `${base}/api/trending-tokens?offset=${offset}&limit=${TRENDING_PAGE_SIZE}&sort_by=${trendingSortBy}&interval=4h`,
+          `${base}/api/trending-tokens?offset=0&limit=${TRENDING_FETCH_CAP}&sort_by=${trendingSortBy}&interval=4h`,
         );
         const data = await res.json().catch(() => ({}));
         if (cancelled) return;
-        const tokens = Array.isArray(data?.tokens) ? data.tokens : [];
-        const total = typeof data?.total === "number" ? data.total : 0;
-        const nextOffset = typeof data?.nextOffset === "number" ? data.nextOffset : offset + tokens.length;
-        if (offset === 0) {
-          setTrending(tokens);
-          setTrendingTotal(total);
-          setTrendingNextOffset(nextOffset);
-          if (tokens.length > 0) {
-            apiCache.set(cacheKey, { tokens, total, nextOffset }, UI_CACHE_TTL_MS);
-          }
-        } else {
-          setTrending((prev) => [...prev, ...tokens]);
-          setTrendingNextOffset(nextOffset);
+        const tokens = Array.isArray(data?.tokens) ? data.tokens.slice(0, TRENDING_FETCH_CAP) : [];
+        setTrending(tokens);
+        if (tokens.length > 0) {
+          apiCache.set(cacheKey, { tokens }, UI_CACHE_TTL_MS);
         }
       } catch (error) {
         console.error("Error fetching trending tokens:", error);
       } finally {
-        if (!cancelled) {
-          if (offset === 0) setTrendingLoading(false);
-          else setTrendingLoadingMore(false);
-        }
+        if (!cancelled) setTrendingLoading(false);
       }
     }
 
-    fetchTrending(0);
+    fetchTrending();
+    const intervalId = setInterval(fetchTrending, TRENDING_REFETCH_INTERVAL_MS);
     return () => {
       cancelled = true;
+      clearInterval(intervalId);
     };
-  }, [trendingSortBy]);
-
-  const loadMoreTrending = useCallback(() => {
-    if (trendingLoadingMore || trendingLoading) return;
-    const total = trendingTotal ?? 0;
-    if (trending.length >= total) return;
-    setTrendingLoadingMore(true);
-    const base = getApiBase();
-    const offset = trendingNextOffset;
-    fetch(
-      `${base}/api/trending-tokens?offset=${offset}&limit=${TRENDING_PAGE_SIZE}&sort_by=${trendingSortBy}&interval=4h`,
-    )
-      .then((res) => res.json().catch(() => ({})))
-      .then((data) => {
-        const tokens = Array.isArray(data?.tokens) ? data.tokens : [];
-        const nextOffset =
-          typeof data?.nextOffset === "number"
-            ? data.nextOffset
-            : offset + tokens.length;
-        setTrending((prev) => [...prev, ...tokens]);
-        setTrendingNextOffset(nextOffset);
-      })
-      .catch((err) => console.error("Error loading more trending:", err))
-      .finally(() => setTrendingLoadingMore(false));
-  }, [
-    trendingNextOffset,
-    trendingTotal,
-    trending.length,
-    trendingLoadingMore,
-    trendingLoading,
-    trendingSortBy,
-  ]);
+  }, [trendingSortBy, refreshTrendingTrigger]);
 
   const formatTime = (timestamp: any) => {
     if (!timestamp) return "Just now";
@@ -543,36 +496,19 @@ export function Home() {
     }
   }, [trending, activeFilter]);
 
-  // Infinite scroll: fetch more trending when sentinel is visible
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel || activeTab !== "trending") return;
-    const total = trendingTotal ?? 0;
-    if (trending.length >= total || trendingLoadingMore || trendingLoading) return;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) loadMoreTrending();
-      },
-      { rootMargin: "200px", threshold: 0.1 },
-    );
-    obs.observe(sentinel);
-    return () => obs.disconnect();
-  }, [
-    activeTab,
-    trending.length,
-    trendingTotal,
-    trendingLoadingMore,
-    trendingLoading,
-    loadMoreTrending,
-  ]);
+  const handlePullRefresh = useCallback(async () => {
+    window.dispatchEvent(new CustomEvent("cope-refresh-balance"));
+    setRefreshTrendingTrigger((t) => t + 1);
+  }, []);
 
   return (
-    <>
-      <DocumentHead
-        title="Home"
-        description="Trending tokens and your followed plays on COPE"
-      />
-      <div className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8">
+    <PullToRefresh onRefresh={handlePullRefresh}>
+      <>
+        <DocumentHead
+          title="Home"
+          description="Trending tokens and your followed plays on COPE"
+        />
+        <div className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8">
         {/* Wallet balance header – when connected */}
         {walletConnected && walletAddress && (
           <div className="mb-5 flex items-start justify-between gap-4">
@@ -795,17 +731,6 @@ export function Home() {
                     <ChevronRight className="w-5 h-5 text-white/30 flex-shrink-0" />
                   </motion.button>
                 ))}
-                {/* Sentinel for infinite scroll + load-more spinner */}
-                {trendingTotal != null &&
-                  trending.length < trendingTotal &&
-                  !trendingLoading && (
-                    <div ref={sentinelRef} className="h-4 flex-shrink-0" aria-hidden />
-                  )}
-                {trendingLoadingMore && (
-                  <div className="flex justify-center py-4">
-                    <Loader2 className="w-6 h-6 animate-spin text-accent-primary" />
-                  </div>
-                )}
               </motion.div>
             )}
           </>
@@ -970,6 +895,7 @@ export function Home() {
           </Card>
         </div>
       </div>
-    </>
+      </>
+    </PullToRefresh>
   );
 }

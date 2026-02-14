@@ -2,14 +2,14 @@
  * GET /api/trending-tokens
  * Fetches trending tokens from Birdeye (defi/token_trending).
  * Multi-chain: fetches solana, base, bsc and merges (round-robin). Single-chain if chain param set.
- * Query: offset (default 0), limit (default 20, max 20), chain (solana|base|bsc|all), sort_by (rank|volumeUSD|liquidity), interval (1h|4h|24h).
+ * Query: offset (default 0), limit (default 25, max 25), chain (solana|base|bsc|all), sort_by (rank|volumeUSD|liquidity), interval (1h|4h|24h).
  * Returns { tokens, total, nextOffset }. Requires BIRDEYE_API_KEY.
  */
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const BIRDEYE_API_BASE = "https://public-api.birdeye.so";
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 20;
+const DEFAULT_LIMIT = 25;
+const MAX_LIMIT = 25;
 const CHAINS = ["solana", "base", "bsc"] as const;
 const SORT_BY_VALUES = ["rank", "volumeUSD", "liquidity"] as const;
 const INTERVAL_VALUES = ["1h", "4h", "24h"] as const;
@@ -200,7 +200,7 @@ export default async function handler(
         Math.min(solanaRes.total, baseRes.total, bscRes.total);
       const nextOffset = offset + perChainLimit;
 
-      res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=60");
+      res.setHeader("Cache-Control", "public, s-maxage=1800, stale-while-revalidate=300");
       res.status(200).json({ tokens, total, nextOffset });
       return;
     }
@@ -216,7 +216,7 @@ export default async function handler(
     );
     const nextOffset = offset + tokens.length;
 
-    res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=60");
+    res.setHeader("Cache-Control", "public, s-maxage=1800, stale-while-revalidate=300");
     res.status(200).json({ tokens, total, nextOffset });
   } catch (error) {
     console.error("[trending-tokens]", error);

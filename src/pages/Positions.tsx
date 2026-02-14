@@ -21,7 +21,20 @@ import { getSolBalance, getUsdcBalance } from "@/lib/rpc";
 import { fetchNativePrices } from "@/lib/coingecko";
 import { apiCache, UI_CACHE_TTL_MS } from "@/lib/cache";
 import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
+import { PullToRefresh } from "@/components/PullToRefresh";
 import { toast } from "sonner";
+
+const SOL_RESERVE = 0.005;
+const BASE_ETH_RESERVE = 0.0005;
+const BNB_RESERVE = 0.001;
+
+function sellableAmount(position: { mint: string; amount: number }): number {
+  if (position.mint === SOL_MINT || position.mint === "So11111111111111111111111111111111111111111")
+    return Math.max(0, position.amount - SOL_RESERVE);
+  if (position.mint === "base-eth") return Math.max(0, position.amount - BASE_ETH_RESERVE);
+  if (position.mint === "bnb-bnb") return Math.max(0, position.amount - BNB_RESERVE);
+  return position.amount;
+}
 
 type ChainTag = "solana" | "base" | "bnb";
 
@@ -381,7 +394,12 @@ export function Positions() {
     );
   }
 
+  const handlePullRefresh = async () => {
+    if (walletAddress) await fetchPositions(true);
+  };
+
   return (
+    <PullToRefresh onRefresh={handlePullRefresh}>
     <div className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8">
       <div className="mb-6 sm:mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
@@ -519,32 +537,32 @@ export function Positions() {
                           )}
                         </div>
                         <p className="text-xs sm:text-sm text-white/50 truncate">
-                          {position.symbol} • {position.amount.toLocaleString()}
+                          {sellableAmount(position).toLocaleString(undefined, {
+                            minimumFractionDigits: 0,
+                            maximumFractionDigits: position.symbol === "SOL" || position.symbol === "ETH" || position.symbol === "BNB" ? 4 : 2,
+                          })}{" "}
+                          {position.symbol}
                         </p>
                       </div>
                     </div>
                     <div className="text-right flex-shrink-0">
-                      {/* Token value is already in USD from API - display directly */}
-                      {/* SOL value is calculated separately */}
                       <p className="font-semibold">
                         {formatCurrency(position.value)}
                       </p>
-                      {!isSOL && !isUSDC && (
-                        <p
-                          className={`text-sm flex items-center gap-1 justify-end ${
-                            position.pnl >= 0
-                              ? "text-[#12d585]"
-                              : "text-[#FF4757]"
-                          }`}
-                        >
-                          {position.pnl >= 0 ? (
-                            <TrendingUp className="w-3 h-3" />
-                          ) : (
-                            <TrendingDown className="w-3 h-3" />
-                          )}
-                          {formatPercentage(position.pnlPercent)}
-                        </p>
-                      )}
+                      <p
+                        className={`text-sm flex items-center gap-1 justify-end ${
+                          position.pnl >= 0
+                            ? "text-[#12d585]"
+                            : "text-[#FF4757]"
+                        }`}
+                      >
+                        {position.pnl >= 0 ? (
+                          <TrendingUp className="w-3 h-3" />
+                        ) : (
+                          <TrendingDown className="w-3 h-3" />
+                        )}
+                        {formatPercentage(position.pnlPercent)}
+                      </p>
                     </div>
                   </div>
 
@@ -623,5 +641,6 @@ export function Positions() {
         )}
       </div>
     </div>
+    </PullToRefresh>
   );
 }

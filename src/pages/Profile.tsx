@@ -34,6 +34,7 @@ import {
   AlertDialogDescription,
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
+import { PullToRefresh } from "@/components/PullToRefresh";
 import { shortenAddress } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { getUsdcBalance } from "@/lib/rpc";
@@ -630,18 +631,24 @@ export function Profile() {
     });
   }, [openPositions]);
 
+  const handlePullRefresh = async () => {
+    if (walletAddress) await fetchBalance();
+    setRefreshTrigger((k) => k + 1);
+  };
+
   return (
-    <>
-      <DocumentHead
-        title="Profile"
-        description="Your COPE profile, wallet, positions, and settings"
-      />
-      <motion.div
-        className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8"
-        variants={container}
-        initial="initial"
-        animate="animate"
-      >
+    <PullToRefresh onRefresh={handlePullRefresh}>
+      <>
+        <DocumentHead
+          title="Profile"
+          description="Your COPE profile, wallet, positions, and settings"
+        />
+        <motion.div
+          className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8"
+          variants={container}
+          initial="initial"
+          animate="animate"
+        >
       <motion.div className="mb-6 flex items-center justify-between" variants={item}>
         <h1 className="text-2xl font-bold">Profile</h1>
         <button
@@ -1372,5 +1379,6 @@ export function Profile() {
       </motion.div>
     </motion.div>
     </>
+    </PullToRefresh>
   );
 }

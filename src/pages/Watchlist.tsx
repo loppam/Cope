@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { shortenAddress } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import { PullToRefresh } from "@/components/PullToRefresh";
 import { getUserProfile } from "@/lib/auth";
 import { getFollowersList, getFollowersCount } from "@/lib/profile";
 import { toast } from "sonner";
@@ -68,6 +69,7 @@ export function Watchlist() {
     >
   >({});
   const [followersLoading, setFollowersLoading] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const following = watchlist.filter(
     (w): w is WatchedWallet & { uid: string } =>
@@ -99,7 +101,7 @@ export function Watchlist() {
       setFollowingProfiles(profiles);
     };
     load();
-  }, [followingUids.join(",")]);
+  }, [followingUids.join(","), refreshTrigger]);
 
   useEffect(() => {
     if (!user) return;
@@ -108,7 +110,7 @@ export function Watchlist() {
       .then((token) => getFollowersCount(token))
       .then(setFollowersCount)
       .catch(() => setFollowersCount(0));
-  }, [user]);
+  }, [user, refreshTrigger]);
 
   useEffect(() => {
     if (activeTab !== "followers" || !user) return;
@@ -119,7 +121,7 @@ export function Watchlist() {
       .then(setFollowersList)
       .catch(() => setFollowersList([]))
       .finally(() => setFollowersLoading(false));
-  }, [activeTab, user]);
+  }, [activeTab, user, refreshTrigger]);
 
   const followersUids = followersList.map((f) => f.uid);
   useEffect(() => {
@@ -144,7 +146,7 @@ export function Watchlist() {
       setFollowersProfiles(profiles);
     };
     load();
-  }, [followersUids.join(",")]);
+  }, [followersUids.join(","), refreshTrigger]);
 
   const getGmgnLink = (address: string) =>
     `https://gmgn.ai/sol/address/${address}`;
@@ -267,13 +269,16 @@ export function Watchlist() {
     );
   }
 
+  const handlePullRefresh = () => setRefreshTrigger((t) => t + 1);
+
   return (
-    <>
-      <DocumentHead
-        title="Social"
-        description="Follow traders and manage your watchlist on COPE"
-      />
-      <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E]">
+    <PullToRefresh onRefresh={handlePullRefresh}>
+      <>
+        <DocumentHead
+          title="Social"
+          description="Follow traders and manage your watchlist on COPE"
+        />
+        <div className="min-h-screen bg-gradient-to-b from-[#000000] to-[#0B3D2E]">
       <div className="p-4">
         <BackButton onClick={() => navigate(-1)} />
       </div>
@@ -787,6 +792,7 @@ export function Watchlist() {
         }
       </div>
     </div>
-    </>
+      </>
+    </PullToRefresh>
   );
 }

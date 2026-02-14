@@ -1,93 +1,38 @@
-// Solana RPC utilities for direct blockchain queries
-// Use RPC for real-time data that doesn't need API credits
-import { Connection, PublicKey, ParsedAccountData } from '@solana/web3.js';
+// Solana RPC utilities - all calls proxied through /api/rpc so API keys stay server-side
+import { getApiBase } from "./utils";
 
-// Get RPC endpoint from environment or use public endpoint
-function getRpcUrl(): string {
-  // Priority 1: Use SolanaTracker RPC API key if available (separate from API key)
-  const solanatrackerRpcApiKey = import.meta.env.VITE_SOLANATRACKER_RPC_API_KEY;
-  if (solanatrackerRpcApiKey) {
-    return `https://rpc-mainnet.solanatracker.io/?api_key=${solanatrackerRpcApiKey}`;
+async function rpcFetch<T>(action: string, address: string): Promise<T> {
+  const base = getApiBase();
+  const url = `${base}/api/rpc?action=${encodeURIComponent(action)}&address=${encodeURIComponent(address)}`;
+  const res = await fetch(url);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = (data as { error?: string }).error ?? `RPC error: ${res.status}`;
+    throw new Error(msg);
   }
-  
-  // Priority 2: Use SolanaTracker API key as fallback (if RPC key not set)
-  const solanatrackerApiKey = import.meta.env.VITE_SOLANATRACKER_API_KEY;
-  if (solanatrackerApiKey) {
-    return `https://rpc-mainnet.solanatracker.io/?api_key=${solanatrackerApiKey}`;
-  }
-  
-  // Priority 3: Use custom RPC URL if specified
-  if (import.meta.env.VITE_SOLANA_RPC_URL) {
-    return import.meta.env.VITE_SOLANA_RPC_URL;
-  }
-  
-  // Priority 4: Use Helius RPC if available
-  if (import.meta.env.VITE_HELIUS_API_KEY) {
-    return `https://rpc.helius.xyz/?api-key=${import.meta.env.VITE_HELIUS_API_KEY}`;
-  }
-  
-  // Priority 5: Use public RPC as fallback (rate limited)
-  return 'https://api.mainnet-beta.solana.com';
-}
-
-// Singleton connection instance
-let connection: Connection | null = null;
-
-function getConnection(): Connection {
-  if (!connection) {
-    connection = new Connection(getRpcUrl(), 'confirmed');
-  }
-  return connection;
+  return data as T;
 }
 
 /**
- * Get SOL balance for a wallet address
- * Uses RPC directly - no API credits needed
+ * Get SOL balance for a wallet address (proxied via /api/rpc).
  */
 export async function getSolBalance(walletAddress: string): Promise<number> {
   try {
-    const conn = getConnection();
-    const publicKey = new PublicKey(walletAddress);
-    const balance = await conn.getBalance(publicKey);
-    return balance / 1e9; // Convert lamports to SOL
+    const { balance } = await rpcFetch<{ balance: number }>("sol-balance", walletAddress);
+    return Number.isFinite(balance) ? balance : 0;
   } catch (error) {
-    console.error('Error fetching SOL balance:', error);
+    console.error("Error fetching SOL balance:", error);
     throw error;
   }
 }
 
-/** Solana mainnet USDC SPL mint (used for getUsdcBalance). */
-const SOLANA_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-
 /**
- * Get USDC balance for a Solana wallet (same method as scripts/get-sol-usdc-balance.mjs).
- * Uses getParsedTokenAccountsByOwner filtered by USDC mint and sums all USDC accounts.
+ * Get USDC balance for a Solana wallet (proxied via /api/rpc).
  */
 export async function getUsdcBalance(walletAddress: string): Promise<number> {
   try {
-    const conn = getConnection();
-    const publicKey = new PublicKey(walletAddress);
-    const usdcMint = new PublicKey(SOLANA_USDC_MINT);
-    const tokenAccounts = await conn.getParsedTokenAccountsByOwner(publicKey, {
-      mint: usdcMint,
-    });
-    let total = 0;
-    for (const { account } of tokenAccounts.value) {
-      const parsed = account.data as ParsedAccountData;
-      const tokenAmount = parsed?.parsed?.info?.tokenAmount;
-      if (!tokenAmount) continue;
-      let uiAmount = tokenAmount.uiAmount ?? 0;
-      if (uiAmount === 0 && tokenAmount.uiAmountString != null) {
-        const parsedNum = parseFloat(tokenAmount.uiAmountString);
-        if (Number.isFinite(parsedNum)) uiAmount = parsedNum;
-      }
-      if (uiAmount === 0 && tokenAmount.amount != null && tokenAmount.decimals != null) {
-        const raw = Number(tokenAmount.amount);
-        if (Number.isFinite(raw)) uiAmount = raw / Math.pow(10, tokenAmount.decimals);
-      }
-      total += uiAmount;
-    }
-    return total;
+    const { balance } = await rpcFetch<{ balance: number }>("usdc-balance", walletAddress);
+    return Number.isFinite(balance) ? balance : 0;
   } catch (error) {
     console.error("Error fetching USDC balance:", error);
     throw error;
@@ -95,8 +40,8 @@ export async function getUsdcBalance(walletAddress: string): Promise<number> {
 }
 
 /**
- * Get all token accounts for a wallet
- * Returns array of { mint, balance, decimals }
+ * Get all token accounts for a wallet (proxied via /api/rpc).
+ * Returns array of { mint, balance, decimals, uiAmount }.
  */
 export interface TokenAccount {
   mint: string;
@@ -107,91 +52,36 @@ export interface TokenAccount {
 
 export async function getTokenAccounts(walletAddress: string): Promise<TokenAccount[]> {
   try {
-    const conn = getConnection();
-    const publicKey = new PublicKey(walletAddress);
-    
-    // Get all token accounts
-    const tokenAccounts = await conn.getParsedTokenAccountsByOwner(publicKey, {
-      programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
-    });
-
-    return tokenAccounts.value.map(account => {
-      const parsedInfo = account.account.data as ParsedAccountData;
-      const tokenAmount = parsedInfo.parsed.info.tokenAmount;
-      // uiAmount can be null from some RPCs; use uiAmountString or derive from amount/decimals
-      let uiAmount = tokenAmount.uiAmount ?? 0;
-      if (uiAmount === 0 && tokenAmount.uiAmountString != null) {
-        const parsed = parseFloat(tokenAmount.uiAmountString);
-        if (Number.isFinite(parsed)) uiAmount = parsed;
-      }
-      if (uiAmount === 0 && tokenAmount.amount != null && tokenAmount.decimals != null) {
-        const raw = Number(tokenAmount.amount);
-        if (Number.isFinite(raw)) uiAmount = raw / Math.pow(10, tokenAmount.decimals);
-      }
-      return {
-        mint: tokenAmount.mint,
-        balance: tokenAmount.amount,
-        decimals: tokenAmount.decimals,
-        uiAmount,
-      };
-    });
+    const { accounts } = await rpcFetch<{ accounts: Array<{ mint: string; balance: string; decimals: number; uiAmount: number }> }>("token-accounts", walletAddress);
+    return (accounts ?? []).map((a) => ({
+      mint: a.mint,
+      balance: parseInt(a.balance, 10) || 0,
+      decimals: a.decimals ?? 0,
+      uiAmount: a.uiAmount ?? 0,
+    }));
   } catch (error) {
-    console.error('Error fetching token accounts:', error);
+    console.error("Error fetching token accounts:", error);
     throw error;
   }
 }
 
 /**
- * Get transaction signature status
+ * Get transaction signature status. Not proxied; use server-side RPC if needed.
  */
-export async function getTransactionStatus(signature: string): Promise<any> {
-  try {
-    const conn = getConnection();
-    const status = await conn.getSignatureStatus(signature);
-    return status;
-  } catch (error) {
-    console.error('Error fetching transaction status:', error);
-    throw error;
-  }
+export async function getTransactionStatus(_signature: string): Promise<any> {
+  throw new Error("getTransactionStatus is not available from client; use server RPC");
 }
 
 /**
- * Get recent transactions for a wallet
+ * Get recent transactions for a wallet. Not proxied; use server-side RPC if needed.
  */
-export async function getRecentTransactions(
-  walletAddress: string,
-  limit: number = 10
-): Promise<any[]> {
-  try {
-    const conn = getConnection();
-    const publicKey = new PublicKey(walletAddress);
-    
-    // Get confirmed signatures
-    const signatures = await conn.getSignaturesForAddress(publicKey, { limit });
-    
-    // Get transaction details (optional - can be expensive)
-    // const transactions = await Promise.all(
-    //   signatures.map(sig => conn.getTransaction(sig.signature))
-    // );
-    
-    return signatures;
-  } catch (error) {
-    console.error('Error fetching recent transactions:', error);
-    throw error;
-  }
+export async function getRecentTransactions(_walletAddress: string, _limit: number = 10): Promise<any[]> {
+  throw new Error("getRecentTransactions is not available from client; use server RPC");
 }
 
 /**
- * Get account info (for any account type)
+ * Get account info. Not proxied; use server-side RPC if needed.
  */
-export async function getAccountInfo(address: string): Promise<any> {
-  try {
-    const conn = getConnection();
-    const publicKey = new PublicKey(address);
-    const accountInfo = await conn.getAccountInfo(publicKey);
-    return accountInfo;
-  } catch (error) {
-    console.error('Error fetching account info:', error);
-    throw error;
-  }
+export async function getAccountInfo(_address: string): Promise<any> {
+  throw new Error("getAccountInfo is not available from client; use server RPC");
 }

@@ -1,104 +1,11 @@
-// Birdeye API integration for Solana wallet analytics
-const BIRDEYE_API_BASE = 'https://public-api.birdeye.so';
-
-/**
- * Get Birdeye API key from environment
- */
-function getApiKey(): string {
-  const apiKey = import.meta.env.VITE_BIRDEYE_API_KEY;
-  if (!apiKey) {
-    throw new Error('Birdeye API key not configured. Add VITE_BIRDEYE_API_KEY to .env');
-  }
-  return apiKey;
-}
+// Birdeye API - scanner/PnL calls proxied via /api/birdeye so API key stays server-side
+import { getApiBase } from "./utils";
 
 /**
  * Delay helper function
  */
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Make a request to Birdeye API with retry logic and exponential backoff
- */
-async function birdeyeRequest<T>(
-  endpoint: string,
-  options: {
-    method?: 'GET' | 'POST';
-    params?: Record<string, any>;
-    body?: any;
-    retries?: number;
-    baseDelay?: number;
-  } = {}
-): Promise<T> {
-  const {
-    method = 'GET',
-    params,
-    body,
-    retries = 3,
-    baseDelay = 1000,
-  } = options;
-
-  const apiKey = getApiKey();
-  const url = new URL(`${BIRDEYE_API_BASE}${endpoint}`);
-  
-  // Add query params for GET requests
-  if (method === 'GET' && params) {
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== null) {
-        url.searchParams.append(key, String(value));
-      }
-    });
-  }
-
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const fetchOptions: RequestInit = {
-        method,
-        headers: {
-          'X-API-KEY': apiKey,
-          'x-chain': 'solana',
-          'Content-Type': 'application/json',
-        },
-      };
-
-      // Add body for POST requests
-      if (method === 'POST' && body) {
-        fetchOptions.body = JSON.stringify(body);
-      }
-
-      const response = await fetch(url.toString(), fetchOptions);
-
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ message: 'Unknown error' }));
-        const errorMessage = error.message || `Birdeye API error: ${response.status}`;
-        
-        // Retry on rate limit (429) or server errors (5xx)
-        if ((response.status === 429 || response.status >= 500) && attempt < retries) {
-          const waitTime = baseDelay * Math.pow(2, attempt);
-          console.warn(`Rate limited. Retrying in ${waitTime}ms... (attempt ${attempt + 1}/${retries + 1})`);
-          await delay(waitTime);
-          continue;
-        }
-        
-        throw new Error(errorMessage);
-      }
-
-      return response.json();
-    } catch (error: any) {
-      // If it's the last attempt or not a retryable error, throw
-      if (attempt === retries || (error.message && !error.message.includes('429') && !error.message.includes('5'))) {
-        throw error;
-      }
-      
-      // Exponential backoff for network errors
-      const waitTime = baseDelay * Math.pow(2, attempt);
-      await delay(waitTime);
-    }
-  }
-
-  throw new Error('Max retries exceeded');
 }
 
 /**
@@ -138,8 +45,7 @@ export interface TokenTransactionsResponse {
 }
 
 /**
- * Get token transactions - retrieves all trades for a token
- * Use this to find wallets that actually traded the token (owner field)
+ * Get token transactions - proxied via /api/birdeye/token-txs
  */
 export async function getTokenTransactions(
   tokenAddress: string,
@@ -147,23 +53,24 @@ export async function getTokenTransactions(
   offset: number = 0,
   txType: 'buy' | 'sell' | 'swap' | 'add' | 'remove' | 'all' = 'swap'
 ): Promise<TokenTransactionsResponse> {
-  // Clamp limit to API max (1-100)
   const clampedLimit = Math.max(1, Math.min(100, limit));
-  // Clamp offset to API max (0-9999, and offset + limit <= 10000)
   const clampedOffset = Math.max(0, Math.min(9999, Math.min(offset, 10000 - clampedLimit)));
-
-  return birdeyeRequest<TokenTransactionsResponse>('/defi/v3/token/txs', {
-    method: 'GET',
-    params: {
-      address: tokenAddress,
-      limit: clampedLimit,
-      offset: clampedOffset,
-      sort_by: 'block_unix_time',
-      sort_type: 'desc',
-      tx_type: txType,
-      ui_amount_mode: 'scaled',
-    },
+  const base = getApiBase();
+  const params = new URLSearchParams({
+    address: tokenAddress,
+    limit: String(clampedLimit),
+    offset: String(clampedOffset),
+    sort_by: "block_unix_time",
+    sort_type: "desc",
+    tx_type: txType,
+    ui_amount_mode: "scaled",
   });
+  const res = await fetch(`${base}/api/birdeye/token-txs?${params.toString()}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { message?: string }).message || `Birdeye token-txs: ${res.status}`);
+  }
+  return res.json();
 }
 
 /**
@@ -244,19 +151,24 @@ export interface WalletPnLSummaryResponse {
  * Uses duration parameter instead of time_from/time_to
  * Includes increased retry attempts and longer delays for rate limit protection
  */
+/**
+ * Get wallet PnL summary - proxied via /api/birdeye/pnl-summary
+ */
 export async function getWalletPnLSummary(
   walletAddress: string,
   duration: 'all' | '90d' | '30d' | '7d' | '24h' = 'all'
 ): Promise<WalletPnLSummaryResponse> {
-  return birdeyeRequest<WalletPnLSummaryResponse>('/wallet/v2/pnl/summary', {
-    method: 'GET',
-    params: {
-      wallet: walletAddress,
-      duration,
-    },
-    retries: 5, // More retries for PnL requests
-    baseDelay: 2000, // Longer base delay (2 seconds) for PnL endpoint
+  const base = getApiBase();
+  const params = new URLSearchParams({
+    wallet: walletAddress,
+    duration,
   });
+  const res = await fetch(`${base}/api/birdeye/pnl-summary?${params.toString()}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { message?: string }).message || `Birdeye pnl-summary: ${res.status}`);
+  }
+  return res.json();
 }
 
 /**

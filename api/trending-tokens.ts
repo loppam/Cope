@@ -2,7 +2,7 @@
  * GET /api/trending-tokens
  * Fetches trending tokens from Birdeye (defi/token_trending).
  * Multi-chain: fetches solana, base, bsc and merges (round-robin). Single-chain if chain param set.
- * Query: offset (default 0), limit (default 20, max 20), chain (solana|base|bsc|all), sort_by (rank|volumeUSD|liquidity).
+ * Query: offset (default 0), limit (default 20, max 20), chain (solana|base|bsc|all), sort_by (rank|volumeUSD|liquidity), interval (1h|4h|24h).
  * Returns { tokens, total, nextOffset }. Requires BIRDEYE_API_KEY.
  */
 import type { VercelRequest, VercelResponse } from "@vercel/node";
@@ -12,6 +12,7 @@ const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 20;
 const CHAINS = ["solana", "base", "bsc"] as const;
 const SORT_BY_VALUES = ["rank", "volumeUSD", "liquidity"] as const;
+const INTERVAL_VALUES = ["1h", "4h", "24h"] as const;
 
 export interface TrendingToken {
   chainId: string;
@@ -72,18 +73,21 @@ async function fetchBirdeyeTrending(
   offset: number,
   limit: number,
   sortBy: string,
+  interval: string,
 ): Promise<{ tokens: TrendingToken[]; total: number }> {
   const url = new URL(`${BIRDEYE_API_BASE}/defi/token_trending`);
   url.searchParams.set("offset", String(offset));
   url.searchParams.set("limit", String(limit));
   url.searchParams.set("sort_by", sortBy);
-  url.searchParams.set("interval", "24h");
+  url.searchParams.set("interval", interval);
   url.searchParams.set("sort_type", "desc");
+  url.searchParams.set("ui_amount_mode", "scaled");
 
   const res = await fetch(url.toString(), {
     headers: {
       "X-API-KEY": apiKey,
       "x-chain": chain,
+      "accept": "application/json",
     },
   });
 
@@ -144,6 +148,12 @@ export default async function handler(
       ? req.query.sort_by
       : "rank";
 
+  const interval =
+    typeof req.query.interval === "string" &&
+    (INTERVAL_VALUES as readonly string[]).includes(req.query.interval)
+      ? req.query.interval
+      : "24h";
+
   const offset = Math.max(0, parseInt(String(req.query.offset ?? 0), 10) || 0);
   const limit = Math.min(
     MAX_LIMIT,
@@ -154,9 +164,9 @@ export default async function handler(
     if (multiChain) {
       const perChainLimit = Math.ceil(limit / 3);
       const [solanaRes, baseRes, bscRes] = await Promise.all([
-        fetchBirdeyeTrending(apiKey, "solana", offset, perChainLimit, sortBy),
-        fetchBirdeyeTrending(apiKey, "base", offset, perChainLimit, sortBy),
-        fetchBirdeyeTrending(apiKey, "bsc", offset, perChainLimit, sortBy),
+        fetchBirdeyeTrending(apiKey, "solana", offset, perChainLimit, sortBy, interval),
+        fetchBirdeyeTrending(apiKey, "base", offset, perChainLimit, sortBy, interval),
+        fetchBirdeyeTrending(apiKey, "bsc", offset, perChainLimit, sortBy, interval),
       ]);
       const tokens = mergeRoundRobin(
         solanaRes.tokens,
@@ -175,7 +185,14 @@ export default async function handler(
     }
 
     const chain = chainParam as (typeof CHAINS)[number];
-    const { tokens, total } = await fetchBirdeyeTrending(apiKey, chain, offset, limit, sortBy);
+    const { tokens, total } = await fetchBirdeyeTrending(
+      apiKey,
+      chain,
+      offset,
+      limit,
+      sortBy,
+      interval,
+    );
     const nextOffset = offset + tokens.length;
 
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=60");

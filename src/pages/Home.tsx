@@ -343,7 +343,7 @@ export function Home() {
     async function fetchTrending(offset = 0) {
       try {
         const res = await fetch(
-          `${base}/api/trending-tokens?offset=${offset}&limit=${TRENDING_PAGE_SIZE}&sort_by=${trendingSortBy}`,
+          `${base}/api/trending-tokens?offset=${offset}&limit=${TRENDING_PAGE_SIZE}&sort_by=${trendingSortBy}&interval=4h`,
         );
         const data = await res.json().catch(() => ({}));
         if (cancelled) return;
@@ -385,7 +385,7 @@ export function Home() {
     const base = getApiBase();
     const offset = trendingNextOffset;
     fetch(
-      `${base}/api/trending-tokens?offset=${offset}&limit=${TRENDING_PAGE_SIZE}&sort_by=${trendingSortBy}`,
+      `${base}/api/trending-tokens?offset=${offset}&limit=${TRENDING_PAGE_SIZE}&sort_by=${trendingSortBy}&interval=4h`,
     )
       .then((res) => res.json().catch(() => ({})))
       .then((data) => {

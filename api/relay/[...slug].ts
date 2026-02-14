@@ -1886,6 +1886,50 @@ async function coingeckoTokensHandler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+const COINGECKO_SIMPLE_BASE = "https://api.coingecko.com/api/v3/simple";
+const DEFAULT_ETH_PRICE = 3000;
+const DEFAULT_BNB_PRICE = 600;
+
+async function coingeckoNativePricesHandler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "GET")
+    return res.status(405).json({ error: "Method not allowed" });
+  try {
+    const apiKey = process.env.COINGECKO_API_KEY;
+    const url = `${COINGECKO_SIMPLE_BASE}/price?ids=ethereum,binancecoin&vs_currencies=usd`;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) headers["x-cg-demo-api-key"] = apiKey;
+    const coinRes = await fetch(url, { method: "GET", headers });
+    const raw = await coinRes.text();
+    if (!coinRes.ok) {
+      return res.status(502).json({
+        eth: DEFAULT_ETH_PRICE,
+        bnb: DEFAULT_BNB_PRICE,
+        _fallback: true,
+      });
+    }
+    let data: { ethereum?: { usd?: number }; binancecoin?: { usd?: number } };
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      return res.status(200).json({
+        eth: DEFAULT_ETH_PRICE,
+        bnb: DEFAULT_BNB_PRICE,
+        _fallback: true,
+      });
+    }
+    const eth = typeof data?.ethereum?.usd === "number" ? data.ethereum.usd : DEFAULT_ETH_PRICE;
+    const bnb = typeof data?.binancecoin?.usd === "number" ? data.binancecoin.usd : DEFAULT_BNB_PRICE;
+    return res.status(200).json({ eth, bnb });
+  } catch (e: unknown) {
+    console.error("coingecko-native-prices error:", e);
+    return res.status(200).json({
+      eth: DEFAULT_ETH_PRICE,
+      bnb: DEFAULT_BNB_PRICE,
+      _fallback: true,
+    });
+  }
+}
+
 function getEvmProvider(chainId: number): JsonRpcProvider {
   if (chainId === 8453)
     return new JsonRpcProvider(
@@ -2299,6 +2343,7 @@ const ROUTES: Record<
   "notify-withdrawal-complete": notifyWithdrawalCompleteHandler,
   currencies: currenciesHandler,
   "coingecko-tokens": coingeckoTokensHandler,
+  "coingecko-native-prices": coingeckoNativePricesHandler,
 };
 
 export default async function handler(

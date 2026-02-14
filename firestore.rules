@@ -43,5 +43,10 @@ service cloud.firestore {
     match /prices/{docId} {
       allow read, write: if false;
     }
+
+    // Balance snapshots: client read/write own only (for 24h change). Cron updates via Admin SDK.
+    match /balanceSnapshots/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
   }
 }

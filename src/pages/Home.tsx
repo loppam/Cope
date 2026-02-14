@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router";
 import { motion } from "motion/react";
 import { Button } from "@/components/Button";
@@ -17,7 +17,6 @@ import {
   BadgeCheck,
   Flame,
   Users,
-  Brain,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -27,12 +26,18 @@ import {
   orderBy,
   limit,
   getDocs,
+  doc,
+  getDoc,
+  setDoc,
+  serverTimestamp,
+  Timestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { WalletNotification } from "@/lib/notifications";
 import { shortenAddress, formatCurrency, getApiBase } from "@/lib/utils";
 import { getUsdcBalance, getSolBalance } from "@/lib/rpc";
 import { getWalletPositions, getSolPrice } from "@/lib/solanatracker";
+import { fetchNativePrices } from "@/lib/coingecko";
 import { toast } from "sonner";
 import { DocumentHead } from "@/components/DocumentHead";
 import type { TrendingToken } from "../../api/trending-tokens";
@@ -65,9 +70,31 @@ export function Home() {
   const walletAddress = userProfile?.walletAddress ?? null;
   const walletConnected = userProfile?.walletConnected ?? false;
 
-  // Fetch balance for header (USDC + positions)
+  function evmBalanceUsd(
+    evmData: {
+      base?: { usdc?: number; native?: number };
+      bnb?: { usdc?: number; native?: number };
+      tokens?: { value?: number }[];
+    } | null,
+    prices: { eth: number; bnb: number },
+  ): number {
+    if (!evmData) return 0;
+    if (Array.isArray(evmData.tokens) && evmData.tokens.length > 0) {
+      return evmData.tokens.reduce((s, t) => s + (t?.value ?? 0), 0);
+    }
+    const b = evmData.base ?? { usdc: 0, native: 0 };
+    const n = evmData.bnb ?? { usdc: 0, native: 0 };
+    return (
+      (b.usdc ?? 0) +
+      (b.native ?? 0) * prices.eth +
+      (n.usdc ?? 0) +
+      (n.native ?? 0) * prices.bnb
+    );
+  }
+
+  // Fetch balance for header (USDC + Solana positions + SOL + EVM)
   useEffect(() => {
-    if (!walletAddress || !walletConnected) {
+    if (!walletAddress || !walletConnected || !user) {
       setTotalBalance(null);
       setBalance24h(null);
       setBalanceLoading(false);
@@ -75,22 +102,66 @@ export function Home() {
     }
     let cancelled = false;
     setBalanceLoading(true);
+    const base = getApiBase();
+
     (async () => {
       try {
-        const [usdc, positionsRes, solBal, solPrice] = await Promise.all([
+        const tokenPromise = user.getIdToken().then((t) =>
+          fetch(`${base}/api/relay/evm-balances`, {
+            headers: { Authorization: `Bearer ${t}` },
+          })
+            .then((r) => r.json())
+            .catch(() => null),
+        );
+
+        const [usdc, positionsRes, solBal, solPrice, nativePrices, evmData] = await Promise.all([
           getUsdcBalance(walletAddress),
           getWalletPositions(walletAddress, true).catch(() => ({ total: 0, tokens: [], totalSol: 0 })),
           getSolBalance(walletAddress),
           getSolPrice().catch(() => 0),
+          fetchNativePrices(),
+          tokenPromise,
         ]);
         if (cancelled) return;
-        const res = positionsRes as { total?: number; tokens?: { value?: number }[] };
-        const positionsValue = res?.total ?? (Array.isArray(res?.tokens)
-          ? (res.tokens as any[]).reduce((s, p) => s + (p?.value ?? 0), 0)
-          : 0);
-        const solValue = (solBal ?? 0) * (solPrice ?? 0);
-        setTotalBalance(usdc + positionsValue + solValue);
-        setBalance24h(null); // Placeholder – 24h portfolio delta would need historical data
+
+        const res = positionsRes as { total?: number };
+        const posVal = res?.total ?? 0;
+        const solVal = (solBal ?? 0) * (solPrice ?? 0);
+        const evmVal = evmBalanceUsd(evmData, nativePrices);
+        const total = usdc + posVal + solVal + evmVal;
+
+        setTotalBalance(total);
+
+        const snapRef = doc(db, "balanceSnapshots", user!.uid);
+        const snap = await getDoc(snapRef).catch(() => null);
+        const data = snap?.data();
+        const prev = data?.prev ?? 0;
+        const prevAt = (data?.prevAt as Timestamp)?.toMillis?.() ?? 0;
+        const now = Date.now();
+        const hoursAgo = (now - prevAt) / (60 * 60 * 1000);
+
+        if (prevAt > 0 && hoursAgo >= 18 && hoursAgo <= 30) {
+          setBalance24h(total - prev);
+        } else {
+          setBalance24h(null);
+        }
+
+        const currentAt = (data?.currentAt as Timestamp)?.toMillis?.() ?? 0;
+        const shouldRotate = currentAt > 0 && now - currentAt >= 20 * 60 * 60 * 1000;
+
+        await setDoc(
+          snapRef,
+          {
+            ...(shouldRotate && {
+              prev: data?.current ?? total,
+              prevAt: data?.currentAt ?? serverTimestamp(),
+            }),
+            current: total,
+            currentAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true },
+        );
       } catch {
         if (!cancelled) setTotalBalance(null);
       } finally {
@@ -100,27 +171,39 @@ export function Home() {
     return () => {
       cancelled = true;
     };
-  }, [walletAddress, walletConnected]);
+  }, [walletAddress, walletConnected, user]);
 
   useEffect(() => {
     const onRefresh = () => {
-      if (!walletAddress) return;
+      if (!walletAddress || !user) return;
       setBalanceLoading(true);
+      const base = getApiBase();
       Promise.all([
         getUsdcBalance(walletAddress),
-        getWalletPositions(walletAddress, false).catch(() => ({ total: 0, tokens: [], totalSol: 0 })),
+        getWalletPositions(walletAddress, false).catch(() => ({ total: 0 })),
         getSolBalance(walletAddress),
         getSolPrice().catch(() => 0),
-      ]).then(([usdc, positionsRes, solBal, solPrice]) => {
+        fetchNativePrices(),
+        user.getIdToken().then((t) =>
+          fetch(`${base}/api/relay/evm-balances`, {
+            headers: { Authorization: `Bearer ${t}` },
+          })
+            .then((r) => r.json())
+            .catch(() => null),
+        ),
+      ]).then(([usdc, positionsRes, solBal, solPrice, nativePrices, evmData]) => {
         const res = positionsRes as { total?: number };
-        const posVal = res?.total ?? 0;
-        const solVal = (solBal ?? 0) * (solPrice ?? 0);
-        setTotalBalance(usdc + posVal + solVal);
+        const total =
+          usdc +
+          (res?.total ?? 0) +
+          (solBal ?? 0) * (solPrice ?? 0) +
+          evmBalanceUsd(evmData, nativePrices);
+        setTotalBalance(total);
       }).catch(() => setTotalBalance(null)).finally(() => setBalanceLoading(false));
     };
     window.addEventListener("cope-refresh-balance", onRefresh);
     return () => window.removeEventListener("cope-refresh-balance", onRefresh);
-  }, [walletAddress]);
+  }, [walletAddress, user]);
 
   // Fetch notifications
   useEffect(() => {
@@ -223,23 +306,6 @@ export function Home() {
       cancelled = true;
     };
   }, []);
-
-  // Lazy load more trending on scroll
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel || activeTab !== "trending" || trending.length <= visibleTrendingCount)
-      return;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) {
-          setVisibleTrendingCount((n) => Math.min(n + LAZY_PAGE_SIZE, trending.length));
-        }
-      },
-      { rootMargin: "100px", threshold: 0.1 },
-    );
-    obs.observe(sentinel);
-    return () => obs.disconnect();
-  }, [activeTab, trending.length, visibleTrendingCount]);
 
   const formatTime = (timestamp: any) => {
     if (!timestamp) return "Just now";
@@ -351,11 +417,51 @@ export function Home() {
   };
 
   const filterPills: { id: FilterId; icon: React.ReactNode; label: string }[] = [
-    { id: "star", icon: <Star className="w-3.5 h-3.5" />, label: "" },
+    { id: "star", icon: <Star className="w-3.5 h-3.5" />, label: "Top gainers" },
     { id: "verified", icon: <BadgeCheck className="w-3.5 h-3.5" />, label: "Verified" },
     { id: "trending", icon: <Flame className="w-3.5 h-3.5" />, label: "Trending" },
     { id: "held", icon: <Users className="w-3.5 h-3.5" />, label: "Most held" },
   ];
+
+  const filteredTrending = useMemo(() => {
+    const list = [...trending];
+    switch (activeFilter) {
+      case "star":
+        return list.sort((a, b) => {
+          const ah = a.priceChange24 ?? -Infinity;
+          const bh = b.priceChange24 ?? -Infinity;
+          return bh - ah;
+        });
+      case "verified":
+        return list.filter((t) => t.marketCap >= 500_000);
+      case "held":
+        return list.sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0));
+      case "trending":
+      default:
+        return list;
+    }
+  }, [trending, activeFilter]);
+
+  useEffect(() => {
+    setVisibleTrendingCount(LAZY_PAGE_SIZE);
+  }, [activeFilter]);
+
+  // Lazy load more trending on scroll
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || activeTab !== "trending" || filteredTrending.length <= visibleTrendingCount)
+      return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleTrendingCount((n) => Math.min(n + LAZY_PAGE_SIZE, filteredTrending.length));
+        }
+      },
+      { rootMargin: "100px", threshold: 0.1 },
+    );
+    obs.observe(sentinel);
+    return () => obs.disconnect();
+  }, [activeTab, filteredTrending.length, visibleTrendingCount]);
 
   return (
     <>
@@ -398,24 +504,6 @@ export function Home() {
             </button>
           </div>
         )}
-
-        {/* Featured card */}
-        <button
-          onClick={() => setActiveTab("trending")}
-          data-tap-haptic
-          className="tap-press w-full mb-5 rounded-2xl overflow-hidden bg-gradient-to-br from-orange-500/40 via-red-500/30 to-orange-600/20 border border-orange-400/20 hover:border-orange-400/40 transition-colors text-left"
-        >
-          <div className="p-4 sm:p-5 flex items-center gap-4 min-h-[88px]">
-            <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center flex-shrink-0">
-              <Brain className="w-6 h-6 text-orange-400" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="font-semibold text-white text-base">AI Tokens</h3>
-              <p className="text-sm text-white/70 mt-0.5">Viral tokens from the AI meta</p>
-            </div>
-            <ChevronRight className="w-5 h-5 text-white/50 flex-shrink-0" />
-          </div>
-        </button>
 
         {/* Two primary CTAs – in place of Weekly Top Trades */}
         <div className="grid grid-cols-2 gap-3 mb-5">
@@ -492,7 +580,7 @@ export function Home() {
                 <Loader2 className="w-8 h-8 animate-spin text-accent-primary mb-4" />
                 <p className="text-white/60 text-sm">Loading trending tokens...</p>
               </div>
-            ) : trending.length === 0 ? (
+            ) : filteredTrending.length === 0 ? (
               <Card glass className="overflow-hidden">
                 <div className="p-8 text-center">
                   <div className="w-14 h-14 rounded-2xl bg-white/5 flex items-center justify-center mx-auto mb-4">
@@ -520,7 +608,7 @@ export function Home() {
                   },
                 }}
               >
-                {trending.slice(0, visibleTrendingCount).map((token) => (
+                {filteredTrending.slice(0, visibleTrendingCount).map((token) => (
                   <motion.button
                     key={`${token.chainId}-${token.tokenAddress}`}
                     variants={{
@@ -592,7 +680,7 @@ export function Home() {
                   </motion.button>
                 ))}
                 {/* Sentinel for lazy load */}
-                {trending.length > visibleTrendingCount && (
+                {filteredTrending.length > visibleTrendingCount && (
                   <div ref={sentinelRef} className="h-4 flex-shrink-0" aria-hidden />
                 )}
               </motion.div>
@@ -723,7 +811,7 @@ export function Home() {
                                 }
                                 variant="primary"
                                 size="sm"
-                                className="flex-shrink-0 min-h-[40px] min-w-[44px]"
+                                className="flex-shrink-0 min-h-[44px] min-w-[44px]"
                               >
                                 <Copy className="w-4 h-4" />
                               </Button>

@@ -1,5 +1,32 @@
 import { getApiBase } from "@/lib/utils";
 
+/** Fallback values when CoinGecko native prices API fails */
+export const DEFAULT_ETH_PRICE = 3000;
+export const DEFAULT_BNB_PRICE = 600;
+
+export interface NativePrices {
+  eth: number;
+  bnb: number;
+}
+
+/**
+ * Fetch ETH and BNB prices from CoinGecko via relay (server-side API key).
+ * Returns fallback values (3000/600) on error.
+ */
+export async function fetchNativePrices(): Promise<NativePrices> {
+  const apiBase = getApiBase();
+  try {
+    const res = await fetch(`${apiBase}/api/relay/coingecko-native-prices`);
+    const data = await res.json().catch(() => ({}));
+    return {
+      eth: typeof data?.eth === "number" ? data.eth : DEFAULT_ETH_PRICE,
+      bnb: typeof data?.bnb === "number" ? data.bnb : DEFAULT_BNB_PRICE,
+    };
+  } catch {
+    return { eth: DEFAULT_ETH_PRICE, bnb: DEFAULT_BNB_PRICE };
+  }
+}
+
 /**
  * CoinGecko On-Chain token details (proxied via our backend to keep API key server-side).
  * Response shape: { data: [{ id, type: "token", attributes: { address, name, symbol, decimals, image_url, price_usd, fdv_usd, total_reserve_in_usd, volume_usd, market_cap_usd, launchpad_details, ... }, relationships }, ... ], included: [ pool, ... ] }

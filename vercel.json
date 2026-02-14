@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/sync-wallet-stats",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/log-balance",
+      "schedule": "5 0 * * *"
     }
   ],
   "rewrites": [

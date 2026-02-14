@@ -49,6 +49,7 @@ import { syncWebhook } from "@/lib/webhook";
 import { getFollowersCount } from "@/lib/profile";
 import { getWalletPositions, getWalletPnL, getSolPrice } from "@/lib/solanatracker";
 import { getSolBalance } from "@/lib/rpc";
+import { fetchNativePrices } from "@/lib/coingecko";
 import { getWalletProfitability } from "@/lib/moralis";
 import { getIntentStatus } from "@/lib/relay";
 import { toast } from "sonner";
@@ -168,8 +169,6 @@ export function Profile() {
 
   // Fetch open positions: SOL + EVM (Base/BNB USDC and native) + SPL tokens
   // Phased loading: positions first, then 1s delay, then PnL (Solana Tracker 1 RPS) + Moralis (EVM PnL)
-  const APPROX_ETH_PRICE = 3000;
-  const APPROX_BNB_PRICE = 600;
   useEffect(() => {
     if (!walletAddress) {
       setOpenPositions([]);
@@ -182,10 +181,11 @@ export function Profile() {
     (async () => {
       try {
         // Phase 1: positions + balances (Solana Tracker throttle applies to getWalletPositions)
-        const [positionsRes, solBalance, solPrice, evmData] = await Promise.all([
+        const [positionsRes, solBalance, solPrice, nativePrices, evmData] = await Promise.all([
           getWalletPositions(walletAddress, true),
           getSolBalance(walletAddress),
           getSolPrice(),
+          fetchNativePrices(),
           user
             ? user.getIdToken().then((token) =>
                 fetch(`${base}/api/relay/evm-balances`, {
@@ -275,7 +275,7 @@ export function Profile() {
                 symbol: "ETH",
                 name: "Ethereum (Base)",
                 amount: evmData.base.native,
-                value: evmData.base.native * APPROX_ETH_PRICE,
+                value: evmData.base.native * nativePrices.eth,
                 pnl: evmPnl?.pnl,
                 pnlPercent: evmPnl?.pnlPercent,
                 chain: "base",
@@ -301,7 +301,7 @@ export function Profile() {
                 symbol: "BNB",
                 name: "BNB",
                 amount: evmData.bnb.native,
-                value: evmData.bnb.native * APPROX_BNB_PRICE,
+                value: evmData.bnb.native * nativePrices.bnb,
                 pnl: evmPnl?.pnl,
                 pnlPercent: evmPnl?.pnlPercent,
                 chain: "bnb",

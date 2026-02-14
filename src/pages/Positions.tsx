@@ -18,6 +18,7 @@ import {
   getSolPrice,
 } from "@/lib/solanatracker";
 import { getSolBalance, getUsdcBalance } from "@/lib/rpc";
+import { fetchNativePrices } from "@/lib/coingecko";
 import { apiCache } from "@/lib/cache";
 import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
 import { toast } from "sonner";
@@ -43,9 +44,6 @@ interface Position {
   holders?: number;
   chain?: ChainTag;
 }
-
-const APPROX_ETH_PRICE = 3000;
-const APPROX_BNB_PRICE = 600;
 
 export function Positions() {
   const { user, userProfile } = useAuth();
@@ -78,15 +76,18 @@ export function Positions() {
       let currentSolBalance = 0;
       let currentSolPrice = 150;
       let currentUsdcBalance = 0;
+      let nativePrices = { eth: 3000, bnb: 600 };
       try {
-        const [balance, price, usdcBal] = await Promise.all([
+        const [balance, price, usdcBal, prices] = await Promise.all([
           getSolBalance(walletAddress),
           getSolPrice(),
           getUsdcBalance(walletAddress),
+          fetchNativePrices(),
         ]);
         currentSolBalance = balance;
         currentSolPrice = price;
         currentUsdcBalance = usdcBal;
+        nativePrices = prices;
         setSolBalance(balance);
         setSolPrice(price);
         setUsdcBalance(usdcBal);
@@ -198,7 +199,7 @@ export function Positions() {
                   symbol: "ETH",
                   name: "Ethereum (Base)",
                   amount: data.base.native,
-                  value: data.base.native * APPROX_ETH_PRICE,
+                  value: data.base.native * nativePrices.eth,
                   pnl: 0,
                   pnlPercent: 0,
                   realized: 0,
@@ -228,7 +229,7 @@ export function Positions() {
                   symbol: "BNB",
                   name: "BNB",
                   amount: data.bnb.native,
-                  value: data.bnb.native * APPROX_BNB_PRICE,
+                  value: data.bnb.native * nativePrices.bnb,
                   pnl: 0,
                   pnlPercent: 0,
                   realized: 0,

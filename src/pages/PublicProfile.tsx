@@ -28,6 +28,7 @@ import {
   getSolPrice,
 } from "@/lib/solanatracker";
 import { getSolBalance } from "@/lib/rpc";
+import { fetchNativePrices } from "@/lib/coingecko";
 import { getWalletProfitability } from "@/lib/moralis";
 import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
 import { DocumentHead } from "@/components/DocumentHead";
@@ -43,9 +44,6 @@ interface TokenPosition {
   pnlPercent?: number;
   chain?: "solana" | "base" | "bnb";
 }
-
-const APPROX_ETH_PRICE = 3000;
-const APPROX_BNB_PRICE = 600;
 
 export function PublicProfile() {
   const { handle } = useParams<{ handle: string }>();
@@ -121,11 +119,12 @@ export function PublicProfile() {
 
     (async () => {
       try {
-        const [positionsRes, solBalance, solPrice, evmData] = await Promise.all(
+        const [positionsRes, solBalance, solPrice, nativePrices, evmData] = await Promise.all(
           [
             getWalletPositions(profile!.walletAddress, true),
             getSolBalance(profile!.walletAddress),
             getSolPrice(),
+            fetchNativePrices(),
             profile!.evmAddress
               ? fetch(
                   `${base}/api/relay/evm-balances-public?address=${encodeURIComponent(profile!.evmAddress)}`,
@@ -198,7 +197,7 @@ export function PublicProfile() {
               symbol: "ETH",
               name: "Ethereum (Base)",
               amount: baseBal.native,
-              value: baseBal.native * APPROX_ETH_PRICE,
+              value: baseBal.native * nativePrices.eth,
               pnl: evmPnl?.pnl,
               pnlPercent: evmPnl?.pnlPercent,
               chain: "base",
@@ -224,7 +223,7 @@ export function PublicProfile() {
               symbol: "BNB",
               name: "BNB",
               amount: bnbBal.native,
-              value: bnbBal.native * APPROX_BNB_PRICE,
+              value: bnbBal.native * nativePrices.bnb,
               pnl: evmPnl?.pnl,
               pnlPercent: evmPnl?.pnlPercent,
               chain: "bnb",

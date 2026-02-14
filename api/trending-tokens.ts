@@ -22,6 +22,10 @@ export interface TrendingToken {
   priceUsd: string;
   marketCap: number;
   priceChange24: number | null;
+  volumeChange24: number | null;
+  liquidity: number;
+  volume24hUsd: number;
+  rank: number | null;
   imageUrl: string | null;
 }
 
@@ -32,6 +36,10 @@ interface BirdeyeTrendingItem {
   price?: number;
   marketcap?: number;
   price24hChangePercent?: number;
+  volume24hChangePercent?: number;
+  volume24hUSD?: number;
+  liquidity?: number;
+  rank?: number;
   logoURI?: string;
 }
 
@@ -55,6 +63,15 @@ function toTrendingToken(item: BirdeyeTrendingItem, chainId: string): TrendingTo
     item.price24hChangePercent != null && Number.isFinite(item.price24hChangePercent)
       ? item.price24hChangePercent
       : null;
+  const volumeChange24 =
+    item.volume24hChangePercent != null && Number.isFinite(item.volume24hChangePercent)
+      ? item.volume24hChangePercent
+      : null;
+  const liquidity = item.liquidity != null && Number.isFinite(item.liquidity) ? item.liquidity : 0;
+  const volume24hUsd =
+    item.volume24hUSD != null && Number.isFinite(item.volume24hUSD) ? item.volume24hUSD : 0;
+  const rank =
+    item.rank != null && Number.isFinite(item.rank) ? item.rank : null;
   return {
     chainId,
     tokenAddress: item.address ?? "",
@@ -63,6 +80,10 @@ function toTrendingToken(item: BirdeyeTrendingItem, chainId: string): TrendingTo
     priceUsd,
     marketCap,
     priceChange24,
+    volumeChange24,
+    liquidity,
+    volume24hUsd,
+    rank,
     imageUrl: item.logoURI ?? null,
   };
 }

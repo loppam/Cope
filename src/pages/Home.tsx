@@ -750,6 +750,19 @@ export function Home() {
                       </div>
                       <p className="text-xs text-white/50 truncate mt-0.5">
                         {formatMarketCap(token.marketCap)} MC
+                        {token.volumeChange24 != null && (
+                          <span
+                            className={
+                              token.volumeChange24 >= 0
+                                ? " text-[#12d585]"
+                                : " text-[#FF6B6B]"
+                            }
+                          >
+                            {" "}
+                            Vol {token.volumeChange24 >= 0 ? "+" : ""}
+                            {token.volumeChange24.toFixed(1)}%
+                          </span>
+                        )}
                       </p>
                     </div>
                     <div className="flex flex-col items-end gap-0.5 flex-shrink-0">

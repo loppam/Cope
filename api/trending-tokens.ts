@@ -80,7 +80,7 @@ async function fetchBirdeyeTrending(
   url.searchParams.set("limit", String(limit));
   url.searchParams.set("sort_by", sortBy);
   url.searchParams.set("interval", interval);
-  url.searchParams.set("sort_type", "desc");
+  url.searchParams.set("sort_type", "asc");
   url.searchParams.set("ui_amount_mode", "scaled");
 
   const res = await fetch(url.toString(), {

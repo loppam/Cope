@@ -59,7 +59,7 @@
       "destination": "/api/push-handler?action=status"
     },
     {
-      "source": "/((?!api/|__/).*)",
+      "source": "/((?!api/|__/|\\.well-known).*)",
       "destination": "/index.html"
     }
   ],
@@ -83,6 +83,15 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/.well-known/assetlinks.json",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/json"
         }
       ]
     },

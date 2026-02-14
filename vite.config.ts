@@ -13,8 +13,9 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["favicon.ico", "icons/*.png", "icons/favicon.svg"],
+      includeAssets: ["favicon.ico", "icons/*.png", "icons/favicon.svg", "offline.html"],
       manifest: {
+        id: "https://trycope.com/",
         name: "COPE - Social Trading App",
         short_name: "COPE",
         description:
@@ -22,6 +23,10 @@ export default defineConfig({
         theme_color: "#12d585",
         background_color: "#000000",
         display: "standalone",
+        display_override: ["window-controls-overlay", "standalone"],
+        dir: "ltr",
+        lang: "en",
+        launch_handler: { client_mode: "navigate-existing" },
         orientation: "portrait-primary",
         scope: "/",
         start_url: "/",
@@ -135,6 +140,14 @@ export default defineConfig({
           },
         ],
         categories: ["finance", "business"],
+        screenshots: [
+          {
+            form_factor: "narrow",
+            label: "Home",
+            sizes: "1080x1920",
+            src: "/screenshots/home.png",
+          },
+        ],
         share_target: {
           action: "/share",
           method: "POST",
@@ -152,6 +165,7 @@ export default defineConfig({
       injectManifest: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff,woff2}"],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024, // 4 MiB (main chunk exceeds 2 MiB default)
+        additionalManifestEntries: [{ url: "/offline.html", revision: null }],
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff,woff2}"],

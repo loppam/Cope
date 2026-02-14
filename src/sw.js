@@ -1,13 +1,26 @@
 // Unified Service Worker: Workbox (PWA caching) + Firebase Messaging
 import { precacheAndRoute, cleanupOutdatedCaches } from "workbox-precaching";
-import { registerRoute } from "workbox-routing";
-import { CacheFirst, NetworkFirst } from "workbox-strategies";
+import { registerRoute, setCatchHandler } from "workbox-routing";
+import { CacheFirst, NetworkFirst, NetworkOnly } from "workbox-strategies";
 import { ExpirationPlugin } from "workbox-expiration";
+import { BackgroundSyncPlugin } from "workbox-background-sync";
 import { clientsClaim } from "workbox-core";
 
 // Clean up old caches and precache new assets
 cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
+
+// Offline fallback: when no route handles the request (e.g. navigate while offline), serve offline page
+const OFFLINE_URL = "/offline.html";
+setCatchHandler(async ({ request }) => {
+  if (request.mode === "navigate") {
+    const offline = await caches.match(OFFLINE_URL);
+    if (offline) return offline;
+    const index = await caches.match("/index.html");
+    if (index) return index;
+  }
+  return new Response("Offline", { status: 503, statusText: "Service Unavailable" });
+});
 
 // Auto-update behavior
 self.skipWaiting();
@@ -96,6 +109,29 @@ self.addEventListener("notificationclick", (event) => {
 });
 
 initFirebase();
+
+// Background Sync: retry failed POST requests to /api/ when back online
+const bgSyncPlugin = new BackgroundSyncPlugin("cope-api-sync", {
+  maxRetentionTime: 24 * 60, // retry for up to 24 hours
+});
+registerRoute(
+  ({ url }) => url.pathname.startsWith("/api/"),
+  new NetworkOnly({ plugins: [bgSyncPlugin] }),
+  "POST",
+);
+
+// Periodic Sync: optional background refresh (register from app with periodicsync permission)
+self.addEventListener("periodicsync", (event) => {
+  if (event.tag === "cope-content-refresh") {
+    event.waitUntil(
+      Promise.all(
+        self.clients.matchAll({ type: "window" }).then((clients) =>
+          clients.map((c) => c.postMessage({ type: "PERIODIC_SYNC", tag: event.tag })),
+        ),
+      ).catch(() => {}),
+    );
+  }
+});
 
 // Runtime caching strategies
 registerRoute(

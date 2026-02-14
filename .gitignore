@@ -52,3 +52,7 @@ dev-sw.js
 # Allow custom SW source for injectManifest
 !src/sw.js
 firestore.rules
+
+# TWA / Solana dApp Store (keystore and password must not be committed)
+twa-build/android.keystore
+twa-build/.keystore-pass

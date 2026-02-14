@@ -1,0 +1,16 @@
+{
+  "packageId": "com.trycope.app",
+  "name": "COPE",
+  "launcherName": "COPE",
+  "startUrl": "/",
+  "host": "trycope.com",
+  "iconUrl": "https://trycope.com/icons/icon-512x512.png",
+  "maskableIconUrl": "https://trycope.com/icons/icon-512x512.png",
+  "themeColor": "#12d585",
+  "backgroundColor": "#000000",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "android.keystore",
+    "alias": "twa"
+  }
+}

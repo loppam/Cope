@@ -95,3 +95,32 @@ export function setupNetworkListener(callback: (online: boolean) => void) {
   window.addEventListener('online', () => callback(true));
   window.addEventListener('offline', () => callback(false));
 }
+
+const PERIODIC_SYNC_TAG = 'cope-content-refresh';
+
+/** Register Periodic Background Sync when supported (e.g. Chrome). Call after user gesture. */
+export async function registerPeriodicSync(minIntervalMs: number = 24 * 60 * 60 * 1000): Promise<boolean> {
+  if (!('serviceWorker' in navigator)) return false;
+  const reg = await navigator.serviceWorker.ready;
+  const periodicSync = (reg as ServiceWorkerRegistration & { periodicSync?: { register: (tag: string, opts: { minInterval: number }) => Promise<void> } }).periodicSync;
+  if (!periodicSync) return false;
+  try {
+    await periodicSync.register(PERIODIC_SYNC_TAG, { minInterval: minIntervalMs });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Unregister Periodic Sync. */
+export async function unregisterPeriodicSync(): Promise<boolean> {
+  if (!('serviceWorker' in navigator)) return false;
+  const reg = await navigator.serviceWorker.ready;
+  const periodicSync = (reg as ServiceWorkerRegistration & { periodicSync?: { unregister: (tag: string) => Promise<boolean> } }).periodicSync;
+  if (!periodicSync) return false;
+  try {
+    return await periodicSync.unregister(PERIODIC_SYNC_TAG);
+  } catch {
+    return false;
+  }
+}

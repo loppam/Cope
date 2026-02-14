@@ -213,6 +213,7 @@ function DiscoverTabContent() {
   const [topTraders, setTopTraders] = useState<TopTrader[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [discoverLoading, setDiscoverLoading] = useState(true);
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -285,27 +286,39 @@ function DiscoverTabContent() {
       if (cursor) params.set("cursor", cursor);
       const res = await fetch(`${base}/api/discover?${params.toString()}`);
       const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const message =
+          (typeof data?.error === "string" && data.error) ||
+          `Failed to load (${res.status})`;
+        return {
+          traders: [] as TopTrader[],
+          nextCursor: null as string | null,
+          error: message,
+        };
+      }
       return {
         traders: (data.topTraders ?? []) as TopTrader[],
         nextCursor: (data.nextCursor ?? null) as string | null,
+        error: null,
       };
     },
     [],
   );
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadDiscover = useCallback(() => {
+    setDiscoverError(null);
     setDiscoverLoading(true);
-    fetchDiscoverPage(null).then(({ traders, nextCursor: nc }) => {
-      if (cancelled) return;
+    fetchDiscoverPage(null).then(({ traders, nextCursor: nc, error }) => {
       setTopTraders(traders);
       setNextCursor(nc);
+      setDiscoverError(error ?? null);
       setDiscoverLoading(false);
     });
-    return () => {
-      cancelled = true;
-    };
   }, [fetchDiscoverPage]);
+
+  useEffect(() => {
+    loadDiscover();
+  }, [loadDiscover]);
 
   const loadMore = useCallback(() => {
     if (!nextCursor || loadingMoreRef.current || discoverLoading) return;
@@ -452,6 +465,18 @@ function DiscoverTabContent() {
           <Loader2 className="h-6 w-6 animate-spin" />
           <span>Loading discover…</span>
         </div>
+      ) : discoverError ? (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-6 text-center">
+          <p className="text-sm text-amber-200 mb-4">{discoverError}</p>
+          <button
+            type="button"
+            onClick={loadDiscover}
+            data-tap-haptic
+            className="tap-press min-h-[44px] min-w-[44px] inline-flex items-center justify-center gap-2 rounded-xl bg-[#12d585] px-5 py-2.5 font-semibold text-black"
+          >
+            <span>Retry</span>
+          </button>
+        </div>
       ) : (
         <div className="space-y-4">
           {topTraders.length > 0 ? (
@@ -524,17 +549,38 @@ function DiscoverTabContent() {
                   );
                 })}
               </div>
+              {/* Load more: visible button + sentinel for infinite scroll */}
               {nextCursor && (
-                <div ref={loadMoreRef} className="flex justify-center py-4 min-h-[48px]">
-                  {loadingMore && (
-                    <Loader2 className="w-5 h-5 text-[#12d585] animate-spin" />
+                <div
+                  ref={loadMoreRef}
+                  className="flex flex-col items-center gap-3 py-4 sm:py-6"
+                >
+                  {loadingMore ? (
+                    <Loader2 className="h-6 w-6 text-[#12d585] animate-spin" />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={loadMore}
+                      data-tap-haptic
+                      className="tap-press min-h-[44px] min-w-[44px] inline-flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/5 px-5 py-3 text-sm font-medium text-white hover:bg-white/10 transition-colors"
+                    >
+                      Load more
+                    </button>
                   )}
                 </div>
               )}
             </div>
           ) : (
-            <div className="py-12 text-center text-white/50 text-sm">
-              No top traders yet
+            <div className="rounded-xl border border-white/10 bg-white/5 p-8 text-center">
+              <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center mx-auto mb-3">
+                <Users className="w-6 h-6 text-white/40" />
+              </div>
+              <h3 className="text-sm font-semibold text-white/80 mb-1">
+                Leaderboard empty
+              </h3>
+              <p className="text-xs text-white/50 max-w-[260px] mx-auto">
+                Top traders will appear here once wallet stats are available. Use search above to find people by handle or wallet.
+              </p>
             </div>
           )}
         </div>

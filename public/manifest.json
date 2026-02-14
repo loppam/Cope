@@ -1,9 +1,14 @@
 {
+  "id": "https://trycope.com/",
   "name": "COPE - Social Trading App",
   "short_name": "COPE",
   "description": "Social trading app for cryptocurrency trading and wallet management",
   "start_url": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "dir": "ltr",
+  "lang": "en",
+  "launch_handler": { "client_mode": "navigate-existing" },
   "background_color": "#000000",
   "theme_color": "#12d585",
   "orientation": "portrait-primary",
@@ -76,7 +81,14 @@
       "purpose": "any"
     }
   ],
-  "screenshots": [],
+  "screenshots": [
+    {
+      "form_factor": "narrow",
+      "label": "Home",
+      "sizes": "1080x1920",
+      "src": "/screenshots/home.png"
+    }
+  ],
   "categories": ["finance", "business"],
   "shortcuts": [
     {

@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.trycope.app",
+      "sha256_cert_fingerprints": [
+        "FD:1F:20:0D:4F:C9:21:E2:70:EA:8A:2C:F6:A9:01:3E:14:77:E3:ED:45:01:D1:03:85:E1:F2:03:C1:17:17:CF"
+      ]
+    }
+  }
+]

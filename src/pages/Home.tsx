@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router";
 import { motion } from "motion/react";
 import { Button } from "@/components/Button";
@@ -38,6 +38,7 @@ import { shortenAddress, formatCurrency, getApiBase } from "@/lib/utils";
 import { getUsdcBalance, getSolBalance } from "@/lib/rpc";
 import { getWalletPositions, getSolPrice } from "@/lib/solanatracker";
 import { fetchNativePrices } from "@/lib/coingecko";
+import { SOL_MINT, SOLANA_USDC_MINT } from "@/lib/constants";
 import { apiCache, UI_CACHE_TTL_MS } from "@/lib/cache";
 import { toast } from "sonner";
 import { DocumentHead } from "@/components/DocumentHead";
@@ -46,18 +47,20 @@ import type { TrendingToken } from "../../api/trending-tokens";
 type TabId = "plays" | "trending";
 type FilterId = "star" | "verified" | "trending" | "held";
 
-const LAZY_PAGE_SIZE = 12;
+const TRENDING_PAGE_SIZE = 20;
 
 export function Home() {
   const navigate = useNavigate();
   const { user, userProfile, watchlist } = useAuth();
   const [notifications, setNotifications] = useState<WalletNotification[]>([]);
   const [trending, setTrending] = useState<TrendingToken[]>([]);
+  const [trendingTotal, setTrendingTotal] = useState<number | null>(null);
+  const [trendingNextOffset, setTrendingNextOffset] = useState(0);
   const [trendingLoading, setTrendingLoading] = useState(true);
+  const [trendingLoadingMore, setTrendingLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>("trending");
   const [activeFilter, setActiveFilter] = useState<FilterId>("trending");
-  const [visibleTrendingCount, setVisibleTrendingCount] = useState(LAZY_PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   // Balance header (when wallet connected)
@@ -134,11 +137,17 @@ export function Home() {
         ]);
         if (cancelled) return;
 
-        const res = positionsRes as { total?: number };
-        const posVal = res?.total ?? 0;
         const solVal = (solBal ?? 0) * (solPrice ?? 0);
         const evmVal = evmBalanceUsd(evmData, nativePrices);
-        const total = usdc + posVal + solVal + evmVal;
+        const tokens = (positionsRes as { tokens?: Array<{ token: { mint: string; symbol?: string }; value?: number }> })?.tokens ?? [];
+        let splVal = 0;
+        for (const t of tokens) {
+          const mint = t.token?.mint;
+          const symbol = (t.token?.symbol ?? "").toUpperCase();
+          if (mint === SOL_MINT || mint === SOLANA_USDC_MINT || symbol === "SOL") continue;
+          splVal += t.value ?? 0;
+        }
+        const total = usdc + solVal + evmVal + splVal;
 
         setTotalBalance(total);
 
@@ -208,12 +217,17 @@ export function Home() {
             .catch(() => null),
         ),
       ]).then(([usdc, positionsRes, solBal, solPrice, nativePrices, evmData]) => {
-        const res = positionsRes as { total?: number };
-        const total =
-          usdc +
-          (res?.total ?? 0) +
-          (solBal ?? 0) * (solPrice ?? 0) +
-          evmBalanceUsd(evmData, nativePrices);
+        const solVal = (solBal ?? 0) * (solPrice ?? 0);
+        const evmVal = evmBalanceUsd(evmData, nativePrices);
+        const tokens = (positionsRes as { tokens?: Array<{ token: { mint: string; symbol?: string }; value?: number }> })?.tokens ?? [];
+        let splVal = 0;
+        for (const t of tokens) {
+          const mint = t.token?.mint;
+          const symbol = (t.token?.symbol ?? "").toUpperCase();
+          if (mint === SOL_MINT || mint === SOLANA_USDC_MINT || symbol === "SOL") continue;
+          splVal += t.value ?? 0;
+        }
+        const total = usdc + solVal + evmVal + splVal;
         setTotalBalance(total);
       }).catch(() => setTotalBalance(null)).finally(() => setBalanceLoading(false));
     };
@@ -303,41 +317,96 @@ export function Home() {
     };
   }, [user, watchlist]);
 
-  // Fetch trending tokens (cache-first: 30s cache on page enter, then refetch in background)
+  // sort_by for API: liquidity helps Verified/Most held; rank for Trending/Top gainers
+  const trendingSortBy =
+    activeFilter === "verified" || activeFilter === "held" ? "liquidity" : "rank";
+
+  // Fetch trending tokens (Birdeye, multi-chain, paginated). Cache-first for first page.
   useEffect(() => {
     let cancelled = false;
     const base = getApiBase();
-    const cacheKey = "trending_tokens";
-    const cached = apiCache.get<TrendingToken[]>(cacheKey);
-    if (cached && cached.length > 0) {
-      setTrending(cached);
-      setVisibleTrendingCount(LAZY_PAGE_SIZE);
+    const cacheKey = `trending_tokens_page0_${trendingSortBy}`;
+    const cached = apiCache.get<{
+      tokens: TrendingToken[];
+      total: number;
+      nextOffset: number;
+    }>(cacheKey);
+    if (cached?.tokens?.length) {
+      setTrending(cached.tokens);
+      setTrendingTotal(cached.total ?? null);
+      setTrendingNextOffset(cached.nextOffset ?? 0);
       setTrendingLoading(false);
     } else {
       setTrendingLoading(true);
     }
 
-    async function fetchTrending() {
+    async function fetchTrending(offset = 0) {
       try {
-        const res = await fetch(`${base}/api/trending-tokens`);
+        const res = await fetch(
+          `${base}/api/trending-tokens?offset=${offset}&limit=${TRENDING_PAGE_SIZE}&sort_by=${trendingSortBy}`,
+        );
         const data = await res.json().catch(() => ({}));
-        if (!cancelled && Array.isArray(data?.tokens)) {
-          setTrending(data.tokens);
-          setVisibleTrendingCount(LAZY_PAGE_SIZE);
-          apiCache.set(cacheKey, data.tokens, UI_CACHE_TTL_MS);
+        if (cancelled) return;
+        const tokens = Array.isArray(data?.tokens) ? data.tokens : [];
+        const total = typeof data?.total === "number" ? data.total : 0;
+        const nextOffset = typeof data?.nextOffset === "number" ? data.nextOffset : offset + tokens.length;
+        if (offset === 0) {
+          setTrending(tokens);
+          setTrendingTotal(total);
+          setTrendingNextOffset(nextOffset);
+          if (tokens.length > 0) {
+            apiCache.set(cacheKey, { tokens, total, nextOffset }, UI_CACHE_TTL_MS);
+          }
+        } else {
+          setTrending((prev) => [...prev, ...tokens]);
+          setTrendingNextOffset(nextOffset);
         }
       } catch (error) {
         console.error("Error fetching trending tokens:", error);
       } finally {
-        if (!cancelled) setTrendingLoading(false);
+        if (!cancelled) {
+          if (offset === 0) setTrendingLoading(false);
+          else setTrendingLoadingMore(false);
+        }
       }
     }
 
-    fetchTrending();
+    fetchTrending(0);
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [trendingSortBy]);
+
+  const loadMoreTrending = useCallback(() => {
+    if (trendingLoadingMore || trendingLoading) return;
+    const total = trendingTotal ?? 0;
+    if (trending.length >= total) return;
+    setTrendingLoadingMore(true);
+    const base = getApiBase();
+    const offset = trendingNextOffset;
+    fetch(
+      `${base}/api/trending-tokens?offset=${offset}&limit=${TRENDING_PAGE_SIZE}&sort_by=${trendingSortBy}`,
+    )
+      .then((res) => res.json().catch(() => ({})))
+      .then((data) => {
+        const tokens = Array.isArray(data?.tokens) ? data.tokens : [];
+        const nextOffset =
+          typeof data?.nextOffset === "number"
+            ? data.nextOffset
+            : offset + tokens.length;
+        setTrending((prev) => [...prev, ...tokens]);
+        setTrendingNextOffset(nextOffset);
+      })
+      .catch((err) => console.error("Error loading more trending:", err))
+      .finally(() => setTrendingLoadingMore(false));
+  }, [
+    trendingNextOffset,
+    trendingTotal,
+    trending.length,
+    trendingLoadingMore,
+    trendingLoading,
+    trendingSortBy,
+  ]);
 
   const formatTime = (timestamp: any) => {
     if (!timestamp) return "Just now";
@@ -474,26 +543,28 @@ export function Home() {
     }
   }, [trending, activeFilter]);
 
-  useEffect(() => {
-    setVisibleTrendingCount(LAZY_PAGE_SIZE);
-  }, [activeFilter]);
-
-  // Lazy load more trending on scroll
+  // Infinite scroll: fetch more trending when sentinel is visible
   useEffect(() => {
     const sentinel = sentinelRef.current;
-    if (!sentinel || activeTab !== "trending" || filteredTrending.length <= visibleTrendingCount)
-      return;
+    if (!sentinel || activeTab !== "trending") return;
+    const total = trendingTotal ?? 0;
+    if (trending.length >= total || trendingLoadingMore || trendingLoading) return;
     const obs = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting) {
-          setVisibleTrendingCount((n) => Math.min(n + LAZY_PAGE_SIZE, filteredTrending.length));
-        }
+        if (entries[0]?.isIntersecting) loadMoreTrending();
       },
-      { rootMargin: "100px", threshold: 0.1 },
+      { rootMargin: "200px", threshold: 0.1 },
     );
     obs.observe(sentinel);
     return () => obs.disconnect();
-  }, [activeTab, filteredTrending.length, visibleTrendingCount]);
+  }, [
+    activeTab,
+    trending.length,
+    trendingTotal,
+    trendingLoadingMore,
+    trendingLoading,
+    loadMoreTrending,
+  ]);
 
   return (
     <>
@@ -640,7 +711,7 @@ export function Home() {
                   },
                 }}
               >
-                {filteredTrending.slice(0, visibleTrendingCount).map((token) => (
+                {filteredTrending.map((token) => (
                   <motion.button
                     key={`${token.chainId}-${token.tokenAddress}`}
                     variants={{
@@ -711,9 +782,16 @@ export function Home() {
                     <ChevronRight className="w-5 h-5 text-white/30 flex-shrink-0" />
                   </motion.button>
                 ))}
-                {/* Sentinel for lazy load */}
-                {filteredTrending.length > visibleTrendingCount && (
-                  <div ref={sentinelRef} className="h-4 flex-shrink-0" aria-hidden />
+                {/* Sentinel for infinite scroll + load-more spinner */}
+                {trendingTotal != null &&
+                  trending.length < trendingTotal &&
+                  !trendingLoading && (
+                    <div ref={sentinelRef} className="h-4 flex-shrink-0" aria-hidden />
+                  )}
+                {trendingLoadingMore && (
+                  <div className="flex justify-center py-4">
+                    <Loader2 className="w-6 h-6 animate-spin text-accent-primary" />
+                  </div>
                 )}
               </motion.div>
             )}

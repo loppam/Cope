@@ -247,7 +247,8 @@ export function Profile() {
         if (evmData?.evmAddress) {
           if (Array.isArray(evmData.tokens) && evmData.tokens.length > 0) {
             for (const t of evmData.tokens) {
-              if (t.value > 0) {
+              const amount = t.amount ?? 0;
+              if (amount > 0 && (t.value ?? 0) > 0) {
                 const evmPnl = evmPnlByMint.get(t.mint);
                 combined.push({
                   mint: t.mint,

@@ -127,9 +127,9 @@ export function Home() {
         );
 
         const [usdc, positionsRes, solBal, solPrice, nativePrices, evmData] = await Promise.all([
-          getUsdcBalance(walletAddress),
+          getUsdcBalance(walletAddress).catch(() => 0),
           getWalletPositions(walletAddress, true).catch(() => ({ total: 0, tokens: [], totalSol: 0 })),
-          getSolBalance(walletAddress),
+          getSolBalance(walletAddress).catch(() => 0),
           getSolPrice().catch(() => 0),
           fetchNativePrices(),
           tokenPromise,
@@ -203,9 +203,9 @@ export function Home() {
       setBalanceLoading(true);
       const base = getApiBase();
       Promise.all([
-        getUsdcBalance(walletAddress),
+        getUsdcBalance(walletAddress).catch(() => 0),
         getWalletPositions(walletAddress, false).catch(() => ({ total: 0 })),
-        getSolBalance(walletAddress),
+        getSolBalance(walletAddress).catch(() => 0),
         getSolPrice().catch(() => 0),
         fetchNativePrices(),
         user.getIdToken().then((t) =>

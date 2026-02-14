@@ -16,6 +16,8 @@ import {
   ArrowUpDown,
   ArrowLeft,
   Copy,
+  TrendingUp,
+  TrendingDown,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { getApiBase } from "@/lib/utils";
@@ -126,7 +128,7 @@ export function Profile() {
     if (!walletAddress) return;
     setUsdcBalanceLoading(true);
     try {
-      const balance = await getUsdcBalance(walletAddress);
+      const balance = await getUsdcBalance(walletAddress).catch(() => 0);
       setUsdcBalance(balance);
     } catch (error) {
       console.error("Error fetching Solana USDC balance:", error);
@@ -191,9 +193,9 @@ export function Profile() {
       try {
         // Phase 1: positions + balances (Solana Tracker throttle applies to getWalletPositions)
         const [positionsRes, solBalance, solPrice, nativePrices, evmData] = await Promise.all([
-          getWalletPositions(walletAddress, true),
-          getSolBalance(walletAddress),
-          getSolPrice(),
+          getWalletPositions(walletAddress, true).catch(() => ({ total: 0, tokens: [], totalSol: 0 })),
+          getSolBalance(walletAddress).catch(() => 0),
+          getSolPrice().catch(() => 0),
           fetchNativePrices(),
           user
             ? user.getIdToken().then((token) =>
@@ -236,11 +238,13 @@ export function Profile() {
         }
 
         const combined: TokenPosition[] = [];
+        const SOLANA_LOGO = "https://assets.coingecko.com/coins/images/4128/small/solana.png";
         if (solBalance > 0 && solPrice > 0) {
           combined.push({
             mint: SOL_MINT,
             symbol: "SOL",
             name: "Solana",
+            image: SOLANA_LOGO,
             amount: solBalance,
             value: solBalance * solPrice,
           });
@@ -820,37 +824,43 @@ export function Profile() {
                       <p className="text-sm text-white/50">No open positions</p>
                     ) : (
                       <ul className="space-y-2">
-                        {displayedOpenPositions.map((pos) => (
-                          <li
-                            key={pos.mint}
-                            data-tap-haptic
-                            className="tap-press flex items-center gap-3 py-3 px-2 rounded-lg min-h-[44px] hover:bg-white/5 active:bg-white/10 touch-manipulation"
-                            role="button"
-                            onClick={() => {
-                              const params = new URLSearchParams({ mint: pos.mint });
-                              if (pos.chain === "base" || pos.chain === "bnb") params.set("chain", pos.chain);
-                              navigate(`/app/trade?${params.toString()}`);
-                            }}
-                          >
-                            {pos.image ? (
-                              <img src={pos.image} alt="" className="w-8 h-8 rounded-full object-cover" />
-                            ) : (
-                              <div className="w-8 h-8 rounded-full bg-white/10" />
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium truncate">{pos.symbol}</p>
-                              <p className="text-xs text-white/50">${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2 })}</p>
-                              {pos.pnl != null && pos.pnl !== 0 && (
-                                <p className={`text-xs mt-0.5 ${pos.pnl >= 0 ? "text-[#12d585]" : "text-red-400"}`}>
-                                  {pos.pnl >= 0 ? "+" : ""}${pos.pnl.toFixed(2)}
-                                  {pos.pnlPercent != null && !Number.isNaN(pos.pnlPercent) && (
-                                    <span className="ml-1 opacity-90">({pos.pnlPercent >= 0 ? "+" : ""}{pos.pnlPercent.toFixed(1)}%)</span>
-                                  )}
+                        {displayedOpenPositions.map((pos) => {
+                          const isNative = pos.symbol === "SOL" || pos.symbol === "ETH" || pos.symbol === "BNB";
+                          const quantityStr = isNative
+                            ? pos.amount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 4 })
+                            : pos.amount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+                          const pct = pos.pnlPercent != null && !Number.isNaN(pos.pnlPercent) ? pos.pnlPercent : 0;
+                          const pctPositive = pct >= 0;
+                          return (
+                            <li
+                              key={pos.mint}
+                              data-tap-haptic
+                              className="tap-press flex items-center gap-3 py-3 px-2 rounded-lg min-h-[44px] hover:bg-white/5 active:bg-white/10 touch-manipulation"
+                              role="button"
+                              onClick={() => {
+                                const params = new URLSearchParams({ mint: pos.mint });
+                                if (pos.chain === "base" || pos.chain === "bnb") params.set("chain", pos.chain);
+                                navigate(`/app/trade?${params.toString()}`);
+                              }}
+                            >
+                              {pos.image ? (
+                                <img src={pos.image} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden"); }} />
+                              ) : null}
+                              <div className={`w-9 h-9 rounded-full bg-white/10 flex-shrink-0 ${pos.image ? "hidden" : ""}`} />
+                              <div className="flex-1 min-w-0">
+                                <p className="font-semibold truncate">{pos.name}</p>
+                                <p className="text-xs text-white/50 truncate">{quantityStr} {pos.symbol}</p>
+                              </div>
+                              <div className="text-right flex-shrink-0">
+                                <p className="font-semibold">${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                <p className={`text-sm flex items-center justify-end gap-0.5 ${pctPositive ? "text-[#12d585]" : "text-red-400"}`}>
+                                  {pctPositive ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+                                  {pctPositive ? "+" : ""}{pct.toFixed(2)}%
                                 </p>
-                              )}
-                            </div>
-                          </li>
-                        ))}
+                              </div>
+                            </li>
+                          );
+                        })}
                       </ul>
                     )}
                   </div>

@@ -23,6 +23,7 @@ interface DexPair {
   baseToken: { address: string; symbol: string; name: string };
   priceUsd?: string;
   marketCap?: number;
+  fdv?: number;
   priceChange?: { h24?: number };
   info?: { imageUrl?: string };
 }
@@ -89,7 +90,8 @@ export default async function handler(
       );
       if (!pairsRes.ok) continue;
 
-      const pairs: DexPair[] = await pairsRes.json();
+      const raw = await pairsRes.json();
+      const pairs: DexPair[] = Array.isArray(raw) ? raw : (raw?.pairs ?? []);
       const byAddr = new Map<string, DexPair>();
       for (const p of pairs) {
         const addr = (p.baseToken?.address ?? "").toLowerCase();
@@ -118,7 +120,7 @@ export default async function handler(
         const symbol = pair?.baseToken?.symbol ?? "—";
         const name = pair?.baseToken?.name ?? symbol;
         const priceUsd = pair?.priceUsd ?? "0";
-        const marketCap = pair?.marketCap ?? 0;
+        const marketCap = pair?.marketCap ?? pair?.fdv ?? 0;
         const priceChange24 = pair?.priceChange?.h24 ?? null;
         const imageUrl =
           pair?.info?.imageUrl ??

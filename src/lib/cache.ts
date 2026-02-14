@@ -1,5 +1,8 @@
 // Simple in-memory cache for API responses
-// Cache expires after a specified time (default 30 seconds)
+// Cache expires after a specified time (default 60 seconds)
+
+/** TTL for UI cache-first data: show cached then refetch in background (e.g. on page change) */
+export const UI_CACHE_TTL_MS = 30 * 1000; // 30 seconds
 
 interface CacheEntry<T> {
   data: T;

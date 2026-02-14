@@ -38,6 +38,7 @@ import { shortenAddress, formatCurrency, getApiBase } from "@/lib/utils";
 import { getUsdcBalance, getSolBalance } from "@/lib/rpc";
 import { getWalletPositions, getSolPrice } from "@/lib/solanatracker";
 import { fetchNativePrices } from "@/lib/coingecko";
+import { apiCache, UI_CACHE_TTL_MS } from "@/lib/cache";
 import { toast } from "sonner";
 import { DocumentHead } from "@/components/DocumentHead";
 import type { TrendingToken } from "../../api/trending-tokens";
@@ -93,6 +94,7 @@ export function Home() {
   }
 
   // Fetch balance for header (USDC + Solana positions + SOL + EVM)
+  // Cache-first: show 30s cache on page enter, then refetch in background
   useEffect(() => {
     if (!walletAddress || !walletConnected || !user) {
       setTotalBalance(null);
@@ -100,8 +102,16 @@ export function Home() {
       setBalanceLoading(false);
       return;
     }
+    const cacheKey = `balance_${user.uid}`;
+    const cached = apiCache.get<{ totalBalance: number; balance24h: number | null }>(cacheKey);
+    if (cached) {
+      setTotalBalance(cached.totalBalance);
+      setBalance24h(cached.balance24h);
+      setBalanceLoading(false);
+    } else {
+      setBalanceLoading(true);
+    }
     let cancelled = false;
-    setBalanceLoading(true);
     const base = getApiBase();
 
     (async () => {
@@ -140,10 +150,16 @@ export function Home() {
         const now = Date.now();
         const hoursAgo = (now - prevAt) / (60 * 60 * 1000);
 
+        let balance24h: number | null = null;
         if (prevAt > 0 && hoursAgo >= 18 && hoursAgo <= 30) {
-          setBalance24h(total - prev);
+          balance24h = total - prev;
+          setBalance24h(balance24h);
         } else {
           setBalance24h(null);
+        }
+
+        if (!cancelled) {
+          apiCache.set(cacheKey, { totalBalance: total, balance24h }, UI_CACHE_TTL_MS);
         }
 
         const currentAt = (data?.currentAt as Timestamp)?.toMillis?.() ?? 0;
@@ -205,7 +221,7 @@ export function Home() {
     return () => window.removeEventListener("cope-refresh-balance", onRefresh);
   }, [walletAddress, user]);
 
-  // Fetch notifications
+  // Fetch notifications (cache-first: 30s cache on page enter, then refetch in background)
   useEffect(() => {
     if (!user) {
       setLoading(false);
@@ -217,6 +233,14 @@ export function Home() {
       setNotifications([]);
       setLoading(false);
       return;
+    }
+
+    const cacheKey = `notifications_${user.uid}`;
+    const cached = apiCache.get<WalletNotification[]>(cacheKey);
+    if (cached) {
+      const filtered = cached.filter((n) => watchedAddresses.includes(n.walletAddress));
+      setNotifications(filtered);
+      setLoading(false);
     }
 
     const notificationsRef = collection(db, "notifications");
@@ -244,18 +268,17 @@ export function Home() {
             throw err;
           }
         }
-        const fetched = snapshot.docs
+        const rawList = snapshot.docs
           .map((doc) => ({ id: doc.id, ...doc.data() }))
-          .filter(
-            (n: any) =>
-              !n.deleted && watchedAddresses.includes(n.walletAddress),
-          )
+          .filter((n: any) => !n.deleted)
           .sort((a: any, b: any) => {
             const aTime = a.createdAt?.toDate?.()?.getTime() || 0;
             const bTime = b.createdAt?.toDate?.()?.getTime() || 0;
             return bTime - aTime;
           }) as WalletNotification[];
-        setNotifications(fetched);
+        apiCache.set(cacheKey, rawList, UI_CACHE_TTL_MS);
+        const filtered = rawList.filter((n) => watchedAddresses.includes(n.walletAddress));
+        setNotifications(filtered);
       } catch (error) {
         console.error("Error fetching notifications:", error);
       } finally {
@@ -280,19 +303,28 @@ export function Home() {
     };
   }, [user, watchlist]);
 
-  // Fetch trending tokens
+  // Fetch trending tokens (cache-first: 30s cache on page enter, then refetch in background)
   useEffect(() => {
     let cancelled = false;
     const base = getApiBase();
+    const cacheKey = "trending_tokens";
+    const cached = apiCache.get<TrendingToken[]>(cacheKey);
+    if (cached && cached.length > 0) {
+      setTrending(cached);
+      setVisibleTrendingCount(LAZY_PAGE_SIZE);
+      setTrendingLoading(false);
+    } else {
+      setTrendingLoading(true);
+    }
 
     async function fetchTrending() {
       try {
-        setTrendingLoading(true);
         const res = await fetch(`${base}/api/trending-tokens`);
         const data = await res.json().catch(() => ({}));
         if (!cancelled && Array.isArray(data?.tokens)) {
           setTrending(data.tokens);
           setVisibleTrendingCount(LAZY_PAGE_SIZE);
+          apiCache.set(cacheKey, data.tokens, UI_CACHE_TTL_MS);
         }
       } catch (error) {
         console.error("Error fetching trending tokens:", error);

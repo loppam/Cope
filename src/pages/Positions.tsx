@@ -19,7 +19,7 @@ import {
 } from "@/lib/solanatracker";
 import { getSolBalance, getUsdcBalance } from "@/lib/rpc";
 import { fetchNativePrices } from "@/lib/coingecko";
-import { apiCache } from "@/lib/cache";
+import { apiCache, UI_CACHE_TTL_MS } from "@/lib/cache";
 import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
 import { toast } from "sonner";
 
@@ -66,6 +66,27 @@ export function Positions() {
 
     try {
       setRefreshing(true);
+      const cacheKey = `positions_${walletAddress}`;
+      if (!forceRefresh) {
+        const cached = apiCache.get<{
+          positions: Position[];
+          summary: any;
+          solBalance: number;
+          solPrice: number;
+          usdcBalance: number;
+        }>(cacheKey);
+        if (cached) {
+          setPositions(cached.positions);
+          setSummary(cached.summary);
+          setSolBalance(cached.solBalance);
+          setSolPrice(cached.solPrice);
+          setUsdcBalance(cached.usdcBalance);
+          setLoading(false);
+          setRefreshing(false);
+          fetchPositions(true); // refetch in background
+          return;
+        }
+      }
 
       // Phase 1: Load positions + SOL/USDC balance/price first so the list shows immediately
       const positionsResponse = await getWalletPositions(
@@ -288,6 +309,17 @@ export function Positions() {
         };
       });
       setPositions(merged);
+      apiCache.set(
+        `positions_${walletAddress}`,
+        {
+          positions: merged,
+          summary: summaryData.data?.summary ?? null,
+          solBalance: currentSolBalance,
+          solPrice: currentSolPrice,
+          usdcBalance: currentUsdcBalance,
+        },
+        UI_CACHE_TTL_MS,
+      );
     } catch (error: any) {
       console.error("Error fetching positions:", error);
       toast.error("Failed to load positions");

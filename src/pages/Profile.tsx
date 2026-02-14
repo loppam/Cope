@@ -55,6 +55,7 @@ import { getIntentStatus } from "@/lib/relay";
 import { toast } from "sonner";
 import type { WatchedWallet } from "@/lib/auth";
 import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
+import { apiCache, UI_CACHE_TTL_MS } from "@/lib/cache";
 import { Input } from "@/components/Input";
 import { Loader2 } from "lucide-react";
 import { DocumentHead } from "@/components/DocumentHead";
@@ -169,11 +170,18 @@ export function Profile() {
 
   // Fetch open positions: SOL + EVM (Base/BNB USDC and native) + SPL tokens
   // Phased loading: positions first, then 1s delay, then PnL (Solana Tracker 1 RPS) + Moralis (EVM PnL)
+  // Cache-first: 30s cache on page enter, then refetch in background
   useEffect(() => {
     if (!walletAddress) {
       setOpenPositions([]);
       setClosedPositions([]);
       return;
+    }
+    const cacheKey = `profile_positions_${walletAddress}`;
+    const cached = apiCache.get<{ openPositions: TokenPosition[]; closedPositions: TokenPosition[] }>(cacheKey);
+    if (cached) {
+      setOpenPositions(cached.openPositions);
+      setClosedPositions(cached.closedPositions);
     }
     let cancelled = false;
     const base = getApiBase();
@@ -337,6 +345,9 @@ export function Profile() {
         }
         setOpenPositions(combined);
         setClosedPositions([]);
+        if (!cancelled) {
+          apiCache.set(cacheKey, { openPositions: combined, closedPositions: [] }, UI_CACHE_TTL_MS);
+        }
       } catch {
         if (!cancelled) {
           setOpenPositions([]);

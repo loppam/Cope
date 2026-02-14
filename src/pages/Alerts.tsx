@@ -23,6 +23,7 @@ import {
   getDocs,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { apiCache, UI_CACHE_TTL_MS } from "@/lib/cache";
 import { toast } from "sonner";
 import { DocumentHead } from "@/components/DocumentHead";
 
@@ -45,6 +46,14 @@ export function Alerts() {
     if (!isAuthenticated || !user) {
       setLoading(false);
       return;
+    }
+
+    const cacheKey = `notifications_${user.uid}`;
+    const cached = apiCache.get<WalletNotification[]>(cacheKey);
+    if (cached) {
+      setNotifications(cached);
+      setUnreadCount(cached.filter((n) => !n.read).length);
+      setLoading(false);
     }
 
     const notificationsRef = collection(db, "notifications");
@@ -81,8 +90,8 @@ export function Alerts() {
             return bTime - aTime;
           });
         setNotifications(fetched);
-        const unread = fetched.filter((n: any) => !n.read);
-        setUnreadCount(unread.length);
+        setUnreadCount(fetched.filter((n) => !n.read).length);
+        apiCache.set(cacheKey, fetched, UI_CACHE_TTL_MS);
       } catch (error) {
         console.error("Error fetching notifications:", error);
       } finally {

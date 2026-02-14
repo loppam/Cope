@@ -1,7 +1,7 @@
 /**
  * Token Scanner – token analysis based on Premium Web App Interface.
  * Uses /api/analyze-token: real bundle detection, stepped reveal, predictions.
- * Tabs: Token (scan) | Discover (accounts + top traders)
+ * Tabs: Token (scan) | Discover (top traders + search)
  */
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router";
@@ -130,17 +130,6 @@ interface TopTrader {
   realizedPnL?: number;
 }
 
-interface DiscoverAccount {
-  uid: string;
-  xHandle?: string | null;
-  displayName?: string | null;
-  avatar?: string | null;
-  walletAddress: string;
-  winRate?: number;
-  totalTrades?: number;
-  realizedPnL?: number;
-}
-
 function AnalysisRow({
   data,
   icon: Icon,
@@ -222,10 +211,13 @@ function DiscoverTabContent() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const [topTraders, setTopTraders] = useState<TopTrader[]>([]);
-  const [accounts, setAccounts] = useState<DiscoverAccount[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [discoverLoading, setDiscoverLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  const loadingMoreRef = useRef(false);
 
   const detectSearchType = (input: string): "wallet" | "xhandle" => {
     const trimmed = input.trim();
@@ -286,41 +278,62 @@ function DiscoverTabContent() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const fetchDiscoverPage = useCallback(
+    async (cursor: string | null) => {
+      const base = getApiBase() || window.location.origin;
+      const params = new URLSearchParams({ limit: "20" });
+      if (cursor) params.set("cursor", cursor);
+      const res = await fetch(`${base}/api/discover?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+      return {
+        traders: (data.topTraders ?? []) as TopTrader[],
+        nextCursor: (data.nextCursor ?? null) as string | null,
+      };
+    },
+    [],
+  );
+
   useEffect(() => {
     let cancelled = false;
-    async function fetchDiscover() {
-      try {
-        const base = getApiBase() || window.location.origin;
-        const res = await fetch(`${base}/api/discover`);
-        const data = await res.json().catch(() => ({}));
-        if (cancelled) return;
-        setTopTraders(data.topTraders ?? []);
-        setAccounts(
-          (data.accounts ?? []).map((a: DiscoverAccount) => ({
-            uid: a.uid,
-            xHandle: a.xHandle ?? null,
-            displayName: a.displayName ?? null,
-            avatar: a.avatar ?? null,
-            walletAddress: a.walletAddress,
-            winRate: a.winRate ?? 0,
-            totalTrades: a.totalTrades ?? 0,
-            realizedPnL: a.realizedPnL,
-          })),
-        );
-      } catch {
-        if (!cancelled) {
-          setTopTraders([]);
-          setAccounts([]);
-        }
-      } finally {
-        if (!cancelled) setDiscoverLoading(false);
-      }
-    }
-    fetchDiscover();
+    setDiscoverLoading(true);
+    fetchDiscoverPage(null).then(({ traders, nextCursor: nc }) => {
+      if (cancelled) return;
+      setTopTraders(traders);
+      setNextCursor(nc);
+      setDiscoverLoading(false);
+    });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [fetchDiscoverPage]);
+
+  const loadMore = useCallback(() => {
+    if (!nextCursor || loadingMoreRef.current || discoverLoading) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    fetchDiscoverPage(nextCursor)
+      .then(({ traders, nextCursor: nc }) => {
+        setTopTraders((prev) => [...prev, ...traders]);
+        setNextCursor(nc);
+      })
+      .finally(() => {
+        setLoadingMore(false);
+        loadingMoreRef.current = false;
+      });
+  }, [nextCursor, discoverLoading, fetchDiscoverPage]);
+
+  useEffect(() => {
+    const el = loadMoreRef.current;
+    if (!el || !nextCursor || loadingMore) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) loadMore();
+      },
+      { rootMargin: "100px", threshold: 0 },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [nextCursor, loadingMore, loadMore]);
 
   const handleSelectUser = (user: UserSearchResult) => {
     setSearchQuery(user.xHandle || user.displayName || "");
@@ -440,17 +453,17 @@ function DiscoverTabContent() {
           <span>Loading discover…</span>
         </div>
       ) : (
-        <div className="space-y-6">
-          {topTraders.length > 0 && (
+        <div className="space-y-4">
+          {topTraders.length > 0 ? (
             <div>
               <h3 className="text-sm font-semibold text-white/80 mb-3">Top traders</h3>
               <div className="space-y-2">
                 {topTraders.map((t) => {
                   const isFollowed = watchedAddresses.has(t.walletAddress);
-                  const percentage = `${Number(t.winRate).toFixed(0)}%`;
+                  const percentage = `${Number(t.winRate).toFixed(2)}%`;
                   return (
                     <div
-                      key={t.uid}
+                      key={t.walletAddress}
                       className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-colors min-h-[56px] ${
                         isFollowed
                           ? "border-[#12d585]/30 bg-[#12d585]/5"
@@ -511,84 +524,19 @@ function DiscoverTabContent() {
                   );
                 })}
               </div>
-            </div>
-          )}
-          <div>
-            <h3 className="text-sm font-semibold text-white/80 mb-3">All accounts</h3>
-            <div className="space-y-2">
-              {accounts.length === 0 ? (
-                <div className="py-8 text-center text-white/50 text-sm">
-                  No public accounts yet
+              {nextCursor && (
+                <div ref={loadMoreRef} className="flex justify-center py-4 min-h-[48px]">
+                  {loadingMore && (
+                    <Loader2 className="w-5 h-5 text-[#12d585] animate-spin" />
+                  )}
                 </div>
-              ) : (
-                accounts.map((a) => {
-                  const isFollowed = watchedAddresses.has(a.walletAddress);
-                  const percentage = `${Number(a.winRate ?? 0).toFixed(0)}%`;
-                  return (
-                    <div
-                      key={a.uid}
-                      className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-colors min-h-[56px] ${
-                        isFollowed
-                          ? "border-[#12d585]/30 bg-[#12d585]/5"
-                          : "border-white/10 bg-white/5"
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => goToProfile(a)}
-                        data-tap-haptic
-                        className="tap-press flex-1 min-w-0 flex items-center gap-3 text-left hover:opacity-90"
-                      >
-                        <span className="font-medium text-white truncate">
-                          {a.xHandle || a.displayName || shortenAddress(a.walletAddress)}
-                        </span>
-                      </button>
-                      <span className="text-sm font-semibold text-[#12d585] flex-shrink-0 tabular-nums">
-                        {percentage}
-                      </span>
-                      {user && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (isFollowed) {
-                              removeFromWatchlist(a.walletAddress, { uid: a.uid });
-                            } else {
-                              addToWatchlist(a.walletAddress, { uid: a.uid, onPlatform: true });
-                            }
-                          }}
-                          data-tap-haptic
-                          className="tap-press relative flex-shrink-0 w-10 h-10 rounded-full ring-2 ring-white/20 flex items-center justify-center min-w-[44px] min-h-[44px] touch-manipulation"
-                          aria-label={isFollowed ? "Unfollow" : "Follow"}
-                        >
-                          {a.avatar ? (
-                            <img
-                              src={a.avatar}
-                              alt=""
-                              className="w-10 h-10 rounded-full object-cover absolute inset-0"
-                            />
-                          ) : (
-                            <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center absolute inset-0">
-                              <Users className="w-5 h-5 text-white/50" />
-                            </div>
-                          )}
-                          {isFollowed ? (
-                            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#12d585] flex items-center justify-center">
-                              <Check className="w-2.5 h-2.5 text-black" strokeWidth={3} />
-                            </span>
-                          ) : (
-                            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#12d585] flex items-center justify-center">
-                              <Plus className="w-2.5 h-2.5 text-black" strokeWidth={3} />
-                            </span>
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  );
-                })
               )}
             </div>
-          </div>
+          ) : (
+            <div className="py-12 text-center text-white/50 text-sm">
+              No top traders yet
+            </div>
+          )}
         </div>
       )}
     </div>

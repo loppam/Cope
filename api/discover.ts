@@ -1,15 +1,15 @@
 /**
  * GET /api/discover
- * Returns top traders (with cached win rates) and all public accounts.
+ * Returns top traders (with cached win rates), paginated.
+ * Query: ?limit=20&cursor=<base64-json> (cursor from previous response)
  * No auth required - public data only.
  */
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore, FieldPath } from "firebase-admin/firestore";
 
-function isUserPublic(data: { isPublic?: boolean }): boolean {
-  return data.isPublic !== false;
-}
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 50;
 
 export default async function handler(
   req: VercelRequest,
@@ -60,11 +60,39 @@ export default async function handler(
   const db = getFirestore();
 
   try {
-    const statsSnap = await db
+    const limit = Math.min(
+      Math.max(1, parseInt(String(req.query.limit || DEFAULT_LIMIT), 10)),
+      MAX_LIMIT,
+    );
+
+    let cursor: { winRate: number; walletAddress: string } | null = null;
+    if (typeof req.query.cursor === "string" && req.query.cursor) {
+      try {
+        const decoded = JSON.parse(
+          Buffer.from(req.query.cursor, "base64url").toString("utf8"),
+        );
+        if (
+          typeof decoded.winRate === "number" &&
+          typeof decoded.walletAddress === "string"
+        ) {
+          cursor = decoded;
+        }
+      } catch {
+        // invalid cursor, ignore
+      }
+    }
+
+    let query = db
       .collection("walletStats")
       .orderBy("winRate", "desc")
-      .limit(20)
-      .get();
+      .orderBy(FieldPath.documentId())
+      .limit(limit);
+
+    if (cursor) {
+      query = query.startAfter(cursor.winRate, cursor.walletAddress);
+    }
+
+    const statsSnap = await query.get();
 
     const topTraders: Array<{
       uid: string;
@@ -75,6 +103,8 @@ export default async function handler(
       totalTrades: number;
       realizedPnL?: number;
     }> = [];
+
+    let nextCursor: string | null = null;
 
     if (!statsSnap.empty) {
       const uids = statsSnap.docs
@@ -109,69 +139,21 @@ export default async function handler(
           realizedPnL: data.realizedPnL,
         });
       });
-    }
 
-    const usersSnap = await db
-      .collection("users")
-      .where("walletAddress", "!=", null)
-      .limit(100)
-      .get();
-
-    const accountDocs = usersSnap.docs
-      .filter((d) => isUserPublic(d.data()))
-      .slice(0, 50);
-
-    const walletAddresses = accountDocs
-      .map((d) => d.data().walletAddress as string)
-      .filter(Boolean);
-
-    const statsByWallet = new Map<
-      string,
-      { winRate: number; totalTrades: number; realizedPnL?: number }
-    >();
-    if (walletAddresses.length > 0) {
-      const chunkSize = 10;
-      const chunks: string[][] = [];
-      for (let i = 0; i < walletAddresses.length; i += chunkSize) {
-        chunks.push(walletAddresses.slice(i, i + chunkSize));
+      if (statsSnap.docs.length === limit) {
+        const last = statsSnap.docs[statsSnap.docs.length - 1];
+        const lastData = last.data();
+        nextCursor = Buffer.from(
+          JSON.stringify({
+            winRate: lastData.winRate ?? 0,
+            walletAddress: last.id,
+          }),
+          "utf8",
+        ).toString("base64url");
       }
-      const allStats = await Promise.all(
-        chunks.map((chunk) =>
-          db
-            .collection("walletStats")
-            .where(FieldPath.documentId(), "in", chunk)
-            .get()
-        )
-      );
-      allStats.forEach((snap) => {
-        snap.docs.forEach((d) => {
-          const data = d.data();
-          statsByWallet.set(d.id, {
-            winRate: data.winRate ?? 0,
-            totalTrades: data.totalTrades ?? 0,
-            realizedPnL: data.realizedPnL,
-          });
-        });
-      });
     }
 
-    const accounts = accountDocs.map((d) => {
-      const data = d.data();
-      const walletAddress = data.walletAddress;
-      const stats = walletAddress ? statsByWallet.get(walletAddress) : undefined;
-      return {
-        uid: d.id,
-        xHandle: data.xHandle ?? null,
-        displayName: data.displayName ?? null,
-        avatar: data.avatar ?? data.photoURL ?? null,
-        walletAddress,
-        winRate: stats?.winRate ?? 0,
-        totalTrades: stats?.totalTrades ?? 0,
-        realizedPnL: stats?.realizedPnL,
-      };
-    });
-
-    res.status(200).json({ topTraders, accounts });
+    res.status(200).json({ topTraders, nextCursor });
   } catch (err) {
     console.error("[api/discover]", err);
     res.status(500).json({

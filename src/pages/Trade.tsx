@@ -9,11 +9,11 @@ import {
   searchTokens,
   getTokenInfo,
   convertTokenInfoToSearchResult,
-  getWalletPositions,
 } from "@/lib/solanatracker";
 import {
   fetchBirdeyeTokenOverview,
   birdeyeOverviewToTokenFields,
+  getWalletTokenBalance,
 } from "@/lib/birdeye-token";
 import {
   isEvmAddress,
@@ -243,18 +243,21 @@ export function Trade() {
     };
   }, [tradeChain, user, userProfile?.evmAddress]);
 
-  // Fetch user's token balance for the selected token (for Sell section)
+  // Fetch user's token balance (Sell section) + USDC balance (Buy section)
+  // Solana: Birdeye wallet token-balance. EVM: relay evm-balances.
   const isEvmToken = token?.chain === "base" || token?.chain === "bnb";
   useEffect(() => {
-    if (!token?.mint || !userProfile?.walletAddress) {
+    if (!userProfile?.walletAddress) {
       setTokenBalance(0);
+      setUsdcBalance(null);
       setSellAmount("");
       return;
     }
-    const fetchBalance = async () => {
+    let cancelled = false;
+    const fetchBalances = async () => {
       setLoadingBalance(true);
       try {
-        if (isEvmToken && user) {
+        if (isEvmToken && user && token?.mint) {
           const tokenId = await user.getIdToken();
           const base = getApiBase();
           const res = await fetch(`${base}/api/relay/evm-balances`, {
@@ -269,53 +272,45 @@ export function Trade() {
           } else {
             setTokenBalance(0);
           }
-        } else {
-          const positions = await getWalletPositions(
+          const usdcBalances = await getWalletTokenBalance(
             userProfile.walletAddress,
-            true,
+            [SOLANA_USDC_MINT],
           );
-          const position = positions.tokens.find(
-            (t) => t.token.mint === token.mint,
+          if (!cancelled) setUsdcBalance(usdcBalances[SOLANA_USDC_MINT] ?? 0);
+        } else {
+          const mints =
+            token?.mint && !isEvmToken
+              ? [token.mint, SOLANA_USDC_MINT]
+              : [SOLANA_USDC_MINT];
+          const balances = await getWalletTokenBalance(
+            userProfile.walletAddress,
+            mints,
           );
-          setTokenBalance(position?.balance ?? 0);
+          if (!cancelled) {
+            if (token?.mint && !isEvmToken) {
+              setTokenBalance(balances[token.mint] ?? 0);
+            } else {
+              setTokenBalance(0);
+            }
+            setUsdcBalance(balances[SOLANA_USDC_MINT] ?? 0);
+          }
         }
-        setSellAmount("");
+        if (!cancelled) setSellAmount("");
       } catch (err) {
-        console.warn("Failed to fetch token balance:", err);
-        setTokenBalance(0);
+        if (!cancelled) {
+          console.warn("Failed to fetch balances:", err);
+          setTokenBalance(0);
+          setUsdcBalance(null);
+        }
       } finally {
-        setLoadingBalance(false);
+        if (!cancelled) setLoadingBalance(false);
       }
     };
-    fetchBalance();
-  }, [token?.mint, token?.chain, userProfile?.walletAddress, user, isEvmToken]);
-
-  // Fetch USDC balance for Buy section (same wallet positions, find SOL USDC)
-  useEffect(() => {
-    if (!userProfile?.walletAddress) {
-      setUsdcBalance(null);
-      return;
-    }
-    let cancelled = false;
-    getWalletPositions(userProfile.walletAddress, true)
-      .then((positions) => {
-        if (cancelled) return;
-        const usdcPosition = positions.tokens.find(
-          (t) => t.token.mint === SOLANA_USDC_MINT,
-        );
-        if (!usdcPosition) {
-          setUsdcBalance(0);
-          return;
-        }
-        setUsdcBalance(usdcPosition.balance ?? 0);
-      })
-      .catch(() => {
-        if (!cancelled) setUsdcBalance(null);
-      });
+    fetchBalances();
     return () => {
       cancelled = true;
     };
-  }, [userProfile?.walletAddress]);
+  }, [token?.mint, token?.chain, userProfile?.walletAddress, user, isEvmToken]);
 
   const fetchTokenDetails = async (
     address: string,
@@ -806,27 +801,40 @@ export function Trade() {
                 setTokenBalance(match?.amount ?? 0);
               }
             } else {
-              const positions = await getWalletPositions(
-                userProfile.walletAddress,
-                false,
-              );
+              const boughtMint = token?.mint ?? crossChainToken?.address;
+              const isBoughtEvm = boughtMint && isEvmAddress(boughtMint);
               if (swapDirection === "sell" && token?.mint) {
-                const position = positions.tokens.find(
-                  (t) => t.token.mint === token.mint,
+                const balances = await getWalletTokenBalance(
+                  userProfile.walletAddress,
+                  [token.mint],
                 );
-                setTokenBalance(position?.balance ?? 0);
+                setTokenBalance(balances[token.mint] ?? 0);
               } else if (swapDirection === "buy") {
-                const boughtMint = token?.mint ?? crossChainToken?.address;
-                if (boughtMint) {
-                  const position = positions.tokens.find(
-                    (t) => t.token.mint === boughtMint,
+                if (boughtMint && isBoughtEvm && user) {
+                  const tokenId = await user.getIdToken();
+                  const base = getApiBase();
+                  const res = await fetch(`${base}/api/relay/evm-balances`, {
+                    headers: { Authorization: `Bearer ${tokenId}` },
+                  });
+                  const data = await res.json();
+                  if (res.ok && data.tokens) {
+                    const match = (data.tokens as Array<{ mint: string; amount: number }>).find(
+                      (t) => t.mint === boughtMint
+                    );
+                    setTokenBalance(match?.amount ?? 0);
+                  }
+                } else if (boughtMint) {
+                  const balances = await getWalletTokenBalance(
+                    userProfile.walletAddress,
+                    [boughtMint],
                   );
-                  setTokenBalance(position?.balance ?? 0);
+                  setTokenBalance(balances[boughtMint] ?? 0);
                 }
-                const usdcPosition = positions.tokens.find(
-                  (t) => t.token.mint === SOLANA_USDC_MINT,
+                const usdcBalances = await getWalletTokenBalance(
+                  userProfile.walletAddress,
+                  [SOLANA_USDC_MINT],
                 );
-                if (usdcPosition) setUsdcBalance(usdcPosition.balance ?? 0);
+                setUsdcBalance(usdcBalances[SOLANA_USDC_MINT] ?? 0);
               }
             }
           } catch {

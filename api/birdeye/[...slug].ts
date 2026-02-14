@@ -302,6 +302,72 @@ async function ohlcvHandler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+async function walletTokenBalanceHandler(
+  req: VercelRequest,
+  res: VercelResponse,
+) {
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
+  try {
+    const apiKey = process.env.BIRDEYE_API_KEY;
+    if (!apiKey) {
+      console.error(
+        "[birdeye wallet-token-balance] BIRDEYE_API_KEY not configured",
+      );
+      return res.status(503).json({ error: "BIRDEYE_API_KEY not configured" });
+    }
+    const body =
+      typeof req.body === "string" ? JSON.parse(req.body) : req.body ?? {};
+    const wallet = (body.wallet ?? "").toString().trim();
+    const rawAddrs = body.token_addresses ?? body.tokenAddresses ?? [];
+    const tokenAddresses = Array.isArray(rawAddrs)
+      ? rawAddrs.map((a) => String(a).trim()).filter(Boolean)
+      : [];
+    if (!wallet) {
+      return res.status(400).json({ error: "Missing wallet" });
+    }
+    if (tokenAddresses.length === 0) {
+      return res.status(400).json({ error: "Missing token_addresses" });
+    }
+    if (tokenAddresses.length > 50) {
+      return res.status(400).json({
+        error: "Maximum 50 tokens per request",
+      });
+    }
+
+    const r = await fetch(`${BIRDEYE_API_BASE}/wallet/v2/token-balance`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": apiKey,
+        "x-chain": "solana",
+      },
+      body: JSON.stringify({
+        wallet,
+        token_addresses: tokenAddresses,
+      }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const message =
+        (data as { message?: string }).message ??
+        `Birdeye wallet token-balance failed: ${r.status}`;
+      return res
+        .status(r.status >= 500 ? 502 : 400)
+        .json({ error: message });
+    }
+    return res.status(200).json(data);
+  } catch (e: unknown) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    console.error("[birdeye wallet-token-balance] error", {
+      message: err.message,
+    });
+    return res.status(500).json({
+      error: err.message || "Internal server error",
+    });
+  }
+}
+
 async function historyPriceHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET")
     return res.status(405).json({ error: "Method not allowed" });
@@ -347,6 +413,7 @@ const ROUTES: Record<
 > = {
   search: searchHandler,
   "token-overview": tokenOverviewHandler,
+  "wallet-token-balance": walletTokenBalanceHandler,
   ohlcv: ohlcvHandler,
   "history-price": historyPriceHandler,
 };
@@ -362,7 +429,7 @@ export default async function handler(
   if (!routeHandler) {
     res.status(404).json({
       error: "Not found",
-      message: `Birdeye action '${action || ""}' not found. Use: search, token-overview, ohlcv, history-price`,
+      message: `Birdeye action '${action || ""}' not found. Use: search, token-overview, wallet-token-balance, ohlcv, history-price`,
     });
     return;
   }

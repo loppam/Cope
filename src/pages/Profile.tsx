@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { motion } from "motion/react";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
@@ -72,6 +72,7 @@ interface TokenPosition {
 
 export function Profile() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user, userProfile, signOut, removeWallet, deleteAccount, loading, watchlist } =
     useAuth();
   const [isRemovingWallet, setIsRemovingWallet] = useState(false);
@@ -151,6 +152,19 @@ export function Profile() {
     window.addEventListener("cope-refresh-balance", onRefresh);
     return () => window.removeEventListener("cope-refresh-balance", onRefresh);
   }, [walletAddress]);
+
+  // Open deposit sheet when navigated with ?open=deposit (e.g. from Home)
+  useEffect(() => {
+    if (searchParams.get("open") === "deposit") {
+      setDepositStep("chain");
+      setDepositSheetOpen(true);
+      setSearchParams((p) => {
+        const next = new URLSearchParams(p);
+        next.delete("open");
+        return next;
+      }, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   // Fetch open positions: SOL + EVM (Base/BNB USDC and native) + SPL tokens
   // Phased loading: positions first, then 1s delay, then PnL (Solana Tracker 1 RPS) + Moralis (EVM PnL)

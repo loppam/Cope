@@ -219,6 +219,69 @@ export async function fetchBirdeyeTokenOverview(
   return res.json();
 }
 
+/** Birdeye wallet token-balance response item. */
+export interface BirdeyeWalletTokenBalance {
+  address: string;
+  decimals: number;
+  amount: number;
+  balance?: string;
+  value?: string;
+  price?: number;
+  symbol?: string;
+  name?: string;
+  logo_uri?: string;
+  network?: string;
+}
+
+/**
+ * Get wallet token balances for Solana tokens via Birdeye v2 token-balance API.
+ * Returns human-readable amounts keyed by token address. Missing/zero balances return 0.
+ */
+export async function getWalletTokenBalance(
+  wallet: string,
+  tokenAddresses: string[],
+): Promise<Record<string, number>> {
+  if (!wallet.trim() || tokenAddresses.length === 0) {
+    return {};
+  }
+  const unique = [...new Set(tokenAddresses.map((a) => a.trim()).filter(Boolean))];
+  if (unique.length === 0) return {};
+
+  const apiBase = getApiBase();
+  const res = await fetch(`${apiBase}/api/birdeye/wallet-token-balance`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      wallet: wallet.trim(),
+      token_addresses: unique,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(
+      (err as { error?: string }).error ||
+        `Birdeye wallet token-balance failed: ${res.status}`,
+    );
+  }
+  const json = (await res.json()) as {
+    success?: boolean;
+    data?: BirdeyeWalletTokenBalance[];
+  };
+  const items = Array.isArray(json?.data) ? json.data : [];
+  const result: Record<string, number> = {};
+  for (const addr of unique) {
+    result[addr] = 0;
+  }
+  for (const item of items) {
+    const addr = item?.address?.trim();
+    if (addr) {
+      result[addr] =
+        typeof item.amount === "number" && item.amount >= 0 ? item.amount : 0;
+    }
+  }
+  return result;
+}
+
 /**
  * Map Birdeye token_overview response to TokenSearchResult fields.
  */

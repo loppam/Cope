@@ -9,6 +9,14 @@
       "collectionGroup": "walletStats",
       "queryScope": "COLLECTION",
       "fields": [{"fieldPath": "winRate", "order": "DESCENDING"}]
+    },
+    {
+      "collectionGroup": "walletStats",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "winRate", "order": "DESCENDING"},
+        {"fieldPath": "__name__", "order": "ASCENDING"}
+      ]
     }
   ],
   "fieldOverrides": []

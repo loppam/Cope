@@ -351,7 +351,7 @@ async function getEvmTokenPositions(
   }>
 > {
   const apiKey =
-    process.env.MORALIS_API_KEY || process.env.VITE_MORALIS_API_KEY;
+    process.env.MORALIS_API_KEY;
   if (!apiKey) return [];
 
   const tokens: Array<{

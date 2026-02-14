@@ -282,7 +282,7 @@ async function getTokenSymbol(mint: string): Promise<string> {
   if (cached && Date.now() - cached.timestamp < CACHE_DURATION) return cached.symbol;
   const fallback = `${mint.slice(0, 4)}...${mint.slice(-4)}`;
   try {
-    const apiKey = process.env.HELIUS_API_KEY || process.env.VITE_HELIUS_API_KEY;
+    const apiKey = process.env.HELIUS_API_KEY;
     if (!apiKey) return fallback;
     const response = await fetchWithRetry(`https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(apiKey)}`, {
       method: "POST",

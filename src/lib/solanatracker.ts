@@ -1,6 +1,6 @@
 // SolanaTracker Data API - all requests proxied via /api/solanatracker so API key stays server-side
 import { apiCache } from "./cache";
-import { getApiBase } from "./utils";
+import { getApiBaseAbsolute } from "./utils";
 
 /**
  * Delay helper function
@@ -35,17 +35,33 @@ async function solanatrackerRequest<T>(
     baseDelay = 1000,
   } = options;
 
-  const base = getApiBase();
+  const base = getApiBaseAbsolute();
   const path = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
-  const url = new URL(`${base}/api/solanatracker/${path}`);
-
-  // Add query params for GET requests
-  if (method === "GET" && params) {
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== null) {
-        url.searchParams.append(key, String(value));
-      }
-    });
+  const pathPrefix = `/api/solanatracker/${path}`;
+  let urlStr: string;
+  if (base) {
+    const url = new URL(`${base}${pathPrefix}`);
+    if (method === "GET" && params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          url.searchParams.append(key, String(value));
+        }
+      });
+    }
+    urlStr = url.toString();
+  } else {
+    const search =
+      method === "GET" && params
+        ? "?" +
+          new URLSearchParams(
+            Object.fromEntries(
+              Object.entries(params)
+                .filter(([, v]) => v !== undefined && v !== null)
+                .map(([k, v]) => [k, String(v)])
+            ) as Record<string, string>
+          ).toString()
+        : "";
+    urlStr = pathPrefix + search;
   }
 
   // Shared throttle: 1 req/sec across all Solana Tracker endpoints
@@ -68,7 +84,7 @@ async function solanatrackerRequest<T>(
         fetchOptions.body = JSON.stringify(body);
       }
 
-      const response = await fetch(url.toString(), fetchOptions);
+      const response = await fetch(urlStr, fetchOptions);
 
       if (!response.ok) {
         const error = await response

@@ -68,7 +68,7 @@ async function moralisFetch(
   params: Record<string, string>,
 ): Promise<unknown> {
   const apiKey =
-    process.env.MORALIS_API_KEY || process.env.VITE_MORALIS_API_KEY;
+    process.env.MORALIS_API_KEY;
   if (!apiKey) throw new Error("MORALIS_API_KEY not configured");
   const url = new URL(`${MORALIS_API_BASE}${path}`);
   Object.entries(params).forEach(([k, v]) =>
@@ -233,16 +233,14 @@ async function fetchEvmTokenDataForChain(
       {
         headers: {
           accept: "application/json",
-          "X-API-Key":
-            process.env.MORALIS_API_KEY || process.env.VITE_MORALIS_API_KEY || "",
+          "X-API-Key": process.env.MORALIS_API_KEY || "",
         },
       },
     ),
     fetch(`${MORALIS_API_BASE}/erc20/${address}/price?chain=${param}`, {
       headers: {
         accept: "application/json",
-        "X-API-Key":
-          process.env.MORALIS_API_KEY || process.env.VITE_MORALIS_API_KEY || "",
+        "X-API-Key": process.env.MORALIS_API_KEY || "",
       },
     }),
     moralisFetch(`/erc20/${address}/owners`, {

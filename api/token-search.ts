@@ -331,7 +331,7 @@ export default async function handler(
 
     const birdeyeKey = process.env.BIRDEYE_API_KEY;
     const moralisKey =
-      process.env.MORALIS_API_KEY ?? process.env.VITE_MORALIS_API_KEY;
+      process.env.MORALIS_API_KEY;
 
     if (isEvmAddress(term)) {
       if (!moralisKey) {

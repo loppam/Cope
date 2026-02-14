@@ -4,7 +4,7 @@ import type {
   TokenSearchResponse,
   TokenInfoResponse,
 } from "./solanatracker";
-import { getApiBase } from "./utils";
+import { getApiBaseAbsolute } from "./utils";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 
@@ -33,16 +33,33 @@ async function jupiterRequest<T>(
     baseDelay = 1000,
   } = options;
 
-  const base = getApiBase();
+  const base = getApiBaseAbsolute();
   const path = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
-  const url = new URL(`${base}/api/jupiter/${path}`);
-
-  if (method === "GET" && params) {
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== null) {
-        url.searchParams.append(key, String(value));
-      }
-    });
+  const pathPrefix = `/api/jupiter/${path}`;
+  let urlStr: string;
+  if (base) {
+    const url = new URL(`${base}${pathPrefix}`);
+    if (method === "GET" && params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          url.searchParams.append(key, String(value));
+        }
+      });
+    }
+    urlStr = url.toString();
+  } else {
+    const search =
+      method === "GET" && params
+        ? "?" +
+          new URLSearchParams(
+            Object.fromEntries(
+              Object.entries(params)
+                .filter(([, v]) => v !== undefined && v !== null)
+                .map(([k, v]) => [k, String(v)])
+            ) as Record<string, string>
+          ).toString()
+        : "";
+    urlStr = pathPrefix + search;
   }
 
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -55,7 +72,7 @@ async function jupiterRequest<T>(
         fetchOptions.body = JSON.stringify(body);
       }
 
-      const response = await fetch(url.toString(), fetchOptions);
+      const response = await fetch(urlStr, fetchOptions);
 
       if (!response.ok) {
         const error = await response

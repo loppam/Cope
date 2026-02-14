@@ -1,9 +1,10 @@
 // Solana RPC utilities - all calls proxied through /api/rpc so API keys stay server-side
-import { getApiBase } from "./utils";
+import { getApiBaseAbsolute } from "./utils";
 
 async function rpcFetch<T>(action: string, address: string): Promise<T> {
-  const base = getApiBase();
-  const url = `${base}/api/rpc?action=${encodeURIComponent(action)}&address=${encodeURIComponent(address)}`;
+  const base = getApiBaseAbsolute();
+  const path = `/api/rpc?action=${encodeURIComponent(action)}&address=${encodeURIComponent(address)}`;
+  const url = base ? `${base}${path}` : path;
   const res = await fetch(url);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {

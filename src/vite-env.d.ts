@@ -10,14 +10,19 @@ interface ImportMetaEnv {
   readonly VITE_FIREBASE_MEASUREMENT_ID?: string;
   readonly VITE_FIREBASE_VAPID_KEY: string;
   readonly VITE_USE_FIREBASE_EMULATOR?: string;
-  readonly VITE_JUPITER_API_KEY: string;
+  /** Server-side only now (JUPITER_API_KEY); client uses /api/jupiter proxy */
+  readonly VITE_JUPITER_API_KEY?: string;
   readonly VITE_JUPITER_REFERRAL_ACCOUNT?: string;
   readonly VITE_JUPITER_REFERRAL_FEE_BPS?: string;
-  readonly VITE_SOLANATRACKER_API_KEY: string;
-  readonly VITE_SOLANATRACKER_RPC_API_KEY: string;
-  readonly VITE_BIRDEYE_API_KEY: string;
-  readonly VITE_HELIUS_API_KEY: string;
+  /** Server-side only now; client uses /api/solanatracker proxy */
+  readonly VITE_SOLANATRACKER_API_KEY?: string;
+  readonly VITE_SOLANATRACKER_RPC_API_KEY?: string;
+  /** Server-side only now; client uses /api/birdeye proxy */
+  readonly VITE_BIRDEYE_API_KEY?: string;
+  readonly VITE_HELIUS_API_KEY?: string;
   readonly VITE_SOLANA_RPC_URL?: string;
+  /** Optional; when unset, client uses relative /api/* or window.location.origin */
+  readonly VITE_API_BASE_URL?: string;
   readonly VITE_ENCRYPTION_SECRET: string;
   readonly VITE_WEBHOOK_SYNC_URL?: string;
   readonly VITE_WEBHOOK_SYNC_SECRET?: string;

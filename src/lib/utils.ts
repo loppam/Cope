@@ -6,6 +6,17 @@ export function getApiBase(): string {
   return import.meta.env?.VITE_API_BASE_URL ?? '';
 }
 
+/**
+ * Base URL for building absolute API URLs (e.g. for new URL()).
+ * When VITE_API_BASE_URL is unset, uses current origin so relative paths still work.
+ */
+export function getApiBaseAbsolute(): string {
+  const base = getApiBase();
+  if (base) return base;
+  if (typeof window !== "undefined" && window.location?.origin) return window.location.origin;
+  return "";
+}
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }

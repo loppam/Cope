@@ -77,8 +77,8 @@ export default async function handler(
 
     if (action === "usdc-balance") {
       const result = await rpcRequest<{ value: Array<{ account: { data: unknown } }> }>(
-        "getParsedTokenAccountsByOwner",
-        [address, { mint: SOLANA_USDC_MINT }]
+        "getTokenAccountsByOwner",
+        [address, { mint: SOLANA_USDC_MINT }, { encoding: "jsonParsed" }]
       );
       let total = 0;
       const value = result?.value ?? [];
@@ -101,8 +101,8 @@ export default async function handler(
 
     if (action === "token-accounts") {
       const result = await rpcRequest<{ value: Array<{ account: { data: unknown } }> }>(
-        "getParsedTokenAccountsByOwner",
-        [address, { programId: TOKEN_PROGRAM_ID }]
+        "getTokenAccountsByOwner",
+        [address, { programId: TOKEN_PROGRAM_ID }, { encoding: "jsonParsed" }]
       );
       const value = result?.value ?? [];
       const accounts = value.map((item) => {

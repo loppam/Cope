@@ -487,7 +487,7 @@ async function tokenTxsHandler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-const ROUTES: Record<
+export const ROUTES: Record<
   string,
   (req: VercelRequest, res: VercelResponse) => Promise<void | VercelResponse>
 > = {

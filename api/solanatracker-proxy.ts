@@ -24,6 +24,8 @@ export default async function handler(
     return;
   }
 
+  console.log("[api/solanatracker] start", { path: suffix, method: req.method ?? "GET" });
+
   const apiKey = process.env.SOLANATRACKER_API_KEY;
   if (!apiKey) {
     res.status(503).json({ error: "SOLANATRACKER_API_KEY not configured" });
@@ -55,6 +57,10 @@ export default async function handler(
     const contentType = out.headers.get("content-type") ?? "application/json";
     res.setHeader("Content-Type", contentType);
     res.status(out.status);
+    console.log("[api/solanatracker] upstream", { path: suffix, status: out.status });
+    if (!out.ok) {
+      console.error("[api/solanatracker] upstream error body", text.slice(0, 300));
+    }
     try {
       res.send(text ? JSON.parse(text) : {});
     } catch {

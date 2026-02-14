@@ -11,7 +11,9 @@ import { triggerHaptic } from "@/lib/haptic";
 function TapHapticListener() {
   useEffect(() => {
     const handler = (e: PointerEvent) => {
-      const target = (e.target as Element).closest("[data-tap-haptic]");
+      const target = (e.target as Element).closest(
+        "[data-tap-haptic], .tap-press",
+      );
       if (target) triggerHaptic();
     };
     document.addEventListener("pointerdown", handler);

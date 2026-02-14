@@ -982,6 +982,7 @@ export function Trade() {
                           <button
                             type="button"
                             onClick={handleCopyShareLink}
+                            data-tap-haptic
                             className="flex items-center justify-center gap-2 px-3 py-2 sm:px-4 rounded-lg text-sm font-medium bg-white/10 hover:bg-white/15 text-white transition-all touch-manipulation min-h-[44px] sm:min-h-0"
                             title="Copy share link"
                           >
@@ -993,6 +994,7 @@ export function Trade() {
                           type="button"
                           onClick={handleRefresh}
                           disabled={refreshCooldown > 0 || loading}
+                          data-tap-haptic
                           className={`flex items-center justify-center gap-2 px-3 py-2 sm:px-4 rounded-lg text-sm font-medium transition-all shrink-0 min-h-[44px] sm:min-h-0 ${
                             refreshCooldown > 0 || loading
                               ? "bg-white/5 text-white/30 cursor-not-allowed"

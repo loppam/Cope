@@ -491,16 +491,18 @@ export function Profile() {
     if (!user) return;
 
     setIsTogglingPublic(true);
+    const previousValue = isPublic;
+    const newValue = !previousValue;
+    setIsPublic(newValue);
     try {
-      const newValue = !isPublic;
       await updatePublicWalletStatus(user.uid, newValue);
-      setIsPublic(newValue);
       toast.success(
         newValue ? "Wallet is now public" : "Wallet is now private",
       );
       // Sync webhook so private users' addresses are removed from Helius
       syncWebhook().catch(() => {});
     } catch (error) {
+      setIsPublic(previousValue);
       console.error("Error toggling public wallet:", error);
       toast.error("Failed to update wallet visibility");
     } finally {
@@ -512,6 +514,7 @@ export function Profile() {
     if (!user) return;
 
     setIsTogglingPush(true);
+    const previousValue = pushEnabled;
     try {
       if (!pushEnabled) {
         // Check if notifications are supported
@@ -534,8 +537,8 @@ export function Profile() {
         // Get push token (automatically uses FCM or Web Push based on browser)
         const result = await requestPermissionAndGetPushToken();
         if (result && result.token) {
-          await savePushTokenWithPlatform(result.token, result.platform);
           setPushEnabled(true);
+          await savePushTokenWithPlatform(result.token, result.platform);
           toast.success("Push notifications enabled");
         } else {
           // Token is null - re-check permission (may have changed during request)
@@ -553,11 +556,12 @@ export function Profile() {
         }
       } else {
         const token = getStoredPushToken();
-        await unregisterPushToken(token || "");
         setPushEnabled(false);
+        await unregisterPushToken(token || "");
         toast.success("Push notifications disabled");
       }
     } catch (error: any) {
+      setPushEnabled(previousValue);
       console.error("Error toggling push notifications:", error);
       const errorMessage = error?.message || "";
       if (
@@ -915,6 +919,7 @@ export function Profile() {
                       setSelectedDepositChain(id);
                       setDepositStep("detail");
                     }}
+                    data-tap-haptic
                     className="w-full min-h-[44px] rounded-[12px] border border-white/20 bg-white/5 hover:bg-white/10 backdrop-blur-sm flex items-center justify-center px-4 py-3 touch-manipulation font-medium transition-colors hover:border-[#12d585]/30"
                   >
                     {label}
@@ -928,6 +933,7 @@ export function Profile() {
                 <button
                   type="button"
                   onClick={() => setDepositStep("chain")}
+                  data-tap-haptic
                   className="p-2 -ml-2 rounded-full hover:bg-white/10 min-w-[44px] min-h-[44px] flex items-center justify-center touch-manipulation"
                   aria-label="Back"
                 >
@@ -1038,6 +1044,7 @@ export function Profile() {
                       setWithdrawQuote(null);
                       setWithdrawStep("form");
                     }}
+                    data-tap-haptic
                     className="w-full min-h-[44px] rounded-[12px] border border-white/20 bg-white/5 hover:bg-white/10 backdrop-blur-sm flex items-center justify-center px-4 py-3 touch-manipulation font-medium transition-colors hover:border-[#12d585]/30"
                   >
                     {label}
@@ -1051,6 +1058,7 @@ export function Profile() {
                 <button
                   type="button"
                   onClick={() => (!withdrawQuote ? setWithdrawStep("chain") : setWithdrawQuote(null))}
+                  data-tap-haptic
                   className="p-2 -ml-2 rounded-full hover:bg-white/10 min-w-[44px] min-h-[44px] flex items-center justify-center touch-manipulation"
                   aria-label="Back"
                 >
@@ -1171,6 +1179,7 @@ export function Profile() {
               <button
                 onClick={handleTogglePush}
                 disabled={isTogglingPush}
+                  data-tap-haptic
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                   pushEnabled ? "bg-accent-primary" : "bg-white/20"
                 } disabled:opacity-50`}
@@ -1204,6 +1213,7 @@ export function Profile() {
                 <button
                   onClick={handleTogglePublic}
                   disabled={isTogglingPublic}
+                  data-tap-haptic
                   className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                     isPublic ? "bg-accent-primary" : "bg-white/20"
                   } disabled:opacity-50`}
@@ -1239,6 +1249,7 @@ export function Profile() {
                     setIsRemovingWallet(false);
                   }
                 }}
+                data-tap-haptic
                 className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-[#FF4757]/10 active:bg-[#FF4757]/15 transition-colors text-left group min-h-[48px] mt-2"
               >
                 <div className="w-9 h-9 rounded-lg bg-[#FF4757]/10 flex items-center justify-center flex-shrink-0">
@@ -1259,6 +1270,7 @@ export function Profile() {
                 setSettingsOpen(false);
                 setShowDeleteConfirmModal(true);
               }}
+              data-tap-haptic
               className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-[#FF4757]/10 active:bg-[#FF4757]/15 transition-colors text-left group min-h-[48px]"
             >
               <div className="w-9 h-9 rounded-lg bg-[#FF4757]/10 flex items-center justify-center flex-shrink-0">
@@ -1300,6 +1312,7 @@ export function Profile() {
                 }
               }}
               disabled={isDeletingAccount}
+              data-tap-haptic
               className="bg-[#FF4757] hover:bg-[#FF4757]/90 text-white px-4 py-2 rounded-lg font-medium disabled:opacity-50"
             >
               {isDeletingAccount ? "Deleting…" : "Delete my account"}
@@ -1322,6 +1335,7 @@ export function Profile() {
                 }
               }}
               disabled={loading}
+              data-tap-haptic
               className="w-full flex items-center justify-center gap-3 py-3 min-h-[48px] rounded-xl border border-white/10 hover:border-[#FF4757]/30 hover:bg-[#FF4757]/5 active:bg-[#FF4757]/10 text-[#FF4757] transition-all duration-200 disabled:opacity-50"
             >
               <LogOut className="w-5 h-5" />

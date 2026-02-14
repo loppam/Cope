@@ -222,6 +222,10 @@ export function Watchlist() {
       return;
     }
     const trimmed = editingValue.trim();
+    const previousEditingKey = editingKey;
+    const previousEditingValue = editingValue;
+    setEditingKey(null);
+    setEditingValue("");
     setSavingNickname(true);
     try {
       await addToWatchlist(
@@ -229,10 +233,10 @@ export function Watchlist() {
         { nickname: trimmed || undefined, ...options },
         { suppressToast: true },
       );
-      setEditingKey(null);
-      setEditingValue("");
       toast.success("Name updated");
     } catch {
+      setEditingKey(previousEditingKey);
+      setEditingValue(previousEditingValue);
       toast.error("Failed to update name");
     } finally {
       setSavingNickname(false);

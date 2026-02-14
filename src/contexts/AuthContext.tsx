@@ -355,6 +355,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     options?: { suppressToast?: boolean },
   ) => {
     if (!user) throw new Error("User not authenticated");
+    const trimmedAddress = walletAddress?.trim();
+    const previousWatchlist = watchlist;
+    if (trimmedAddress) {
+      setWatchlist((prev) => {
+        const existingIndex = prev.findIndex(
+          (item) =>
+            item.address === trimmedAddress ||
+            (!!walletData?.uid && item.uid === walletData.uid),
+        );
+        if (existingIndex >= 0) {
+          const next = [...prev];
+          next[existingIndex] = {
+            ...next[existingIndex],
+            address: trimmedAddress,
+            ...walletData,
+            updatedAt: new Date(),
+          };
+          return next;
+        }
+        return [
+          ...prev,
+          {
+            address: trimmedAddress,
+            addedAt: new Date(),
+            ...walletData,
+          },
+        ];
+      });
+    }
     try {
       const token = await user.getIdToken();
       const base = getApiBase();
@@ -379,6 +408,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         toast.success("Wallet added to watchlist");
       }
     } catch (error: any) {
+      if (trimmedAddress) {
+        setWatchlist(previousWatchlist);
+      }
       console.error("Add to watchlist error:", error);
       toast.error(error.message || "Failed to add wallet to watchlist");
       throw error;
@@ -390,6 +422,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     options?: { uid?: string },
   ) => {
     if (!user) throw new Error("User not authenticated");
+    const trimmedAddress = walletAddress?.trim();
+    const targetUid = options?.uid;
+    const previousWatchlist = watchlist;
+    if (trimmedAddress || targetUid) {
+      setWatchlist((prev) =>
+        prev.filter((item) => {
+          if (targetUid && item.uid === targetUid) return false;
+          if (trimmedAddress && item.address === trimmedAddress) return false;
+          return true;
+        }),
+      );
+    }
     try {
       const token = await user.getIdToken();
       const base = getApiBase();
@@ -409,6 +453,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       toast.success("Wallet removed from watchlist");
     } catch (error: any) {
+      if (trimmedAddress || targetUid) {
+        setWatchlist(previousWatchlist);
+      }
       console.error("Remove from watchlist error:", error);
       toast.error(error.message || "Failed to remove wallet from watchlist");
       throw error;

@@ -495,7 +495,7 @@ export function PublicProfile() {
                               <span className="text-sm">Win Rate</span>
                             </div>
                             <p className="text-2xl font-bold text-[#12d585]">
-                              {profile.winRate ?? 0}%
+                              {Number(profile.winRate ?? 0).toFixed(2)}%
                             </p>
                             <p className="text-xs text-white/50 mt-1">
                               {(() => {

@@ -21,6 +21,8 @@ export function getChainId(network: RelayNetwork): number {
 
 /**
  * Poll Relay intent status (for deposit/withdraw/swap). Call from client; no API key.
+ * @see https://docs.relay.link/references/api/get-intents-status-v3
+ * Status values: waiting | pending | submitted | success | delayed | refunded | failure
  */
 export async function getIntentStatus(requestId: string): Promise<{
   status?: string;

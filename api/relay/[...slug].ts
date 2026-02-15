@@ -319,7 +319,7 @@ async function depositQuoteHandler(req: VercelRequest, res: VercelResponse) {
         ...(apiKey && { "x-api-key": apiKey }),
       },
       body: JSON.stringify({
-        user: "0x0000000000000000000000000000000000000000",
+        user: "0x03508bb71268bba25ecacc8f620e01866650532c",
         originChainId,
         destinationChainId: CHAIN_IDS.solana,
         originCurrency: ORIGIN_USDC[network],
@@ -2111,14 +2111,15 @@ async function executeBridgeCustodialHandler(
             headers: apiKey ? { "x-api-key": apiKey } : {},
           });
           const statusJson = (await statusRes.json()) as { status?: string };
+          const s = statusJson?.status;
+          if (s === "success" || s === "completed") break;
+          if (s === "refunded") {
+            return res.status(200).json({ status: "refunded", message: "Bridge was refunded" });
+          }
           if (
-            statusJson?.status === "success" ||
-            statusJson?.status === "completed"
-          )
-            break;
-          if (
-            statusJson?.status === "failed" ||
-            statusJson?.status === "reverted"
+            s === "failure" ||
+            s === "failed" ||
+            s === "reverted"
           ) {
             return res.status(502).json({ error: "Bridge step failed" });
           }

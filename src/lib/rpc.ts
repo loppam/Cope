@@ -1,18 +1,34 @@
-// Solana RPC utilities - all calls proxied through /api/rpc so API keys stay server-side
-import { getApiBaseAbsolute } from "./utils";
+// Solana RPC utilities - client-side direct calls to Solana Tracker RPC (or fallback)
+// Env: VITE_SOLANATRACKER_RPC_API_KEY, VITE_SOLANATRACKER_API_KEY, or VITE_SOLANA_RPC_URL
+
+const SOLANA_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
 const RPC_RETRY_MAX = 4;
 const RPC_RETRY_DELAYS_MS = [2000, 4000, 6000, 8000];
 
-async function rpcFetch<T>(action: string, address: string): Promise<T> {
-  const base = getApiBaseAbsolute();
-  const path = `/api/rpc?action=${encodeURIComponent(action)}&address=${encodeURIComponent(address)}`;
-  const url = base ? `${base}${path}` : path;
+function getRpcUrl(): string {
+  const key = import.meta.env.VITE_SOLANATRACKER_RPC_API_KEY ?? import.meta.env.VITE_SOLANATRACKER_API_KEY;
+  if (key) {
+    return `https://rpc-mainnet.solanatracker.io/?api_key=${key}`;
+  }
+  const url = import.meta.env.VITE_SOLANA_RPC_URL;
+  if (url) return url;
+  return "https://api.mainnet-beta.solana.com";
+}
+
+async function rpcRequest<T>(method: string, params: unknown[]): Promise<T> {
+  const url = getRpcUrl();
+  const body = { jsonrpc: "2.0", id: 1, method, params };
   for (let attempt = 0; attempt <= RPC_RETRY_MAX; attempt++) {
-    const res = await fetch(url);
-    const data = await res.json().catch(() => ({}));
-    if (res.ok) return data as T;
-    const msg = (data as { error?: string }).error ?? `RPC error: ${res.status}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json()) as { result?: T; error?: { message: string } };
+    if (res.ok && !data.error) return data.result as T;
+    const msg = data?.error?.message ?? `RPC error: ${res.status}`;
     const err = new Error(msg);
     const isRetryable = res.status === 429 || res.status === 502;
     if (!isRetryable || attempt === RPC_RETRY_MAX) throw err;
@@ -22,12 +38,13 @@ async function rpcFetch<T>(action: string, address: string): Promise<T> {
 }
 
 /**
- * Get SOL balance for a wallet address (proxied via /api/rpc).
+ * Get SOL balance for a wallet address (client-side RPC).
  */
 export async function getSolBalance(walletAddress: string): Promise<number> {
   try {
-    const { balance } = await rpcFetch<{ balance: number }>("sol-balance", walletAddress);
-    return Number.isFinite(balance) ? balance : 0;
+    const result = await rpcRequest<string | number>("getBalance", [walletAddress]);
+    const lamports = typeof result === "number" ? result : parseInt(String(result), 10);
+    return Number.isFinite(lamports) ? lamports / 1e9 : 0;
   } catch (error) {
     console.error("Error fetching SOL balance:", error);
     throw error;
@@ -35,12 +52,30 @@ export async function getSolBalance(walletAddress: string): Promise<number> {
 }
 
 /**
- * Get USDC balance for a Solana wallet (proxied via /api/rpc).
+ * Get USDC balance for a Solana wallet (client-side RPC).
  */
 export async function getUsdcBalance(walletAddress: string): Promise<number> {
   try {
-    const { balance } = await rpcFetch<{ balance: number }>("usdc-balance", walletAddress);
-    return Number.isFinite(balance) ? balance : 0;
+    const result = await rpcRequest<{ value: Array<{ account: { data: unknown } }> }>(
+      "getTokenAccountsByOwner",
+      [walletAddress, { mint: SOLANA_USDC_MINT }, { encoding: "jsonParsed" }]
+    );
+    let total = 0;
+    const value = result?.value ?? [];
+    for (const { account } of value) {
+      const parsed = (account?.data as { parsed?: { info?: { tokenAmount?: { uiAmount?: number; uiAmountString?: string; amount?: string; decimals?: number } } } })?.parsed?.info?.tokenAmount;
+      if (!parsed) continue;
+      let uiAmount = parsed.uiAmount ?? 0;
+      if (uiAmount === 0 && parsed.uiAmountString != null) {
+        const n = parseFloat(parsed.uiAmountString);
+        if (Number.isFinite(n)) uiAmount = n;
+      }
+      if (uiAmount === 0 && parsed.amount != null && parsed.decimals != null) {
+        uiAmount = Number(parsed.amount) / Math.pow(10, parsed.decimals);
+      }
+      total += uiAmount;
+    }
+    return total;
   } catch (error) {
     console.error("Error fetching USDC balance:", error);
     throw error;
@@ -48,7 +83,7 @@ export async function getUsdcBalance(walletAddress: string): Promise<number> {
 }
 
 /**
- * Get all token accounts for a wallet (proxied via /api/rpc).
+ * Get all token accounts for a wallet (client-side RPC).
  * Returns array of { mint, balance, decimals, uiAmount }.
  */
 export interface TokenAccount {
@@ -60,13 +95,29 @@ export interface TokenAccount {
 
 export async function getTokenAccounts(walletAddress: string): Promise<TokenAccount[]> {
   try {
-    const { accounts } = await rpcFetch<{ accounts: Array<{ mint: string; balance: string; decimals: number; uiAmount: number }> }>("token-accounts", walletAddress);
-    return (accounts ?? []).map((a) => ({
-      mint: a.mint,
-      balance: parseInt(a.balance, 10) || 0,
-      decimals: a.decimals ?? 0,
-      uiAmount: a.uiAmount ?? 0,
-    }));
+    const result = await rpcRequest<{ value: Array<{ account: { data: unknown } }> }>(
+      "getTokenAccountsByOwner",
+      [walletAddress, { programId: TOKEN_PROGRAM_ID }, { encoding: "jsonParsed" }]
+    );
+    const value = result?.value ?? [];
+    return value.map((item) => {
+      const parsedInfo = (item.account?.data as { parsed?: { info?: { tokenAmount?: { mint: string; amount: string; decimals: number; uiAmount?: number; uiAmountString?: string } } } })?.parsed?.info;
+      const tokenAmount = parsedInfo?.tokenAmount ?? {};
+      let uiAmount = tokenAmount.uiAmount ?? 0;
+      if (uiAmount === 0 && tokenAmount.uiAmountString != null) {
+        const n = parseFloat(tokenAmount.uiAmountString);
+        if (Number.isFinite(n)) uiAmount = n;
+      }
+      if (uiAmount === 0 && tokenAmount.amount != null && tokenAmount.decimals != null) {
+        uiAmount = Number(tokenAmount.amount) / Math.pow(10, tokenAmount.decimals);
+      }
+      return {
+        mint: tokenAmount.mint ?? "",
+        balance: parseInt(tokenAmount.amount ?? "0", 10) || 0,
+        decimals: tokenAmount.decimals ?? 0,
+        uiAmount,
+      };
+    });
   } catch (error) {
     console.error("Error fetching token accounts:", error);
     throw error;
@@ -74,21 +125,21 @@ export async function getTokenAccounts(walletAddress: string): Promise<TokenAcco
 }
 
 /**
- * Get transaction signature status. Not proxied; use server-side RPC if needed.
+ * Get transaction signature status. Not implemented on client.
  */
 export async function getTransactionStatus(_signature: string): Promise<any> {
   throw new Error("getTransactionStatus is not available from client; use server RPC");
 }
 
 /**
- * Get recent transactions for a wallet. Not proxied; use server-side RPC if needed.
+ * Get recent transactions for a wallet. Not implemented on client.
  */
 export async function getRecentTransactions(_walletAddress: string, _limit: number = 10): Promise<any[]> {
   throw new Error("getRecentTransactions is not available from client; use server RPC");
 }
 
 /**
- * Get account info. Not proxied; use server-side RPC if needed.
+ * Get account info. Not implemented on client.
  */
 export async function getAccountInfo(_address: string): Promise<any> {
   throw new Error("getAccountInfo is not available from client; use server RPC");

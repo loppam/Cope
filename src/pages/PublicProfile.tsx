@@ -119,22 +119,27 @@ export function PublicProfile() {
 
     (async () => {
       try {
-        const [positionsRes, solBalance, solPrice, solanaUsdc, nativePrices, evmData] = await Promise.all(
-          [
-            getWalletPositions(profile!.walletAddress, true),
-            getSolBalance(profile!.walletAddress),
-            getSolPrice(),
-            getUsdcBalance(profile!.walletAddress),
-            fetchNativePrices(),
-            profile!.evmAddress
-              ? fetch(
-                  `${base}/api/relay/evm-balances-public?address=${encodeURIComponent(profile!.evmAddress)}`,
-                )
-                  .then((r) => r.json())
-                  .catch(() => null)
-              : Promise.resolve(null),
-          ],
-        );
+        const [
+          positionsRes,
+          solBalance,
+          solPrice,
+          solanaUsdc,
+          nativePrices,
+          evmData,
+        ] = await Promise.all([
+          getWalletPositions(profile!.walletAddress, true),
+          getSolBalance(profile!.walletAddress),
+          getSolPrice(),
+          getUsdcBalance(profile!.walletAddress),
+          fetchNativePrices(),
+          profile!.evmAddress
+            ? fetch(
+                `${base}/api/relay/evm-balances-public?address=${encodeURIComponent(profile!.evmAddress)}`,
+              )
+                .then((r) => r.json())
+                .catch(() => null)
+            : Promise.resolve(null),
+        ]);
 
         if (cancelled) return;
 
@@ -170,7 +175,10 @@ export function PublicProfile() {
         const bnbBal = evmData?.bnb ?? { usdc: 0, native: 0 };
 
         // 1) USDC first: Solana + Base + BNB combined (one row)
-        const totalUsdc = (Number.isFinite(solanaUsdc) ? solanaUsdc : 0) + (baseBal.usdc ?? 0) + (bnbBal.usdc ?? 0);
+        const totalUsdc =
+          (Number.isFinite(solanaUsdc) ? solanaUsdc : 0) +
+          (baseBal.usdc ?? 0) +
+          (bnbBal.usdc ?? 0);
         if (totalUsdc > 0) {
           combined.push({
             mint: SOLANA_USDC_MINT,
@@ -316,17 +324,17 @@ export function PublicProfile() {
             paddingBottom: "var(--safe-area-inset-bottom)",
           }}
         >
-        <p className="text-white/80 text-center">
-          {error || "Profile not found or private"}
-        </p>
-        <Button
-          variant="ghost"
-          onClick={() => navigate("/")}
-          className="text-accent-primary hover:text-accent-hover min-h-[44px]"
-        >
-          Go home
-        </Button>
-      </div>
+          <p className="text-white/80 text-center">
+            {error || "Profile not found or private"}
+          </p>
+          <Button
+            variant="ghost"
+            onClick={() => navigate("/")}
+            className="text-accent-primary hover:text-accent-hover min-h-[44px]"
+          >
+            Go home
+          </Button>
+        </div>
       </>
     );
   }
@@ -346,334 +354,346 @@ export function PublicProfile() {
           paddingBottom: "var(--safe-area-inset-bottom)",
         }}
       >
-      <motion.div
-        className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8"
-        variants={container}
-        initial="initial"
-        animate="animate"
-      >
-        <motion.div className="mb-6 flex items-center gap-3" variants={item}>
-          <button
-            onClick={() => navigate(-1)}
-            data-tap-haptic
-            className="tap-press p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white min-w-[44px] min-h-[44px] flex items-center justify-center touch-manipulation"
-            aria-label="Back"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <h1 className="text-xl sm:text-2xl font-bold flex-1 truncate">
-            Profile
-          </h1>
-        </motion.div>
+        <motion.div
+          className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8"
+          variants={container}
+          initial="initial"
+          animate="animate"
+        >
+          <motion.div className="mb-6 flex items-center gap-3" variants={item}>
+            <button
+              onClick={() => navigate(-1)}
+              data-tap-haptic
+              className="tap-press p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white min-w-[44px] min-h-[44px] flex items-center justify-center touch-manipulation"
+              aria-label="Back"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <h1 className="text-xl sm:text-2xl font-bold flex-1 truncate">
+              Profile
+            </h1>
+          </motion.div>
 
-        <motion.div variants={item} className="mb-6">
-          <Card glass className="overflow-hidden">
-            <div className="relative">
-              <div className="h-1 bg-gradient-to-r from-[#12d585]/40 via-[#08b16b]/30 to-transparent" />
-              <div className="p-4 sm:p-6">
-                <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
-                  <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-                    {avatar ? (
-                      <img
-                        src={avatar}
-                        alt={xHandle}
-                        className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-cover ring-2 ring-white/10 flex-shrink-0"
-                      />
-                    ) : (
-                      <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-[#12d585] to-[#08b16b] flex items-center justify-center ring-2 ring-white/10 flex-shrink-0">
-                        <span className="text-lg sm:text-xl font-bold text-[#000000]">
-                          {xHandle.charAt(1)?.toUpperCase() || "U"}
-                        </span>
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <h3 className="font-bold text-base sm:text-lg truncate">
-                        {xHandle}
-                      </h3>
-                      <div className="flex items-center gap-2 text-sm text-white/60 mt-0.5">
-                        <Twitter className="w-4 h-4" />
-                        <span>Public profile</span>
-                      </div>
-                      {profile.walletAddress && (
-                        <div className="flex items-center gap-2 mt-1 min-w-0 overflow-hidden">
-                          <code className="text-xs font-mono text-white/50 truncate">
-                            {shortenAddress(profile.walletAddress)}
-                          </code>
+          <motion.div variants={item} className="mb-6">
+            <Card glass className="overflow-hidden">
+              <div className="relative">
+                <div className="h-1 bg-gradient-to-r from-[#12d585]/40 via-[#08b16b]/30 to-transparent" />
+                <div className="p-4 sm:p-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
+                    <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                      {avatar ? (
+                        <img
+                          src={avatar}
+                          alt={xHandle}
+                          className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-cover ring-2 ring-white/10 flex-shrink-0"
+                        />
+                      ) : (
+                        <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-[#12d585] to-[#08b16b] flex items-center justify-center ring-2 ring-white/10 flex-shrink-0">
+                          <span className="text-lg sm:text-xl font-bold text-[#000000]">
+                            {xHandle.charAt(1)?.toUpperCase() || "U"}
+                          </span>
                         </div>
                       )}
-                    </div>
-                    {user && profile?.walletAddress && (
-                      <Button
-                        variant={isFollowed ? "outline" : "primary"}
-                        size="sm"
-                        disabled={followLoading}
-                        onClick={async () => {
-                          if (!profile?.walletAddress) return;
-                          setFollowLoading(true);
-                          try {
-                            if (isFollowed) {
-                              await removeFromWatchlist(profile.walletAddress, {
-                                uid: profile.uid,
-                              });
-                            } else {
-                              await addToWatchlist(profile.walletAddress, {
-                                uid: profile.uid,
-                                onPlatform: true,
-                              });
-                            }
-                          } finally {
-                            setFollowLoading(false);
-                          }
-                        }}
-                        className="min-h-[44px] min-w-[44px] touch-manipulation flex-shrink-0 gap-2"
-                      >
-                        {isFollowed ? (
-                          <>
-                            <Check className="w-4 h-4" />
-                            Following
-                          </>
-                        ) : (
-                          <>
-                            <UserPlus className="w-4 h-4" />
-                            Follow
-                          </>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-bold text-base sm:text-lg truncate">
+                          {xHandle}
+                        </h3>
+                        <div className="flex items-center gap-2 text-sm text-white/60 mt-0.5">
+                          <Twitter className="w-4 h-4" />
+                          <span>Public profile</span>
+                        </div>
+                        {profile.walletAddress && (
+                          <div className="flex items-center gap-2 mt-1 min-w-0 overflow-hidden">
+                            <code className="text-xs font-mono text-white/50 truncate">
+                              {shortenAddress(profile.walletAddress)}
+                            </code>
+                          </div>
                         )}
-                      </Button>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-6 pl-0 sm:pl-4 border-l-0 sm:border-l border-white/10 mt-2 sm:mt-0">
-                    <div className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial py-1">
-                      <span className="text-lg sm:text-2xl font-bold">
-                        {profile.followingCount}
-                      </span>
-                      <span className="text-[10px] sm:text-xs text-white/60">
-                        Following
-                      </span>
-                    </div>
-                    <div className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial py-1">
-                      <span className="text-lg sm:text-2xl font-bold">
-                        {profile.followersCount}
-                      </span>
-                      <span className="text-[10px] sm:text-xs text-white/60">
-                        Followers
-                      </span>
-                    </div>
-                    <div className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial py-1">
-                      <span className="text-lg sm:text-2xl font-bold">
-                        {profile.watchlistCount}
-                      </span>
-                      <span className="text-[10px] sm:text-xs text-white/60">
-                        Watchlist
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {profile.walletAddress && (
-                  <>
-                    {(profile.winRate != null || profile.totalTrades != null) && (
-                      <div className="mt-4 pt-4 border-t border-white/10">
-                        <div className="grid grid-cols-2 gap-4 sm:gap-6">
-                          <div>
-                            <div className="flex items-center gap-2 mb-2 text-white/60">
-                              <TrendingUp className="w-4 h-4" />
-                              <span className="text-sm">Win Rate</span>
-                            </div>
-                            <p className="text-2xl font-bold text-[#12d585]">
-                              {Number(profile.winRate ?? 0).toFixed(2)}%
-                            </p>
-                            <p className="text-xs text-white/50 mt-1">
-                              {(() => {
-                                const trades = profile.totalTrades ?? 0;
-                                const wins = Math.round(
-                                  trades * ((profile.winRate ?? 0) / 100),
-                                );
-                                const losses = trades - wins;
-                                return `${wins}W / ${losses}L`;
-                              })()}
-                            </p>
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2 mb-2 text-white/60">
-                              <Activity className="w-4 h-4" />
-                              <span className="text-sm">Total Trades</span>
-                            </div>
-                            <p className="text-2xl font-bold">
-                              {profile.totalTrades ?? 0}
-                            </p>
-                            <p className="text-xs text-white/50 mt-1">
-                              All time
-                            </p>
-                          </div>
-                        </div>
                       </div>
-                    )}
-                    <div className="mt-4 pt-4 border-t border-white/10">
-                      <p className="text-2xl sm:text-3xl font-bold">
-                        {usdcBalanceLoading
-                          ? "—"
-                          : `$${openPositions
-                              .reduce((s, p) => s + p.value, 0)
-                              .toLocaleString("en-US", {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}`}
-                      </p>
-                      <p className="text-xs text-white/50 mt-0.5">
-                        Total wallet balance
-                      </p>
+                      {user && profile?.walletAddress && (
+                        <Button
+                          variant={isFollowed ? "outline" : "primary"}
+                          size="sm"
+                          disabled={followLoading}
+                          onClick={async () => {
+                            if (!profile?.walletAddress) return;
+                            setFollowLoading(true);
+                            try {
+                              if (isFollowed) {
+                                await removeFromWatchlist(
+                                  profile.walletAddress,
+                                  {
+                                    uid: profile.uid,
+                                  },
+                                );
+                              } else {
+                                await addToWatchlist(profile.walletAddress, {
+                                  uid: profile.uid,
+                                  onPlatform: true,
+                                });
+                              }
+                            } finally {
+                              setFollowLoading(false);
+                            }
+                          }}
+                          className="min-h-[44px] min-w-[44px] touch-manipulation flex-shrink-0 gap-2"
+                        >
+                          {isFollowed ? (
+                            <>
+                              <Check className="w-4 h-4" />
+                              Following
+                            </>
+                          ) : (
+                            <>
+                              <UserPlus className="w-4 h-4" />
+                              Follow
+                            </>
+                          )}
+                        </Button>
+                      )}
                     </div>
-                    <div className="mt-4 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center">
-                          <DollarSign className="w-4 h-4 text-white/70" />
+
+                    <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-6 pl-0 sm:pl-4 border-l-0 sm:border-l border-white/10 mt-2 sm:mt-0">
+                      <div className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial py-1">
+                        <span className="text-lg sm:text-2xl font-bold">
+                          {profile.followingCount}
+                        </span>
+                        <span className="text-[10px] sm:text-xs text-white/60">
+                          Following
+                        </span>
+                      </div>
+                      <div className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial py-1">
+                        <span className="text-lg sm:text-2xl font-bold">
+                          {profile.followersCount}
+                        </span>
+                        <span className="text-[10px] sm:text-xs text-white/60">
+                          Followers
+                        </span>
+                      </div>
+                      <div className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial py-1">
+                        <span className="text-lg sm:text-2xl font-bold">
+                          {profile.watchlistCount}
+                        </span>
+                        <span className="text-[10px] sm:text-xs text-white/60">
+                          Watchlist
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {profile.walletAddress && (
+                    <>
+                      {(profile.winRate != null ||
+                        profile.totalTrades != null) && (
+                        <div className="mt-4 pt-4 border-t border-white/10">
+                          <div className="grid grid-cols-2 gap-4 sm:gap-6">
+                            <div>
+                              <div className="flex items-center gap-2 mb-2 text-white/60">
+                                <TrendingUp className="w-4 h-4" />
+                                <span className="text-sm">Win Rate</span>
+                              </div>
+                              <p className="text-2xl font-bold text-[#12d585]">
+                                {Number(profile.winRate ?? 0).toFixed(2)}%
+                              </p>
+                              <p className="text-xs text-white/50 mt-1">
+                                {(() => {
+                                  const trades = profile.totalTrades ?? 0;
+                                  const wins = Math.round(
+                                    trades * ((profile.winRate ?? 0) / 100),
+                                  );
+                                  const losses = trades - wins;
+                                  return `${wins}W / ${losses}L`;
+                                })()}
+                              </p>
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2 mb-2 text-white/60">
+                                <Activity className="w-4 h-4" />
+                                <span className="text-sm">Total Trades</span>
+                              </div>
+                              <p className="text-2xl font-bold">
+                                {profile.totalTrades ?? 0}
+                              </p>
+                              <p className="text-xs text-white/50 mt-1">
+                                All time
+                              </p>
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm text-white/60">Cash balance</p>
-                          <p className="font-semibold">
-                            {usdcBalanceLoading
-                              ? "—"
-                              : `$${usdcBalance.toLocaleString("en-US", {
+                      )}
+                      <div className="mt-4 pt-4 border-t border-white/10">
+                        <p className="text-2xl sm:text-3xl font-bold">
+                          {usdcBalanceLoading
+                            ? "—"
+                            : `$${openPositions
+                                .reduce((s, p) => s + p.value, 0)
+                                .toLocaleString("en-US", {
                                   minimumFractionDigits: 2,
                                   maximumFractionDigits: 2,
                                 })}`}
-                          </p>
+                        </p>
+                        <p className="text-xs text-white/50 mt-0.5">
+                          Total wallet balance
+                        </p>
+                      </div>
+                      <div className="mt-4 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center">
+                            <DollarSign className="w-4 h-4 text-white/70" />
+                          </div>
+                          <div>
+                            <p className="text-sm text-white/60">
+                              Cash balance
+                            </p>
+                            <p className="font-semibold">
+                              {usdcBalanceLoading
+                                ? "—"
+                                : `$${usdcBalance.toLocaleString("en-US", {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}`}
+                            </p>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-white/10">
-                      <p className="text-sm font-medium mb-2">Open positions</p>
-                      {displayedOpenPositions.length === 0 ? (
-                        <p className="text-sm text-white/50">
-                          No open positions
+                      <div className="mt-4 pt-4 border-t border-white/10">
+                        <p className="text-sm font-medium mb-2">
+                          Open positions
                         </p>
-                      ) : (
-                        <ul className="space-y-2">
-                          {displayedOpenPositions.map((pos) => (
-                            <li
-                              key={pos.mint}
-                              data-tap-haptic
-                              className="tap-press flex items-center gap-3 py-3 px-2 rounded-lg min-h-[44px] hover:bg-white/5 active:bg-white/10 touch-manipulation cursor-pointer"
-                              role="button"
-                              onClick={() => {
-                                const params = new URLSearchParams({
-                                  mint: pos.mint,
-                                });
-                                if (
-                                  pos.chain === "base" ||
-                                  pos.chain === "bnb"
-                                ) {
-                                  params.set("chain", pos.chain);
-                                }
-                                navigate(`/app/trade?${params.toString()}`);
-                              }}
-                            >
-                              {pos.image ? (
-                                <img
-                                  src={pos.image}
-                                  alt=""
-                                  className="w-8 h-8 rounded-full object-cover"
-                                />
-                              ) : (
-                                <div className="w-8 h-8 rounded-full bg-white/10" />
-                              )}
-                              <div className="flex-1 min-w-0">
-                                <p className="font-medium truncate">
-                                  {pos.symbol}
-                                </p>
-                                <p className="text-xs text-white/50">
-                                  $
-                                  {pos.value.toLocaleString("en-US", {
-                                    minimumFractionDigits: 2,
-                                  })}
-                                </p>
-                                {pos.pnl != null && pos.pnl !== 0 && (
-                                  <p
-                                    className={`text-xs mt-0.5 ${
-                                      pos.pnl >= 0
-                                        ? "text-[#12d585]"
-                                        : "text-red-400"
-                                    }`}
-                                  >
-                                    {pos.pnl >= 0 ? "+" : ""}$
-                                    {pos.pnl.toFixed(2)}
-                                    {pos.pnlPercent != null &&
-                                      !Number.isNaN(pos.pnlPercent) && (
-                                        <span className="ml-1 opacity-90">
-                                          ({pos.pnlPercent >= 0 ? "+" : ""}
-                                          {pos.pnlPercent.toFixed(1)}%)
-                                        </span>
-                                      )}
-                                  </p>
+                        {displayedOpenPositions.length === 0 ? (
+                          <p className="text-sm text-white/50">
+                            No open positions
+                          </p>
+                        ) : (
+                          <ul className="space-y-2">
+                            {displayedOpenPositions.map((pos) => (
+                              <li
+                                key={pos.mint}
+                                data-tap-haptic
+                                className="tap-press flex items-center gap-3 py-3 px-2 rounded-lg min-h-[44px] hover:bg-white/5 active:bg-white/10 touch-manipulation cursor-pointer"
+                                role="button"
+                                onClick={() => {
+                                  const params = new URLSearchParams({
+                                    mint: pos.mint,
+                                  });
+                                  if (
+                                    pos.chain === "base" ||
+                                    pos.chain === "bnb"
+                                  ) {
+                                    params.set("chain", pos.chain);
+                                  }
+                                  navigate(`/app/trade?${params.toString()}`);
+                                }}
+                              >
+                                {pos.image ? (
+                                  <img
+                                    src={pos.image}
+                                    alt=""
+                                    className="w-8 h-8 rounded-full object-cover"
+                                  />
+                                ) : (
+                                  <div className="w-8 h-8 rounded-full bg-white/10" />
                                 )}
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-white/10">
-                      <div className="flex items-center justify-between mb-2">
-                        <p className="text-sm font-medium">Closed positions</p>
-                        <span className="flex items-center gap-1 text-xs text-white/50">
-                          <ArrowUpDown className="w-3 h-3" /> Recent
-                        </span>
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-medium truncate">
+                                    {pos.symbol}
+                                  </p>
+                                  <p className="text-xs text-white/50">
+                                    $
+                                    {pos.value.toLocaleString("en-US", {
+                                      minimumFractionDigits: 2,
+                                    })}
+                                  </p>
+                                  {pos.pnl != null && pos.pnl !== 0 && (
+                                    <p
+                                      className={`text-xs mt-0.5 ${
+                                        pos.pnl >= 0
+                                          ? "text-[#12d585]"
+                                          : "text-red-400"
+                                      }`}
+                                    >
+                                      {pos.pnl >= 0 ? "+" : ""}$
+                                      {pos.pnl.toFixed(2)}
+                                      {pos.pnlPercent != null &&
+                                        !Number.isNaN(pos.pnlPercent) && (
+                                          <span className="ml-1 opacity-90">
+                                            ({pos.pnlPercent >= 0 ? "+" : ""}
+                                            {pos.pnlPercent.toFixed(1)}%)
+                                          </span>
+                                        )}
+                                    </p>
+                                  )}
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
-                      {closedPositions.length === 0 ? (
-                        <p className="text-sm text-white/50">
-                          No closed positions
-                        </p>
-                      ) : (
-                        <ul className="space-y-2">
-                          {closedPositions.map((pos) => (
-                            <li
-                              key={pos.mint}
-                              className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5"
-                            >
-                              {pos.image ? (
-                                <img
-                                  src={pos.image}
-                                  alt=""
-                                  className="w-8 h-8 rounded-full object-cover"
-                                />
-                              ) : (
-                                <div className="w-8 h-8 rounded-full bg-white/10" />
-                              )}
-                              <div className="flex-1 min-w-0">
-                                <p className="font-medium truncate">
-                                  {pos.symbol}
+                      <div className="mt-4 pt-4 border-t border-white/10">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-sm font-medium">
+                            Closed positions
+                          </p>
+                          <span className="flex items-center gap-1 text-xs text-white/50">
+                            <ArrowUpDown className="w-3 h-3" /> Recent
+                          </span>
+                        </div>
+                        {closedPositions.length === 0 ? (
+                          <p className="text-sm text-white/50">
+                            No closed positions
+                          </p>
+                        ) : (
+                          <ul className="space-y-2">
+                            {closedPositions.map((pos) => (
+                              <li
+                                key={pos.mint}
+                                className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5"
+                              >
+                                {pos.image ? (
+                                  <img
+                                    src={pos.image}
+                                    alt=""
+                                    className="w-8 h-8 rounded-full object-cover"
+                                  />
+                                ) : (
+                                  <div className="w-8 h-8 rounded-full bg-white/10" />
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-medium truncate">
+                                    {pos.symbol}
+                                  </p>
+                                  <p className="text-xs text-white/50">
+                                    Closed
+                                  </p>
+                                </div>
+                                <p className="text-sm text-[#12d585]">
+                                  +${pos.value.toFixed(2)}
                                 </p>
-                                <p className="text-xs text-white/50">Closed</p>
-                              </div>
-                              <p className="text-sm text-[#12d585]">
-                                +${pos.value.toFixed(2)}
-                              </p>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                    <div className="mt-2 flex justify-end">
-                      <a
-                        href={`https://solscan.io/account/${profile.walletAddress}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        data-tap-haptic
-                        className="tap-press text-xs text-accent-primary hover:text-accent-hover flex items-center gap-1 min-h-[44px] items-center touch-manipulation"
-                      >
-                        View on Explorer
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                  </>
-                )}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                      <div className="mt-2 flex justify-end">
+                        <a
+                          href={`https://solscan.io/account/${profile.walletAddress}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          data-tap-haptic
+                          className="tap-press text-xs text-accent-primary hover:text-accent-hover flex items-center gap-1 min-h-[44px] items-center touch-manipulation"
+                        >
+                          View on Explorer
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
-          </Card>
+            </Card>
+          </motion.div>
         </motion.div>
-      </motion.div>
-    </div>
+      </div>
     </>
   );
 }

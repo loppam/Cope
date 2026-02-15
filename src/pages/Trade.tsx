@@ -903,13 +903,19 @@ export function Trade() {
             body: JSON.stringify(body),
           });
           const freshQuote = await refreshRes.json();
-          if (
-            refreshRes.ok &&
-            Array.isArray(freshQuote?.steps) &&
-            freshQuote.steps.length > 0
-          ) {
-            quoteToExecute = freshQuote;
+          const hasValidSteps =
+            Array.isArray(freshQuote?.steps) && freshQuote.steps.length > 0;
+          if (!refreshRes.ok || !hasValidSteps) {
+            const errMsg =
+              (freshQuote as { error?: string })?.error ||
+              "Quote expired or failed to refresh. Please get a new quote and try again.";
+            throw new Error(errMsg);
           }
+          quoteToExecute = freshQuote;
+        } else {
+          throw new Error(
+            "Cannot refresh quote. Please get a new quote and try again.",
+          );
         }
 
         const steps = Array.isArray(

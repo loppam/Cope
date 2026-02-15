@@ -19,13 +19,17 @@ async function tokenOverviewHandler(
   try {
     const apiKey = process.env.MORALIS_API_KEY;
     if (!apiKey) {
-      return void res.status(503).json({ error: "MORALIS_API_KEY not configured" });
+      return void res
+        .status(503)
+        .json({ error: "MORALIS_API_KEY not configured" });
     }
     const address = (req.query.address ?? "").toString().trim();
     const chainParam = (req.query.chain ?? "base").toString().toLowerCase();
     const chain = toMoralisChain(chainParam);
     if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      return void res.status(400).json({ error: "Missing or invalid address (0x + 40 hex)" });
+      return void res
+        .status(400)
+        .json({ error: "Missing or invalid address (0x + 40 hex)" });
     }
     if (chainParam !== "base" && chainParam !== "bnb") {
       return void res.status(400).json({ error: "Chain must be base or bnb" });
@@ -36,10 +40,9 @@ async function tokenOverviewHandler(
         `${MORALIS_API_BASE}/erc20/metadata?chain=${chain}&addresses[]=${encodeURIComponent(address)}`,
         { headers: { accept: "application/json", "X-API-Key": apiKey } },
       ),
-      fetch(
-        `${MORALIS_API_BASE}/erc20/${address}/price?chain=${chain}`,
-        { headers: { accept: "application/json", "X-API-Key": apiKey } },
-      ),
+      fetch(`${MORALIS_API_BASE}/erc20/${address}/price?chain=${chain}`, {
+        headers: { accept: "application/json", "X-API-Key": apiKey },
+      }),
     ]);
 
     const metadataList = await metadataRes.json().catch(() => []);
@@ -62,7 +65,8 @@ async function tokenOverviewHandler(
     const priceUsd = priceData?.usdPrice
       ? parseFloat(String(priceData.usdPrice))
       : undefined;
-    const priceChange24h = priceData?.usdPrice24hrPercentChange ?? priceData?.["24hrPercentChange"];
+    const priceChange24h =
+      priceData?.usdPrice24hrPercentChange ?? priceData?.["24hrPercentChange"];
     const links = metadata?.links ?? {};
     const holders = metadata?.total_holders;
 
@@ -81,7 +85,9 @@ async function tokenOverviewHandler(
         liquidityUsd,
         holder: holders,
         priceChange24hPercent:
-          priceChange24h != null ? parseFloat(String(priceChange24h)) : undefined,
+          priceChange24h != null
+            ? parseFloat(String(priceChange24h))
+            : undefined,
         extensions: {
           website: links.website,
           twitter: links.twitter,
@@ -92,17 +98,24 @@ async function tokenOverviewHandler(
     });
   } catch (e: unknown) {
     const err = e instanceof Error ? e : new Error(String(e));
-    return void res.status(500).json({ error: err.message || "Internal server error" });
+    return void res
+      .status(500)
+      .json({ error: err.message || "Internal server error" });
   }
 }
 
-async function searchHandler(req: VercelRequest, res: VercelResponse): Promise<void> {
+async function searchHandler(
+  req: VercelRequest,
+  res: VercelResponse,
+): Promise<void> {
   if (req.method !== "GET")
     return void res.status(405).json({ error: "Method not allowed" });
   try {
     const apiKey = process.env.MORALIS_API_KEY;
     if (!apiKey) {
-      return void res.status(503).json({ error: "MORALIS_API_KEY not configured" });
+      return void res
+        .status(503)
+        .json({ error: "MORALIS_API_KEY not configured" });
     }
     const term = (req.query.term ?? "").toString().trim();
     const limit = Math.min(
@@ -121,20 +134,18 @@ async function searchHandler(req: VercelRequest, res: VercelResponse): Promise<v
             `${MORALIS_API_BASE}/erc20/metadata?chain=base&addresses[]=${encodeURIComponent(addr)}`,
             { headers: { accept: "application/json", "X-API-Key": apiKey } },
           ).then((r) => r.json()),
-          fetch(
-            `${MORALIS_API_BASE}/erc20/${addr}/price?chain=base`,
-            { headers: { accept: "application/json", "X-API-Key": apiKey } },
-          ).then((r) => r.json()),
+          fetch(`${MORALIS_API_BASE}/erc20/${addr}/price?chain=base`, {
+            headers: { accept: "application/json", "X-API-Key": apiKey },
+          }).then((r) => r.json()),
         ]),
         Promise.all([
           fetch(
             `${MORALIS_API_BASE}/erc20/metadata?chain=bsc&addresses[]=${encodeURIComponent(addr)}`,
             { headers: { accept: "application/json", "X-API-Key": apiKey } },
           ).then((r) => r.json()),
-          fetch(
-            `${MORALIS_API_BASE}/erc20/${addr}/price?chain=bsc`,
-            { headers: { accept: "application/json", "X-API-Key": apiKey } },
-          ).then((r) => r.json()),
+          fetch(`${MORALIS_API_BASE}/erc20/${addr}/price?chain=bsc`, {
+            headers: { accept: "application/json", "X-API-Key": apiKey },
+          }).then((r) => r.json()),
         ]),
       ]);
       const build = (
@@ -147,15 +158,27 @@ async function searchHandler(req: VercelRequest, res: VercelResponse): Promise<v
         const links = (m as Record<string, unknown>)?.links ?? {};
         return {
           address: addr,
-          name: (m as Record<string, unknown>)?.name ?? price?.tokenName ?? "Unknown",
-          symbol: (m as Record<string, unknown>)?.symbol ?? price?.tokenSymbol ?? "???",
+          name:
+            (m as Record<string, unknown>)?.name ??
+            price?.tokenName ??
+            "Unknown",
+          symbol:
+            (m as Record<string, unknown>)?.symbol ??
+            price?.tokenSymbol ??
+            "???",
           logoURI: (m as Record<string, unknown>)?.logo ?? price?.tokenLogo,
           decimals: parseInt(
-            String((m as Record<string, unknown>)?.decimals ?? price?.tokenDecimals ?? 18),
+            String(
+              (m as Record<string, unknown>)?.decimals ??
+                price?.tokenDecimals ??
+                18,
+            ),
             10,
           ),
           price:
-            price?.usdPrice != null ? parseFloat(String(price.usdPrice)) : undefined,
+            price?.usdPrice != null
+              ? parseFloat(String(price.usdPrice))
+              : undefined,
           mc:
             (m as Record<string, unknown>)?.market_cap != null
               ? parseFloat(String((m as Record<string, unknown>).market_cap))
@@ -175,7 +198,8 @@ async function searchHandler(req: VercelRequest, res: VercelResponse): Promise<v
       const bnbMeta = bnbRes[0];
       const bnbPrice = bnbRes[1] as Record<string, unknown>;
       const hasBase =
-        (Array.isArray(baseMeta) ? baseMeta[0] : baseMeta) || basePrice?.tokenName;
+        (Array.isArray(baseMeta) ? baseMeta[0] : baseMeta) ||
+        basePrice?.tokenName;
       const hasBnb =
         (Array.isArray(bnbMeta) ? bnbMeta[0] : bnbMeta) || bnbPrice?.tokenName;
       if (!hasBase && !hasBnb) {
@@ -217,7 +241,10 @@ async function searchHandler(req: VercelRequest, res: VercelResponse): Promise<v
             symbol: item.symbol ?? symbol,
             logoURI: item.logo ?? item.thumbnail,
             decimals: parseInt(String(item.decimals ?? 18), 10),
-            mc: item.market_cap != null ? parseFloat(String(item.market_cap)) : undefined,
+            mc:
+              item.market_cap != null
+                ? parseFloat(String(item.market_cap))
+                : undefined,
             chain,
             chainId,
           }));
@@ -241,7 +268,9 @@ async function searchHandler(req: VercelRequest, res: VercelResponse): Promise<v
     return void res.status(200).json({ tokens: tokens.slice(0, limit) });
   } catch (e: unknown) {
     const err = e instanceof Error ? e : new Error(String(e));
-    return void res.status(500).json({ error: err.message || "Internal server error" });
+    return void res
+      .status(500)
+      .json({ error: err.message || "Internal server error" });
   }
 }
 
@@ -254,7 +283,9 @@ async function profitabilityHandler(
   try {
     const apiKey = process.env.MORALIS_API_KEY;
     if (!apiKey) {
-      return void res.status(503).json({ error: "MORALIS_API_KEY not configured" });
+      return void res
+        .status(503)
+        .json({ error: "MORALIS_API_KEY not configured" });
     }
     const address = (req.query.address ?? "").toString().trim();
     const chainParam = (req.query.chain ?? "base").toString().toLowerCase();
@@ -271,13 +302,16 @@ async function profitabilityHandler(
     );
     const data = await r.json().catch(() => ({}));
     if (!r.ok) {
-      if (r.status === 429) return void res.status(429).json({ error: "Rate limited" });
+      if (r.status === 429)
+        return void res.status(429).json({ error: "Rate limited" });
       return void res.status(r.status >= 500 ? 502 : 400).json(data);
     }
     return void res.status(200).json(data);
   } catch (e: unknown) {
     const err = e instanceof Error ? e : new Error(String(e));
-    return void res.status(500).json({ error: err.message || "Internal server error" });
+    return void res
+      .status(500)
+      .json({ error: err.message || "Internal server error" });
   }
 }
 

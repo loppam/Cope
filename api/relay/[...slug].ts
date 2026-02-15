@@ -686,6 +686,12 @@ async function withdrawQuoteHandler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: "Invalid amount" });
     if (!destinationAddress || destinationAddress.length < 20)
       return res.status(400).json({ error: "Invalid destinationAddress" });
+    if (destinationNetwork === "base" || destinationNetwork === "bnb") {
+      if (!/^0x[a-fA-F0-9]{40}$/.test(destinationAddress))
+        return res.status(400).json({
+          error: "Destination must be a valid EVM address (0x + 40 hex chars)",
+        });
+    }
     const apiKey = process.env.RELAY_API_KEY;
     const destinationChainId = CHAIN_IDS[destinationNetwork] ?? CHAIN_IDS.base;
     const destinationCurrency =
@@ -716,8 +722,13 @@ async function withdrawQuoteHandler(req: VercelRequest, res: VercelResponse) {
       let message = `Relay quote failed: ${quoteRes.status}`;
       try {
         const j = JSON.parse(errBody);
-        if (j.message) message = j.message;
-        else if (j.error) message = j.error;
+        message =
+          j.message ?? j.error ?? j.errorCode ?? message;
+        if (typeof j.errorData === "string") message += ` (${j.errorData})`;
+        console.warn("[withdraw-quote] Relay error", {
+          status: quoteRes.status,
+          message: message.slice(0, 200),
+        });
       } catch {
         if (errBody) message = errBody.slice(0, 200);
       }
@@ -1174,7 +1185,9 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
               errMsg: errMsg.slice(0, 120),
               hasFunder: !!getEvmFunderWallet(chainId),
             });
-            const isExecutionReverted = /execution reverted|reverted/i.test(errMsg);
+            const isExecutionReverted = /execution reverted|reverted/i.test(
+              errMsg,
+            );
             const userError = isExecutionReverted
               ? "Swap failed. Price may have moved. Try increasing slippage tolerance and try again."
               : errMsg.slice(0, 200) || "Transaction failed. Please try again.";
@@ -1563,7 +1576,8 @@ async function jupiterExecuteHandler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ error: "Unauthorized" });
     const decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
     const userId = decoded?.uid ?? "";
-    const body = (req.body as { transaction?: string; requestId?: string }) ?? {};
+    const body =
+      (req.body as { transaction?: string; requestId?: string }) ?? {};
     const transactionB64 = (body.transaction ?? "").trim();
     const requestId = (body.requestId ?? "").trim();
     if (!transactionB64 || !requestId) {
@@ -1573,7 +1587,9 @@ async function jupiterExecuteHandler(req: VercelRequest, res: VercelResponse) {
     }
     const encryptionSecret = process.env.ENCRYPTION_SECRET;
     if (!encryptionSecret) {
-      return res.status(503).json({ error: "ENCRYPTION_SECRET not configured" });
+      return res
+        .status(503)
+        .json({ error: "ENCRYPTION_SECRET not configured" });
     }
     const db = getAdminDb();
     const userSnap = await db.collection("users").doc(userId).get();
@@ -1614,7 +1630,8 @@ async function jupiterExecuteHandler(req: VercelRequest, res: VercelResponse) {
       error?: string;
     };
     if (!jupRes.ok) {
-      const errMsg = jupData?.error ?? `Jupiter execute failed: ${jupRes.status}`;
+      const errMsg =
+        jupData?.error ?? `Jupiter execute failed: ${jupRes.status}`;
       return res.status(jupRes.status >= 500 ? 502 : 400).json({
         error: errMsg,
         signature: "",
@@ -2471,7 +2488,11 @@ export default async function handler(
   const path = (req.url ?? "").split("?")[0];
   const segments = path.split("/").filter(Boolean);
   const action = segments[segments.length - 1];
-  if (action === "swap-quote" || action === "execute-step" || action === "jupiter-execute") {
+  if (
+    action === "swap-quote" ||
+    action === "execute-step" ||
+    action === "jupiter-execute"
+  ) {
     console.log("[relay] request", { action, method: req.method });
   }
   const routeHandler = action ? ROUTES[action] : undefined;

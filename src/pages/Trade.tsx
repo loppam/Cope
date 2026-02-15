@@ -549,7 +549,8 @@ export function Trade() {
     const outputIsEvm =
       tradeChain === "base" ||
       tradeChain === "bnb" ||
-      (token?.chain === "base" || token?.chain === "bnb");
+      token?.chain === "base" ||
+      token?.chain === "bnb";
     const isCrossChain = outputIsEvm;
     if (!amount || !userProfile?.walletAddress || !user) {
       toast.error("Missing required information", {
@@ -632,13 +633,24 @@ export function Trade() {
         setSwapQuote({
           inputMint: SOLANA_USDC_MINT,
           outputMint,
-          inputAmount: parseInt(currencyIn.amount || "0", 10) || parseInt(amountRaw, 10),
+          inputAmount:
+            parseInt(currencyIn.amount || "0", 10) || parseInt(amountRaw, 10),
           outputAmount: parseInt(currencyOut.amount || "0", 10),
-          inputAmountUi: parseFloat(currencyIn.amountFormatted || "0") || amountNum,
+          inputAmountUi:
+            parseFloat(currencyIn.amountFormatted || "0") || amountNum,
           outputAmountUi: parseFloat(currencyOut.amountFormatted || "0"),
-          inUsdValue: currencyIn.amountUsd != null ? parseFloat(currencyIn.amountUsd) : undefined,
-          outUsdValue: currencyOut.amountUsd != null ? parseFloat(currencyOut.amountUsd) : undefined,
-          priceImpact: details.totalImpact?.percent != null ? parseFloat(details.totalImpact.percent) : 0,
+          inUsdValue:
+            currencyIn.amountUsd != null
+              ? parseFloat(currencyIn.amountUsd)
+              : undefined,
+          outUsdValue:
+            currencyOut.amountUsd != null
+              ? parseFloat(currencyOut.amountUsd)
+              : undefined,
+          priceImpact:
+            details.totalImpact?.percent != null
+              ? parseFloat(details.totalImpact.percent)
+              : 0,
           feeBps: 0,
           feeMint: SOLANA_USDC_MINT,
           requestId: data?.steps?.[0]?.requestId || "",
@@ -747,13 +759,24 @@ export function Trade() {
         setSwapQuote({
           inputMint: token.mint,
           outputMint: SOLANA_USDC_MINT,
-          inputAmount: parseInt(currencyIn.amount || "0", 10) || parseInt(amountRaw, 10),
+          inputAmount:
+            parseInt(currencyIn.amount || "0", 10) || parseInt(amountRaw, 10),
           outputAmount: parseInt(currencyOut.amount || "0", 10),
-          inputAmountUi: parseFloat(currencyIn.amountFormatted || "0") || amountNum,
+          inputAmountUi:
+            parseFloat(currencyIn.amountFormatted || "0") || amountNum,
           outputAmountUi: parseFloat(currencyOut.amountFormatted || "0"),
-          inUsdValue: currencyIn.amountUsd != null ? parseFloat(currencyIn.amountUsd) : undefined,
-          outUsdValue: currencyOut.amountUsd != null ? parseFloat(currencyOut.amountUsd) : undefined,
-          priceImpact: details.totalImpact?.percent != null ? parseFloat(details.totalImpact.percent) : 0,
+          inUsdValue:
+            currencyIn.amountUsd != null
+              ? parseFloat(currencyIn.amountUsd)
+              : undefined,
+          outUsdValue:
+            currencyOut.amountUsd != null
+              ? parseFloat(currencyOut.amountUsd)
+              : undefined,
+          priceImpact:
+            details.totalImpact?.percent != null
+              ? parseFloat(details.totalImpact.percent)
+              : 0,
           feeBps: 0,
           feeMint: token.mint,
           requestId: data?.steps?.[0]?.requestId || "",
@@ -794,7 +817,12 @@ export function Trade() {
   };
 
   const handleConfirmSwap = async () => {
-    if (!(relayQuote || jupiterQuote) || !user || !swapQuote || !userProfile?.walletAddress)
+    if (
+      !(relayQuote || jupiterQuote) ||
+      !user ||
+      !swapQuote ||
+      !userProfile?.walletAddress
+    )
       return;
 
     setSwapping(true);
@@ -820,8 +848,7 @@ export function Trade() {
           }),
         });
         const result = await res.json();
-        if (!res.ok)
-          throw new Error(result.error || "Jupiter swap failed");
+        if (!res.ok) throw new Error(result.error || "Jupiter swap failed");
         lastSignature = result.signature ?? null;
       } else {
         // Relay flow: refresh quote then execute-step loop
@@ -844,7 +871,10 @@ export function Trade() {
             userWallet: isEvmSell ? evmAddress : userProfile.walletAddress,
             tradeType: swapDirection === "buy" ? "buy" : "sell",
           };
-          if (swapDirection === "buy" && (tradeChain === "base" || tradeChain === "bnb")) {
+          if (
+            swapDirection === "buy" &&
+            (tradeChain === "base" || tradeChain === "bnb")
+          ) {
             body.outputChainId = tradeChain === "base" ? 8453 : 56;
             body.recipient = evmAddress ?? undefined;
           }
@@ -864,12 +894,18 @@ export function Trade() {
             body: JSON.stringify(body),
           });
           const freshQuote = await refreshRes.json();
-          if (refreshRes.ok && Array.isArray(freshQuote?.steps) && freshQuote.steps.length > 0) {
+          if (
+            refreshRes.ok &&
+            Array.isArray(freshQuote?.steps) &&
+            freshQuote.steps.length > 0
+          ) {
             quoteToExecute = freshQuote;
           }
         }
 
-        const steps = Array.isArray((quoteToExecute as { steps?: unknown[] })?.steps)
+        const steps = Array.isArray(
+          (quoteToExecute as { steps?: unknown[] })?.steps,
+        )
           ? (quoteToExecute as { steps: unknown[] }).steps
           : [];
 

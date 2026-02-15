@@ -95,13 +95,39 @@ async function getEvmTokenPositions(address: string): Promise<EvmTokenPosition[]
         };
         const list = Array.isArray(data?.result) ? data.result : [];
         for (const t of list) {
-          const bal = parseFloat(t.balance_formatted ?? t.balance ?? "0");
+          // Prefer balance_formatted (human-readable); fallback to raw balance / 10^decimals
+          // Moralis balance is raw units; balance_formatted may be empty in some responses
+          const formatted = t.balance_formatted?.trim();
+          let bal = 0;
+          if (formatted !== "" && formatted != null) {
+            bal = parseFloat(formatted);
+          } else if (
+            t.balance != null &&
+            t.balance !== "" &&
+            typeof t.decimals === "number" &&
+            t.decimals >= 0
+          ) {
+            try {
+              bal = Number(BigInt(t.balance)) / Math.pow(10, t.decimals);
+            } catch {
+              bal = 0;
+            }
+          }
           const value = t.usd_value ?? 0;
           if (bal <= 0 && value <= 0) continue;
 
           const addr = (t.token_address ?? "").toLowerCase();
           const isNative = t.native_token || !addr || addr === NATIVE_ETH_PLACEHOLDER;
-          const mint = isNative ? (chain === "base" ? "base-eth" : "bnb-bnb") : addr;
+          // Normalize USDC mint to base-usdc / bnb-usdc for consistent matching
+          const mint = isNative
+            ? chain === "base"
+              ? "base-eth"
+              : "bnb-bnb"
+            : addr === BASE_USDC.toLowerCase()
+              ? "base-usdc"
+              : addr === BNB_USDC.toLowerCase()
+                ? "bnb-usdc"
+                : addr;
 
           tokens.push({
             mint,

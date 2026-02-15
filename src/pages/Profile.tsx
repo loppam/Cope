@@ -351,7 +351,8 @@ export function Profile() {
               const value = t.value ?? 0;
               const m = (t.mint ?? "").toLowerCase();
               if (addedMints.has(m)) continue;
-              if (m === BASE_USDC_ADDR || m === BNB_USDC_ADDR) continue;
+              // Skip USDC (already in combined USDC row); support both address and normalized mint
+              if (m === BASE_USDC_ADDR || m === BNB_USDC_ADDR || m === "base-usdc" || m === "bnb-usdc") continue;
               addedMints.add(m);
               const evmPnl = evmPnlByMint.get(m);
               const pos: TokenPosition = {

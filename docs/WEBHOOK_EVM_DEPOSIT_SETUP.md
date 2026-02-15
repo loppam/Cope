@@ -6,13 +6,22 @@ This doc covers how to set up the **Alchemy webhook** so that when a user's cust
 
 ## 1. Cross-chain flow: Deposit → Trading → Withdraw
 
-| Step | Chain(s) | What happens |
-|------|----------|--------------|
-| **Deposit** | Base/BNB → Solana | User (or someone) sends USDC to the user's **custodial EVM address** (shown in-app). Alchemy detects the transfer and POSTs to your `/api/webhook/evm-deposit`. Your backend gets a Relay quote and executes the bridge (signing with the user's key). USDC lands in their **Solana wallet**. |
-| **Trading** | Solana | All trading uses the **same Solana wallet** (buy/sell SPL tokens, cross-chain buys to EVM if you support it). Balance is the Solana USDC (+ positions) from deposits. |
-| **Withdraw** | Solana → Base/BNB | User chooses amount and destination chain. Your app gets a withdraw quote from Relay (Sol USDC → Base/BNB USDC) and executes. User receives USDC on their chosen EVM network. |
+| Step         | Chain(s)          | What happens                                                                                                                                                                                                                                                                                  |
+| ------------ | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Deposit**  | Base/BNB → Solana | User (or someone) sends USDC to the user's **custodial EVM address** (shown in-app). Alchemy detects the transfer and POSTs to your `/api/webhook/evm-deposit`. Your backend gets a Relay quote and executes the bridge (signing with the user's key). USDC lands in their **Solana wallet**. |
+| **Trading**  | Solana            | All trading uses the **same Solana wallet** (buy/sell SPL tokens, cross-chain buys to EVM if you support it). Balance is the Solana USDC (+ positions) from deposits.                                                                                                                         |
+| **Withdraw** | Solana → Base/BNB | User chooses amount and destination chain. Your app gets a withdraw quote from Relay (Sol USDC → Base/BNB USDC) and executes. User receives USDC on their chosen EVM network.                                                                                                                 |
 
 So: **deposit** and **withdraw** are cross-chain via Relay; **trading** is on Solana. The webhook is what makes **deposit** automatic when funds hit the custodial EVM address.
+
+**Fallback when Relay/webhook fails:** The `bridge-evm-usdc-fallback` cron runs every 6h and bridges any stuck Base/BNB USDC to Solana. Test via curl:
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" \
+  "https://YOUR_DOMAIN/api/cron/bridge-evm-usdc-fallback?dryRun=1"
+```
+
+Balance is from RPC (`Contract.balanceOf` / 1e6), not Moralis. See `api/cron/bridge-evm-usdc-fallback.ts`.
 
 ---
 
@@ -20,18 +29,18 @@ So: **deposit** and **withdraw** are cross-chain via Relay; **trading** is on So
 
 Put these in your `.env` (and in Vercel → Project → Settings → Environment Variables). Copy from `.env.example` for the exact variable names.
 
-| Purpose | Env var | Where to get it |
-|--------|---------|------------------|
-| **Authenticate incoming webhook** | `WEBHOOK_EVM_DEPOSIT_SECRET` | You generate this (e.g. `openssl rand -hex 32`). Optional: Alchemy sends X-Alchemy-Signature and the app accepts that; or use this for custom callers. |
-| **Alchemy signature verification** | `ALCHEMY_EVM_DEPOSIT_SIGNING_KEY` | Optional. Signing key from Alchemy webhook detail page for X-Alchemy-Signature verification. |
-| **Alchemy: create/update webhook & add addresses** | `ALCHEMY_API_KEY` | [Alchemy Dashboard](https://dashboard.alchemy.com/) → your app → API Key. |
-| **Alchemy: add addresses to webhooks (PATCH API)** | `ALCHEMY_NOTIFY_AUTH_TOKEN` | **Required for update-webhook-addresses.** Dashboard → **Data** → **Webhooks** → **AUTH TOKEN** (copy). If you get 401, you're likely using the app API Key; use this token and set it in `.env` as `ALCHEMY_NOTIFY_AUTH_TOKEN`. |
-| **Alchemy: webhook ID (Base)** | `ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BASE` | Set **after** creating the Address Activity webhook for Base (step 4 below). |
-| **Alchemy: webhook ID (BSC/BNB)** | `ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BNB` | Set **after** creating the Address Activity webhook for BSC (step 4 below). |
-| **Relay: bridge & execute** | `RELAY_API_KEY` | [Relay Link](https://docs.relay.link/) – required for deposit quote + execute and for withdraw. |
-| **Decrypt user wallets** | `ENCRYPTION_SECRET` | Your existing app secret (must match client). |
-| **Server-to-self calls** | `API_BASE_URL` | Optional. Defaults to `https://${VERCEL_URL}` on Vercel. |
-| **EVM RPC (optional)** | `BASE_RPC_URL`, `BNB_RPC_URL` | Optional. Defaults to public RPCs. Prefer Alchemy RPC URLs for reliability. |
+| Purpose                                            | Env var                               | Where to get it                                                                                                                                                                                                                  |
+| -------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Authenticate incoming webhook**                  | `WEBHOOK_EVM_DEPOSIT_SECRET`          | You generate this (e.g. `openssl rand -hex 32`). Optional: Alchemy sends X-Alchemy-Signature and the app accepts that; or use this for custom callers.                                                                           |
+| **Alchemy signature verification**                 | `ALCHEMY_EVM_DEPOSIT_SIGNING_KEY`     | Optional. Signing key from Alchemy webhook detail page for X-Alchemy-Signature verification.                                                                                                                                     |
+| **Alchemy: create/update webhook & add addresses** | `ALCHEMY_API_KEY`                     | [Alchemy Dashboard](https://dashboard.alchemy.com/) → your app → API Key.                                                                                                                                                        |
+| **Alchemy: add addresses to webhooks (PATCH API)** | `ALCHEMY_NOTIFY_AUTH_TOKEN`           | **Required for update-webhook-addresses.** Dashboard → **Data** → **Webhooks** → **AUTH TOKEN** (copy). If you get 401, you're likely using the app API Key; use this token and set it in `.env` as `ALCHEMY_NOTIFY_AUTH_TOKEN`. |
+| **Alchemy: webhook ID (Base)**                     | `ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BASE` | Set **after** creating the Address Activity webhook for Base (step 4 below).                                                                                                                                                     |
+| **Alchemy: webhook ID (BSC/BNB)**                  | `ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BNB`  | Set **after** creating the Address Activity webhook for BSC (step 4 below).                                                                                                                                                      |
+| **Relay: bridge & execute**                        | `RELAY_API_KEY`                       | [Relay Link](https://docs.relay.link/) – required for deposit quote + execute and for withdraw.                                                                                                                                  |
+| **Decrypt user wallets**                           | `ENCRYPTION_SECRET`                   | Your existing app secret (must match client).                                                                                                                                                                                    |
+| **Server-to-self calls**                           | `API_BASE_URL`                        | Optional. Defaults to `https://${VERCEL_URL}` on Vercel.                                                                                                                                                                         |
+| **EVM RPC (optional)**                             | `BASE_RPC_URL`, `BNB_RPC_URL`         | Optional. Defaults to public RPCs. Prefer Alchemy RPC URLs for reliability.                                                                                                                                                      |
 
 ---
 
@@ -114,6 +123,7 @@ Call both updates from your backend whenever you persist a new `evmAddress` (e.g
 The handler accepts two payload shapes.
 
 **Generic (e.g. custom indexer):**
+
 ```json
 {
   "to": "0x...",
@@ -122,12 +132,14 @@ The handler accepts two payload shapes.
   "chainId": 8453
 }
 ```
+
 - `to`: receiver (custodial EVM address).
 - `value`: raw USDC amount (6 decimals).
 - `token` / `tokenAddress`: USDC contract (validated for Base/BNB).
 - `chainId` / `chain`: `8453` or `"base"` for Base; `56` or `"bnb"` / `"bsc"` for BNB.
 
 **Alchemy Address Activity (primary format):**
+
 ```json
 {
   "type": "ADDRESS_ACTIVITY",
@@ -148,6 +160,7 @@ The handler accepts two payload shapes.
   }
 }
 ```
+
 The handler uses `event.activity[0]`; token is identified by `rawContract.address`; amount by `rawContract.rawValue` (hex). Flat `activity` at root is also supported.
 
 **Alchemy / other:** The handler returns `200` for every received POST so Alchemy does not disable the webhook. Respond quickly; bridge runs in the background.

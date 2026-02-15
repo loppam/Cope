@@ -774,6 +774,8 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
       else if (
         chainStr === "BSC" ||
         chainStr === "BSC_MAINNET" ||
+        chainStr === "BNB" ||
+        chainStr === "BNB_MAINNET" ||
         chain === "bnb" ||
         chain === 56
       )

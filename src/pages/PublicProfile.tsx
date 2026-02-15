@@ -45,9 +45,13 @@ const BASE_ETH_RESERVE = 0.0005;
 const BNB_RESERVE = 0.001;
 
 function sellableAmount(pos: { mint: string; amount: number }): number {
-  if (pos.mint === SOL_MINT || pos.mint === "So11111111111111111111111111111111111111111")
+  if (
+    pos.mint === SOL_MINT ||
+    pos.mint === "So11111111111111111111111111111111111111111"
+  )
     return Math.max(0, pos.amount - SOL_RESERVE);
-  if (pos.mint === "base-eth") return Math.max(0, pos.amount - BASE_ETH_RESERVE);
+  if (pos.mint === "base-eth")
+    return Math.max(0, pos.amount - BASE_ETH_RESERVE);
   if (pos.mint === "bnb-bnb") return Math.max(0, pos.amount - BNB_RESERVE);
   return pos.amount;
 }

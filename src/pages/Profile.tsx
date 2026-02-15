@@ -80,9 +80,13 @@ const BASE_ETH_RESERVE = 0.0005;
 const BNB_RESERVE = 0.001;
 
 function sellableAmount(pos: { mint: string; amount: number }): number {
-  if (pos.mint === SOL_MINT || pos.mint === "So11111111111111111111111111111111111111111")
+  if (
+    pos.mint === SOL_MINT ||
+    pos.mint === "So11111111111111111111111111111111111111111"
+  )
     return Math.max(0, pos.amount - SOL_RESERVE);
-  if (pos.mint === "base-eth") return Math.max(0, pos.amount - BASE_ETH_RESERVE);
+  if (pos.mint === "base-eth")
+    return Math.max(0, pos.amount - BASE_ETH_RESERVE);
   if (pos.mint === "bnb-bnb") return Math.max(0, pos.amount - BNB_RESERVE);
   return pos.amount;
 }
@@ -90,8 +94,15 @@ function sellableAmount(pos: { mint: string; amount: number }): number {
 export function Profile() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user, userProfile, signOut, removeWallet, deleteAccount, loading, watchlist } =
-    useAuth();
+  const {
+    user,
+    userProfile,
+    signOut,
+    removeWallet,
+    deleteAccount,
+    loading,
+    watchlist,
+  } = useAuth();
   const [isRemovingWallet, setIsRemovingWallet] = useState(false);
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
@@ -108,17 +119,23 @@ export function Profile() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [depositSheetOpen, setDepositSheetOpen] = useState(false);
   const [depositStep, setDepositStep] = useState<"chain" | "detail">("chain");
-  const [selectedDepositChain, setSelectedDepositChain] = useState<"solana" | "base" | "bnb">("solana");
+  const [selectedDepositChain, setSelectedDepositChain] = useState<
+    "solana" | "base" | "bnb"
+  >("solana");
   const [evmAddress, setEvmAddress] = useState<string | null>(null);
   const [withdrawSheetOpen, setWithdrawSheetOpen] = useState(false);
   const [withdrawStep, setWithdrawStep] = useState<"chain" | "form">("chain");
-  const [withdrawNetwork, setWithdrawNetwork] = useState<"solana" | "base" | "bnb">("solana");
+  const [withdrawNetwork, setWithdrawNetwork] = useState<
+    "solana" | "base" | "bnb"
+  >("solana");
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [withdrawDestination, setWithdrawDestination] = useState("");
   const [withdrawQuote, setWithdrawQuote] = useState<unknown>(null);
   const [withdrawQuoteLoading, setWithdrawQuoteLoading] = useState(false);
   const [withdrawExecuting, setWithdrawExecuting] = useState(false);
-  const [withdrawRequestId, setWithdrawRequestId] = useState<string | null>(null);
+  const [withdrawRequestId, setWithdrawRequestId] = useState<string | null>(
+    null,
+  );
   const following = watchlist.filter(
     (w): w is WatchedWallet & { uid: string } =>
       w.onPlatform === true && !!w.uid,
@@ -171,7 +188,8 @@ export function Profile() {
       }
     };
     window.addEventListener("cope-refresh-balance", handleRefresh);
-    return () => window.removeEventListener("cope-refresh-balance", handleRefresh);
+    return () =>
+      window.removeEventListener("cope-refresh-balance", handleRefresh);
   }, [walletAddress]);
 
   // Open deposit sheet when navigated with ?open=deposit (e.g. from Home)
@@ -179,11 +197,14 @@ export function Profile() {
     if (searchParams.get("open") === "deposit") {
       setDepositStep("chain");
       setDepositSheetOpen(true);
-      setSearchParams((p) => {
-        const next = new URLSearchParams(p);
-        next.delete("open");
-        return next;
-      }, { replace: true });
+      setSearchParams(
+        (p) => {
+          const next = new URLSearchParams(p);
+          next.delete("open");
+          return next;
+        },
+        { replace: true },
+      );
     }
   }, [searchParams, setSearchParams]);
 
@@ -197,7 +218,10 @@ export function Profile() {
       return;
     }
     const cacheKey = `profile_positions_${walletAddress}`;
-    const cached = apiCache.get<{ openPositions: TokenPosition[]; closedPositions: TokenPosition[] }>(cacheKey);
+    const cached = apiCache.get<{
+      openPositions: TokenPosition[];
+      closedPositions: TokenPosition[];
+    }>(cacheKey);
     if (cached) {
       setOpenPositions(cached.openPositions);
       setClosedPositions(cached.closedPositions);
@@ -243,7 +267,10 @@ export function Profile() {
         if (cancelled) return;
 
         // Build EVM PnL lookup by mint
-        const evmPnlByMint = new Map<string, { pnl: number; pnlPercent?: number }>();
+        const evmPnlByMint = new Map<
+          string,
+          { pnl: number; pnlPercent?: number }
+        >();
         for (const item of [...evmPnlBase, ...evmPnlBnb]) {
           evmPnlByMint.set(item.mint, {
             pnl: item.pnl,
@@ -253,14 +280,16 @@ export function Profile() {
 
         const combined: TokenPosition[] = [];
         const closed: TokenPosition[] = [];
-        const SOLANA_LOGO = "https://assets.coingecko.com/coins/images/4128/small/solana.png";
+        const SOLANA_LOGO =
+          "https://assets.coingecko.com/coins/images/4128/small/solana.png";
 
         // 1) USDC first: Solana + Base + BNB combined (one row)
         const solBalance = portfolio.solBalance;
         const solanaUsdc = portfolio.usdcBalance;
         const baseUsdc = evmData?.base?.usdc ?? 0;
         const bnbUsdc = evmData?.bnb?.usdc ?? 0;
-        const totalUsdc = (Number.isFinite(solanaUsdc) ? solanaUsdc : 0) + baseUsdc + bnbUsdc;
+        const totalUsdc =
+          (Number.isFinite(solanaUsdc) ? solanaUsdc : 0) + baseUsdc + bnbUsdc;
         if (totalUsdc > 0) {
           combined.push({
             mint: SOLANA_USDC_MINT,
@@ -365,7 +394,11 @@ export function Profile() {
         setOpenPositions(combined);
         setClosedPositions(closed);
         if (!cancelled) {
-          apiCache.set(cacheKey, { openPositions: combined, closedPositions: closed }, UI_CACHE_TTL_MS);
+          apiCache.set(
+            cacheKey,
+            { openPositions: combined, closedPositions: closed },
+            UI_CACHE_TTL_MS,
+          );
         }
       } catch {
         if (!cancelled) {
@@ -397,7 +430,13 @@ export function Profile() {
 
   // Load evmAddress from user collection (or API) for deposit/withdraw when needed
   useEffect(() => {
-    if (!user || (selectedDepositChain !== "base" && selectedDepositChain !== "bnb" && withdrawNetwork !== "base" && withdrawNetwork !== "bnb")) {
+    if (
+      !user ||
+      (selectedDepositChain !== "base" &&
+        selectedDepositChain !== "bnb" &&
+        withdrawNetwork !== "base" &&
+        withdrawNetwork !== "bnb")
+    ) {
       return;
     }
     if (userProfile?.evmAddress) {
@@ -405,18 +444,25 @@ export function Profile() {
       return;
     }
     let cancelled = false;
-    user.getIdToken().then((token) => {
-      const base = getApiBase();
-      return fetch(`${base}/api/relay/evm-address`, {
-        headers: { Authorization: `Bearer ${token}` },
+    user
+      .getIdToken()
+      .then((token) => {
+        const base = getApiBase();
+        return fetch(`${base}/api/relay/evm-address`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && data.evmAddress) setEvmAddress(data.evmAddress);
+        else if (!cancelled) setEvmAddress(null);
+      })
+      .catch(() => {
+        if (!cancelled) setEvmAddress(null);
       });
-    }).then((res) => res.json()).then((data) => {
-      if (!cancelled && data.evmAddress) setEvmAddress(data.evmAddress);
-      else if (!cancelled) setEvmAddress(null);
-    }).catch(() => {
-      if (!cancelled) setEvmAddress(null);
-    });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [user, userProfile?.evmAddress, selectedDepositChain, withdrawNetwork]);
 
   const copyAddress = (value: string) => {
@@ -488,20 +534,29 @@ export function Profile() {
       if (!res.ok) throw new Error(data.error || "Execution failed");
       if (data.signature) {
         const completedAmount = parseFloat(withdrawAmount);
-        const completedNetwork = withdrawNetwork === "solana" ? "Solana" : withdrawNetwork === "base" ? "Base" : "BNB";
+        const completedNetwork =
+          withdrawNetwork === "solana"
+            ? "Solana"
+            : withdrawNetwork === "base"
+              ? "Base"
+              : "BNB";
         toast.success("Withdraw submitted", {
           description: "Transaction sent. Relay will complete the transfer.",
         });
         setWithdrawQuote(null);
         setWithdrawAmount("");
-        if (Number.isFinite(completedAmount)) setUsdcBalance((prev) => Math.max(0, prev - completedAmount));
+        if (Number.isFinite(completedAmount))
+          setUsdcBalance((prev) => Math.max(0, prev - completedAmount));
         if (withdrawRequestId) {
           let attempts = 0;
           const interval = setInterval(async () => {
             attempts++;
             try {
               const status = await getIntentStatus(withdrawRequestId);
-              if (status?.status === "filled" || status?.status === "complete") {
+              if (
+                status?.status === "filled" ||
+                status?.status === "complete"
+              ) {
                 clearInterval(interval);
                 toast.success("Withdraw complete");
                 window.dispatchEvent(new CustomEvent("cope-refresh-balance"));
@@ -513,7 +568,10 @@ export function Profile() {
                       "Content-Type": "application/json",
                       Authorization: `Bearer ${token}`,
                     },
-                    body: JSON.stringify({ amount: completedAmount, network: completedNetwork }),
+                    body: JSON.stringify({
+                      amount: completedAmount,
+                      network: completedNetwork,
+                    }),
                   }).catch(() => {});
                 });
               }
@@ -660,761 +718,955 @@ export function Profile() {
           initial="initial"
           animate="animate"
         >
-      <motion.div className="mb-6 flex items-center justify-between" variants={item}>
-        <h1 className="text-2xl font-bold">Profile</h1>
-        <button
-          onClick={() => setSettingsOpen(true)}
-          data-tap-haptic
-          className="tap-press p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white"
-          aria-label="Settings"
-        >
-          <Settings className="w-5 h-5" />
-        </button>
-      </motion.div>
+          <motion.div
+            className="mb-6 flex items-center justify-between"
+            variants={item}
+          >
+            <h1 className="text-2xl font-bold">Profile</h1>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              data-tap-haptic
+              className="tap-press p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white"
+              aria-label="Settings"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+          </motion.div>
 
-      {/* User + Stats merged card */}
-      <motion.div variants={item} className="mb-6">
-        <Card glass className="overflow-hidden">
-          <div className="relative">
-            {/* Subtle gradient header strip */}
-            <div className="h-1 bg-gradient-to-r from-[#12d585]/40 via-[#08b16b]/30 to-transparent" />
-            <div className="p-4 sm:p-6">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
-                <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-                  {avatar ? (
-                    <img
-                      src={avatar}
-                      alt={xHandle}
-                      className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-cover ring-2 ring-white/10 flex-shrink-0"
-                    />
-                  ) : (
-                    <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-[#12d585] to-[#08b16b] flex items-center justify-center ring-2 ring-white/10 flex-shrink-0">
-                      <span className="text-lg sm:text-xl font-bold text-[#000000]">
-                        {xHandle.charAt(1)?.toUpperCase() || "U"}
-                      </span>
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <h3 className="font-bold text-base sm:text-lg truncate">
-                      {xHandle}
-                    </h3>
-                    <div className="flex items-center gap-2 text-sm text-white/60 mt-0.5">
-                      <Twitter className="w-4 h-4" />
-                      <span>Connected</span>
-                    </div>
-                          <button className="text-sm text-accent-primary hover:underline mt-0.5">
-                      + Add a bio
-                    </button>
-                    {walletConnected && walletAddress && (
-                      <div className="flex items-center gap-2 mt-1 min-w-0 overflow-hidden">
-                        <code className="text-xs font-mono text-white/50 truncate">
-                          {shortenAddress(walletAddress)}
-                        </code>
+          {/* User + Stats merged card */}
+          <motion.div variants={item} className="mb-6">
+            <Card glass className="overflow-hidden">
+              <div className="relative">
+                {/* Subtle gradient header strip */}
+                <div className="h-1 bg-gradient-to-r from-[#12d585]/40 via-[#08b16b]/30 to-transparent" />
+                <div className="p-4 sm:p-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
+                    <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                      {avatar ? (
+                        <img
+                          src={avatar}
+                          alt={xHandle}
+                          className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-cover ring-2 ring-white/10 flex-shrink-0"
+                        />
+                      ) : (
+                        <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-[#12d585] to-[#08b16b] flex items-center justify-center ring-2 ring-white/10 flex-shrink-0">
+                          <span className="text-lg sm:text-xl font-bold text-[#000000]">
+                            {xHandle.charAt(1)?.toUpperCase() || "U"}
+                          </span>
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-bold text-base sm:text-lg truncate">
+                          {xHandle}
+                        </h3>
+                        <div className="flex items-center gap-2 text-sm text-white/60 mt-0.5">
+                          <Twitter className="w-4 h-4" />
+                          <span>Connected</span>
+                        </div>
+                        <button className="text-sm text-accent-primary hover:underline mt-0.5">
+                          + Add a bio
+                        </button>
+                        {walletConnected && walletAddress && (
+                          <div className="flex items-center gap-2 mt-1 min-w-0 overflow-hidden">
+                            <code className="text-xs font-mono text-white/50 truncate">
+                              {shortenAddress(walletAddress)}
+                            </code>
+                          </div>
+                        )}
                       </div>
-                    )}
+                    </div>
+
+                    {/* Stats row - integrated */}
+                    <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-6 pl-0 sm:pl-4 border-l-0 sm:border-l border-white/10 mt-2 sm:mt-0">
+                      <button
+                        onClick={() =>
+                          navigate("/app/watchlist", {
+                            state: { tab: "following" },
+                          })
+                        }
+                        className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial hover:opacity-80 transition-opacity py-1 active:scale-95"
+                      >
+                        <span className="text-lg sm:text-2xl font-bold">
+                          {following.length}
+                        </span>
+                        <span className="text-[10px] sm:text-xs text-white/60">
+                          Following
+                        </span>
+                      </button>
+                      <button
+                        onClick={() =>
+                          navigate("/app/watchlist", {
+                            state: { tab: "followers" },
+                          })
+                        }
+                        className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial hover:opacity-80 transition-opacity py-1 active:scale-95"
+                      >
+                        <span className="text-lg sm:text-2xl font-bold">
+                          {followersCount ?? "—"}
+                        </span>
+                        <span className="text-[10px] sm:text-xs text-white/60">
+                          Followers
+                        </span>
+                      </button>
+                      <button
+                        onClick={() =>
+                          navigate("/app/watchlist", {
+                            state: { tab: "watchlist" },
+                          })
+                        }
+                        className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial hover:opacity-80 transition-opacity py-1 active:scale-95"
+                      >
+                        <span className="text-lg sm:text-2xl font-bold">
+                          {watchlistExternal.length}
+                        </span>
+                        <span className="text-[10px] sm:text-xs text-white/60">
+                          Watchlist
+                        </span>
+                      </button>
+                    </div>
                   </div>
-                </div>
 
-                {/* Stats row - integrated */}
-                <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-6 pl-0 sm:pl-4 border-l-0 sm:border-l border-white/10 mt-2 sm:mt-0">
-                  <button
-                    onClick={() =>
-                      navigate("/app/watchlist", {
-                        state: { tab: "following" },
-                      })
-                    }
-                    className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial hover:opacity-80 transition-opacity py-1 active:scale-95"
-                  >
-                    <span className="text-lg sm:text-2xl font-bold">
-                      {following.length}
-                    </span>
-                    <span className="text-[10px] sm:text-xs text-white/60">
-                      Following
-                    </span>
-                  </button>
-                  <button
-                    onClick={() =>
-                      navigate("/app/watchlist", {
-                        state: { tab: "followers" },
-                      })
-                    }
-                    className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial hover:opacity-80 transition-opacity py-1 active:scale-95"
-                  >
-                    <span className="text-lg sm:text-2xl font-bold">
-                      {followersCount ?? "—"}
-                    </span>
-                    <span className="text-[10px] sm:text-xs text-white/60">
-                      Followers
-                    </span>
-                  </button>
-                  <button
-                    onClick={() =>
-                      navigate("/app/watchlist", {
-                        state: { tab: "watchlist" },
-                      })
-                    }
-                    className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial hover:opacity-80 transition-opacity py-1 active:scale-95"
-                  >
-                    <span className="text-lg sm:text-2xl font-bold">
-                      {watchlistExternal.length}
-                    </span>
-                    <span className="text-[10px] sm:text-xs text-white/60">
-                      Watchlist
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Total wallet balance (USDC + positions) + cash row - when connected */}
-              {walletConnected && walletAddress && (
-                <>
-                  <div className="mt-4 pt-4 border-t border-white/10">
-                    <p className="text-2xl sm:text-3xl font-bold">
-                      {usdcBalanceLoading
-                        ? "$0.00"
-                        : `$${openPositions.reduce((s, p) => s + p.value, 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                    </p>
-                    <p className="text-xs text-white/50 mt-0.5">Total wallet balance (both wallets)</p>
-                </div>
-                  <div className="mt-4 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center">
-                        <DollarSign className="w-4 h-4 text-white/70" />
-                      </div>
-                      <div>
-                        <p className="text-sm text-white/60">Cash balance</p>
-                        <p className="font-semibold">
+                  {/* Total wallet balance (USDC + positions) + cash row - when connected */}
+                  {walletConnected && walletAddress && (
+                    <>
+                      <div className="mt-4 pt-4 border-t border-white/10">
+                        <p className="text-2xl sm:text-3xl font-bold">
                           {usdcBalanceLoading
                             ? "$0.00"
-                            : `$${usdcBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                            : `$${openPositions.reduce((s, p) => s + p.value, 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        </p>
+                        <p className="text-xs text-white/50 mt-0.5">
+                          Total wallet balance (both wallets)
                         </p>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => {
-                          setDepositStep("chain");
-                          setDepositSheetOpen(true);
-                        }}
-                        data-tap-haptic
-                        className="tap-press w-9 h-9 min-w-[44px] min-h-[44px] rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center text-lg font-medium touch-manipulation"
-                        aria-label="Deposit"
-                      >
-                        +
-                      </button>
-                      <button
-                        onClick={() => {
-                          setWithdrawStep("chain");
-                          setWithdrawNetwork("solana");
-                          setWithdrawAmount("");
-                          setWithdrawDestination("");
-                          setWithdrawQuote(null);
-                          setWithdrawSheetOpen(true);
-                        }}
-                        data-tap-haptic
-                        className="tap-press w-9 h-9 min-w-[44px] min-h-[44px] rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center text-white/70 touch-manipulation"
-                        aria-label="Withdraw"
-                      >
-                        …
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-4 pt-4 border-t border-white/10">
-                    <button
-                      onClick={() => navigate("/app/trade")}
-                      data-tap-haptic
-                      className="tap-press text-sm font-medium mb-2 block w-full text-left py-2 -mx-2 px-2 rounded-lg min-h-[44px] flex items-center hover:bg-white/5 active:bg-white/10 hover:text-accent-primary transition-colors touch-manipulation"
-                    >
-                      Open positions
-                    </button>
-                    {displayedOpenPositions.length === 0 ? (
-                      <p className="text-sm text-white/50">No open positions</p>
-                    ) : (
-                      <ul className="space-y-2">
-                        {displayedOpenPositions.map((pos) => {
-                          const isNative = pos.symbol === "SOL" || pos.symbol === "ETH" || pos.symbol === "BNB";
-                          const quantityStr = isNative
-                            ? pos.amount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 4 })
-                            : pos.amount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-                          const pct = pos.pnlPercent != null && !Number.isNaN(pos.pnlPercent) ? pos.pnlPercent : 0;
-                          const pctPositive = pct >= 0;
-                          return (
-                            <li
-                              key={pos.mint}
-                              data-tap-haptic
-                              className="tap-press flex items-center gap-3 py-3 px-2 rounded-lg min-h-[44px] hover:bg-white/5 active:bg-white/10 touch-manipulation"
-                              role="button"
-                              onClick={() => {
-                                const params = new URLSearchParams({ mint: pos.mint });
-                                if (pos.chain === "base" || pos.chain === "bnb") params.set("chain", pos.chain);
-                                navigate(`/app/trade?${params.toString()}`);
-                              }}
-                            >
-                              {pos.image ? (
-                                <img src={pos.image} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden"); }} />
-                              ) : null}
-                              <div className={`w-9 h-9 rounded-full bg-white/10 flex-shrink-0 ${pos.image ? "hidden" : ""}`} />
-                              <div className="flex-1 min-w-0">
-                                <p className="font-semibold truncate">{pos.name}</p>
-                                <p className="text-xs text-white/50 truncate">{quantityStr} {pos.symbol}</p>
-                              </div>
-                              <div className="text-right flex-shrink-0">
-                                <p className="font-semibold">${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                                <p className={`text-sm flex items-center justify-end gap-0.5 ${pctPositive ? "text-[#12d585]" : "text-red-400"}`}>
-                                  {pctPositive ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-                                  {pctPositive ? "+" : ""}{pct.toFixed(2)}%
-                                </p>
-                              </div>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </div>
-                  <div className="mt-4 pt-4 border-t border-white/10">
-                    <button
-                      type="button"
-                      data-tap-haptic
-                      className="flex w-full items-center justify-between min-h-[44px] rounded-lg hover:bg-white/5 -m-2 p-2 transition-colors"
-                      onClick={() => setClosedExpanded((v) => !v)}
-                    >
-                      <div className="flex items-center gap-2">
-                        {closedExpanded ? (
-                          <ChevronUp className="w-4 h-4 text-white/50 flex-shrink-0" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4 text-white/50 flex-shrink-0" />
-                        )}
-                        <p className="text-sm font-medium">Closed positions</p>
-                        {closedPositions.length > 0 && (
-                          <span className="text-xs text-white/50">({closedPositions.length})</span>
-                        )}
+                      <div className="mt-4 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center">
+                            <DollarSign className="w-4 h-4 text-white/70" />
+                          </div>
+                          <div>
+                            <p className="text-sm text-white/60">
+                              Cash balance
+                            </p>
+                            <p className="font-semibold">
+                              {usdcBalanceLoading
+                                ? "$0.00"
+                                : `$${usdcBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => {
+                              setDepositStep("chain");
+                              setDepositSheetOpen(true);
+                            }}
+                            data-tap-haptic
+                            className="tap-press w-9 h-9 min-w-[44px] min-h-[44px] rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center text-lg font-medium touch-manipulation"
+                            aria-label="Deposit"
+                          >
+                            +
+                          </button>
+                          <button
+                            onClick={() => {
+                              setWithdrawStep("chain");
+                              setWithdrawNetwork("solana");
+                              setWithdrawAmount("");
+                              setWithdrawDestination("");
+                              setWithdrawQuote(null);
+                              setWithdrawSheetOpen(true);
+                            }}
+                            data-tap-haptic
+                            className="tap-press w-9 h-9 min-w-[44px] min-h-[44px] rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center text-white/70 touch-manipulation"
+                            aria-label="Withdraw"
+                          >
+                            …
+                          </button>
+                        </div>
                       </div>
-                    </button>
-                    {closedExpanded && (
-                      <>
-                        {closedPositions.length === 0 ? (
-                          <p className="text-sm text-white/50 mt-2 pl-6">No closed positions</p>
+                      <div className="mt-4 pt-4 border-t border-white/10">
+                        <button
+                          onClick={() => navigate("/app/trade")}
+                          data-tap-haptic
+                          className="tap-press text-sm font-medium mb-2 block w-full text-left py-2 -mx-2 px-2 rounded-lg min-h-[44px] flex items-center hover:bg-white/5 active:bg-white/10 hover:text-accent-primary transition-colors touch-manipulation"
+                        >
+                          Open positions
+                        </button>
+                        {displayedOpenPositions.length === 0 ? (
+                          <p className="text-sm text-white/50">
+                            No open positions
+                          </p>
                         ) : (
-                          <ul className="space-y-2 mt-2 pl-2">
-                            {closedPositions.map((pos) => (
-                              <li key={pos.mint} className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5">
-                                {pos.image ? (
-                                  <img src={pos.image} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden"); }} />
-                                ) : null}
-                                <div className={`w-8 h-8 rounded-full bg-white/10 flex-shrink-0 ${pos.image ? "hidden" : ""}`} />
-                                <div className="flex-1 min-w-0">
-                                  <p className="font-medium truncate">{pos.symbol}</p>
-                                  <p className="text-xs text-white/50">
-                                    {pos.amount > 0 ? `${pos.amount.toLocaleString()} ${pos.symbol}` : "0 held"}
-                                  </p>
-                                </div>
-                                <p className="text-sm flex-shrink-0">
-                                  {`$${(pos.value ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                                </p>
-                              </li>
-                            ))}
+                          <ul className="space-y-2">
+                            {displayedOpenPositions.map((pos) => {
+                              const isNative =
+                                pos.symbol === "SOL" ||
+                                pos.symbol === "ETH" ||
+                                pos.symbol === "BNB";
+                              const quantityStr = isNative
+                                ? pos.amount.toLocaleString(undefined, {
+                                    minimumFractionDigits: 0,
+                                    maximumFractionDigits: 4,
+                                  })
+                                : pos.amount.toLocaleString(undefined, {
+                                    minimumFractionDigits: 0,
+                                    maximumFractionDigits: 2,
+                                  });
+                              const pct =
+                                pos.pnlPercent != null &&
+                                !Number.isNaN(pos.pnlPercent)
+                                  ? pos.pnlPercent
+                                  : 0;
+                              const pctPositive = pct >= 0;
+                              return (
+                                <li
+                                  key={pos.mint}
+                                  data-tap-haptic
+                                  className="tap-press flex items-center gap-3 py-3 px-2 rounded-lg min-h-[44px] hover:bg-white/5 active:bg-white/10 touch-manipulation"
+                                  role="button"
+                                  onClick={() => {
+                                    const params = new URLSearchParams({
+                                      mint: pos.mint,
+                                    });
+                                    if (
+                                      pos.chain === "base" ||
+                                      pos.chain === "bnb"
+                                    )
+                                      params.set("chain", pos.chain);
+                                    navigate(`/app/trade?${params.toString()}`);
+                                  }}
+                                >
+                                  {pos.image ? (
+                                    <img
+                                      src={pos.image}
+                                      alt=""
+                                      className="w-9 h-9 rounded-full object-cover flex-shrink-0"
+                                      onError={(e) => {
+                                        (
+                                          e.target as HTMLImageElement
+                                        ).style.display = "none";
+                                        (
+                                          e.target as HTMLImageElement
+                                        ).nextElementSibling?.classList.remove(
+                                          "hidden",
+                                        );
+                                      }}
+                                    />
+                                  ) : null}
+                                  <div
+                                    className={`w-9 h-9 rounded-full bg-white/10 flex-shrink-0 ${pos.image ? "hidden" : ""}`}
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="font-semibold truncate">
+                                      {pos.name}
+                                    </p>
+                                    <p className="text-xs text-white/50 truncate">
+                                      {quantityStr} {pos.symbol}
+                                    </p>
+                                  </div>
+                                  <div className="text-right flex-shrink-0">
+                                    <p className="font-semibold">
+                                      $
+                                      {pos.value.toLocaleString("en-US", {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2,
+                                      })}
+                                    </p>
+                                    <p
+                                      className={`text-sm flex items-center justify-end gap-0.5 ${pctPositive ? "text-[#12d585]" : "text-red-400"}`}
+                                    >
+                                      {pctPositive ? (
+                                        <TrendingUp className="w-3.5 h-3.5" />
+                                      ) : (
+                                        <TrendingDown className="w-3.5 h-3.5" />
+                                      )}
+                                      {pctPositive ? "+" : ""}
+                                      {pct.toFixed(2)}%
+                                    </p>
+                                  </div>
+                                </li>
+                              );
+                            })}
                           </ul>
                         )}
+                      </div>
+                      <div className="mt-4 pt-4 border-t border-white/10">
+                        <button
+                          type="button"
+                          data-tap-haptic
+                          className="flex w-full items-center justify-between min-h-[44px] rounded-lg hover:bg-white/5 -m-2 p-2 transition-colors"
+                          onClick={() => setClosedExpanded((v) => !v)}
+                        >
+                          <div className="flex items-center gap-2">
+                            {closedExpanded ? (
+                              <ChevronUp className="w-4 h-4 text-white/50 flex-shrink-0" />
+                            ) : (
+                              <ChevronDown className="w-4 h-4 text-white/50 flex-shrink-0" />
+                            )}
+                            <p className="text-sm font-medium">
+                              Closed positions
+                            </p>
+                            {closedPositions.length > 0 && (
+                              <span className="text-xs text-white/50">
+                                ({closedPositions.length})
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                        {closedExpanded && (
+                          <>
+                            {closedPositions.length === 0 ? (
+                              <p className="text-sm text-white/50 mt-2 pl-6">
+                                No closed positions
+                              </p>
+                            ) : (
+                              <ul className="space-y-2 mt-2 pl-2">
+                                {closedPositions.map((pos) => (
+                                  <li
+                                    key={pos.mint}
+                                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5"
+                                  >
+                                    {pos.image ? (
+                                      <img
+                                        src={pos.image}
+                                        alt=""
+                                        className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                                        onError={(e) => {
+                                          (
+                                            e.target as HTMLImageElement
+                                          ).style.display = "none";
+                                          (
+                                            e.target as HTMLImageElement
+                                          ).nextElementSibling?.classList.remove(
+                                            "hidden",
+                                          );
+                                        }}
+                                      />
+                                    ) : null}
+                                    <div
+                                      className={`w-8 h-8 rounded-full bg-white/10 flex-shrink-0 ${pos.image ? "hidden" : ""}`}
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                      <p className="font-medium truncate">
+                                        {pos.symbol}
+                                      </p>
+                                      <p className="text-xs text-white/50">
+                                        {pos.amount > 0
+                                          ? `${pos.amount.toLocaleString()} ${pos.symbol}`
+                                          : "0 held"}
+                                      </p>
+                                    </div>
+                                    <p className="text-sm flex-shrink-0">
+                                      {`$${(pos.value ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                                    </p>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      <div className="mt-2 flex justify-end">
+                        <a
+                          href={`https://solscan.io/account/${walletAddress}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-accent-primary hover:text-accent-hover flex items-center gap-1"
+                        >
+                          View on Explorer
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    </>
+                  )}
+
+                  {!walletConnected && (
+                    <div className="mt-4 pt-4 border-t border-white/6 text-center">
+                      <p className="text-sm text-white/60 mb-2">
+                        No wallet connected
+                      </p>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => navigate("/auth/wallet-setup")}
+                        className="text-accent-primary hover:text-accent-hover"
+                      >
+                        Connect Wallet
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Card>
+          </motion.div>
+
+          {/* Deposit sheet - from bottom: chain picker then deposit detail */}
+          <Sheet
+            open={depositSheetOpen}
+            onOpenChange={(open) => {
+              setDepositSheetOpen(open);
+              if (!open) setDepositStep("chain");
+            }}
+          >
+            <SheetContent
+              side="bottom"
+              className="bg-white/[0.06] backdrop-blur-xl border border-white/10 text-white w-full max-w-[100%] sm:max-w-md mx-auto rounded-t-2xl overflow-hidden flex flex-col shadow-2xl"
+              style={{
+                paddingBottom:
+                  "calc(1rem + var(--safe-area-inset-bottom, 0px))",
+              }}
+            >
+              <div
+                className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#12d585]/50 via-[#08b16b]/40 to-transparent rounded-t-2xl"
+                aria-hidden
+              />
+              <div
+                className="absolute top-2.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/30"
+                aria-hidden
+              />
+              {depositStep === "chain" ? (
+                <>
+                  <SheetHeader className="text-center pt-2">
+                    <SheetTitle className="text-white text-xl">
+                      Deposit crypto
+                    </SheetTitle>
+                  </SheetHeader>
+                  <p className="text-sm text-white/70 text-center px-4 -mt-1">
+                    Choose a chain to deposit from
+                  </p>
+                  <div className="p-4 space-y-3 flex-1 overflow-y-auto">
+                    {(
+                      [
+                        { id: "solana" as const, label: "Solana" },
+                        { id: "base" as const, label: "Base" },
+                        { id: "bnb" as const, label: "BNB Chain" },
+                      ] as const
+                    ).map(({ id, label }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedDepositChain(id);
+                          setDepositStep("detail");
+                        }}
+                        data-tap-haptic
+                        className="w-full min-h-[44px] rounded-[12px] border border-white/20 bg-white/5 hover:bg-white/10 backdrop-blur-sm flex items-center justify-center px-4 py-3 touch-manipulation font-medium transition-colors hover:border-[#12d585]/30"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3 p-4 border-b border-white/10">
+                    <button
+                      type="button"
+                      onClick={() => setDepositStep("chain")}
+                      data-tap-haptic
+                      className="p-2 -ml-2 rounded-full hover:bg-white/10 min-w-[44px] min-h-[44px] flex items-center justify-center touch-manipulation"
+                      aria-label="Back"
+                    >
+                      <ArrowLeft className="w-5 h-5" />
+                    </button>
+                    <h2 className="text-lg font-semibold flex-1 text-center pr-10">
+                      Deposit crypto
+                    </h2>
+                  </div>
+                  <div className="p-4 flex-1 overflow-y-auto space-y-5 text-center">
+                    {selectedDepositChain === "solana" && (
+                      <>
+                        <p className="text-sm text-white/90">
+                          Send any token on the Solana network
+                        </p>
+                        <p className="text-sm text-white/60">
+                          Deposit USDC to add to your cash balance
+                        </p>
                       </>
                     )}
-                  </div>
-                  <div className="mt-2 flex justify-end">
-                    <a
-                      href={`https://solscan.io/account/${walletAddress}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-accent-primary hover:text-accent-hover flex items-center gap-1"
-                    >
-                      View on Explorer
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
+                    {(selectedDepositChain === "base" ||
+                      selectedDepositChain === "bnb") && (
+                      <>
+                        <p className="text-sm text-white/90">
+                          Send any token on the{" "}
+                          {selectedDepositChain === "base"
+                            ? "Base"
+                            : "BNB Chain"}{" "}
+                          network
+                        </p>
+                        <p className="text-sm text-white/60">
+                          Deposit USDC to add to your cash balance
+                        </p>
+                      </>
+                    )}
+                    {(() => {
+                      const address =
+                        selectedDepositChain === "solana"
+                          ? walletAddress
+                          : selectedDepositChain === "base" ||
+                              selectedDepositChain === "bnb"
+                            ? evmAddress
+                            : null;
+                      const showQr = !!address;
+                      return (
+                        <>
+                          {showQr ? (
+                            <div className="w-48 h-48 mx-auto bg-white rounded-2xl flex items-center justify-center p-3 shadow-lg ring-1 ring-white/20">
+                              <QRCodeSVG
+                                value={address}
+                                size={192}
+                                level="H"
+                                includeMargin={false}
+                              />
+                            </div>
+                          ) : (
+                            <div className="w-48 h-48 mx-auto bg-white/10 rounded-2xl flex items-center justify-center backdrop-blur-sm">
+                              <p className="text-white/40 text-sm">
+                                Loading address…
+                              </p>
+                            </div>
+                          )}
+                          {address && (
+                            <div className="space-y-3 w-full">
+                              <div className="w-full px-1">
+                                <code className="block w-full px-3 py-2.5 bg-black/30 rounded-[12px] text-xs font-mono text-white/90 break-all text-center">
+                                  {address}
+                                </code>
+                              </div>
+                              <Button
+                                onClick={() => copyAddress(address)}
+                                className="w-full min-h-[44px] rounded-[12px] bg-gradient-to-r from-[#12d585]/20 to-[#08b16b]/20 border border-[#12d585]/30 hover:from-[#12d585]/30 hover:to-[#08b16b]/30 text-white font-medium"
+                              >
+                                <Copy className="w-4 h-4 mr-2 inline" />
+                                Copy wallet address
+                              </Button>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </>
               )}
+            </SheetContent>
+          </Sheet>
 
-              {!walletConnected && (
-                <div className="mt-4 pt-4 border-t border-white/6 text-center">
-                  <p className="text-sm text-white/60 mb-2">
-                    No wallet connected
+          {/* Withdraw sheet - from bottom: chain picker then amount + destination (same flow as deposit) */}
+          <Sheet
+            open={withdrawSheetOpen}
+            onOpenChange={(open) => {
+              setWithdrawSheetOpen(open);
+              if (!open) {
+                setWithdrawStep("chain");
+                setWithdrawQuote(null);
+                setWithdrawAmount("");
+                setWithdrawDestination("");
+              }
+            }}
+          >
+            <SheetContent
+              side="bottom"
+              className="bg-white/[0.06] backdrop-blur-xl border border-white/10 text-white w-full max-w-[100%] sm:max-w-md mx-auto rounded-t-2xl overflow-hidden flex flex-col shadow-2xl"
+              style={{
+                paddingBottom:
+                  "calc(1rem + var(--safe-area-inset-bottom, 0px))",
+              }}
+            >
+              <div
+                className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#12d585]/50 via-[#08b16b]/40 to-transparent rounded-t-2xl"
+                aria-hidden
+              />
+              <div
+                className="absolute top-2.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/30"
+                aria-hidden
+              />
+              {withdrawStep === "chain" ? (
+                <>
+                  <SheetHeader className="text-center pt-2">
+                    <SheetTitle className="text-white text-xl">
+                      Withdraw
+                    </SheetTitle>
+                  </SheetHeader>
+                  <p className="text-sm text-white/70 text-center px-4 -mt-1">
+                    Choose a chain to withdraw to
                   </p>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => navigate("/auth/wallet-setup")}
-                    className="text-accent-primary hover:text-accent-hover"
-                  >
-                    Connect Wallet
-                  </Button>
-                </div>
-              )}
-            </div>
-          </div>
-        </Card>
-      </motion.div>
-
-      {/* Deposit sheet - from bottom: chain picker then deposit detail */}
-      <Sheet
-        open={depositSheetOpen}
-        onOpenChange={(open) => {
-          setDepositSheetOpen(open);
-          if (!open) setDepositStep("chain");
-        }}
-      >
-        <SheetContent
-          side="bottom"
-          className="bg-white/[0.06] backdrop-blur-xl border border-white/10 text-white w-full max-w-[100%] sm:max-w-md mx-auto rounded-t-2xl overflow-hidden flex flex-col shadow-2xl"
-          style={{ paddingBottom: "calc(1rem + var(--safe-area-inset-bottom, 0px))" }}
-        >
-          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#12d585]/50 via-[#08b16b]/40 to-transparent rounded-t-2xl" aria-hidden />
-          <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/30" aria-hidden />
-          {depositStep === "chain" ? (
-            <>
-              <SheetHeader className="text-center pt-2">
-                <SheetTitle className="text-white text-xl">Deposit crypto</SheetTitle>
-              </SheetHeader>
-              <p className="text-sm text-white/70 text-center px-4 -mt-1">Choose a chain to deposit from</p>
-              <div className="p-4 space-y-3 flex-1 overflow-y-auto">
-                {(
-                  [
-                    { id: "solana" as const, label: "Solana" },
-                    { id: "base" as const, label: "Base" },
-                    { id: "bnb" as const, label: "BNB Chain" },
-                  ] as const
-                ).map(({ id, label }) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedDepositChain(id);
-                      setDepositStep("detail");
-                    }}
-                    data-tap-haptic
-                    className="w-full min-h-[44px] rounded-[12px] border border-white/20 bg-white/5 hover:bg-white/10 backdrop-blur-sm flex items-center justify-center px-4 py-3 touch-manipulation font-medium transition-colors hover:border-[#12d585]/30"
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center gap-3 p-4 border-b border-white/10">
-                <button
-                  type="button"
-                  onClick={() => setDepositStep("chain")}
-                  data-tap-haptic
-                  className="p-2 -ml-2 rounded-full hover:bg-white/10 min-w-[44px] min-h-[44px] flex items-center justify-center touch-manipulation"
-                  aria-label="Back"
-                >
-                  <ArrowLeft className="w-5 h-5" />
-                </button>
-                <h2 className="text-lg font-semibold flex-1 text-center pr-10">Deposit crypto</h2>
-              </div>
-              <div className="p-4 flex-1 overflow-y-auto space-y-5 text-center">
-                {selectedDepositChain === "solana" && (
-                  <>
-                    <p className="text-sm text-white/90">Send any token on the Solana network</p>
-                    <p className="text-sm text-white/60">Deposit USDC to add to your cash balance</p>
-                  </>
-                )}
-                {(selectedDepositChain === "base" || selectedDepositChain === "bnb") && (
-                  <>
-                    <p className="text-sm text-white/90">
-                      Send any token on the {selectedDepositChain === "base" ? "Base" : "BNB Chain"} network
-                    </p>
-                    <p className="text-sm text-white/60">Deposit USDC to add to your cash balance</p>
-                  </>
-                )}
-                {(() => {
-                  const address =
-                    selectedDepositChain === "solana"
-                      ? walletAddress
-                      : selectedDepositChain === "base" || selectedDepositChain === "bnb"
-                        ? evmAddress
-                        : null;
-                  const showQr = !!address;
-                  return (
-                    <>
-                      {showQr ? (
-                        <div className="w-48 h-48 mx-auto bg-white rounded-2xl flex items-center justify-center p-3 shadow-lg ring-1 ring-white/20">
-                          <QRCodeSVG value={address} size={192} level="H" includeMargin={false} />
-                        </div>
-                      ) : (
-                        <div className="w-48 h-48 mx-auto bg-white/10 rounded-2xl flex items-center justify-center backdrop-blur-sm">
-                          <p className="text-white/40 text-sm">Loading address…</p>
-                        </div>
-                      )}
-                      {address && (
-                        <div className="space-y-3 w-full">
-                          <div className="w-full px-1">
-                            <code className="block w-full px-3 py-2.5 bg-black/30 rounded-[12px] text-xs font-mono text-white/90 break-all text-center">
-                              {address}
-                            </code>
-                          </div>
-                          <Button
-                            onClick={() => copyAddress(address)}
-                            className="w-full min-h-[44px] rounded-[12px] bg-gradient-to-r from-[#12d585]/20 to-[#08b16b]/20 border border-[#12d585]/30 hover:from-[#12d585]/30 hover:to-[#08b16b]/30 text-white font-medium"
-                          >
-                            <Copy className="w-4 h-4 mr-2 inline" />
-                            Copy wallet address
-                          </Button>
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
-
-      {/* Withdraw sheet - from bottom: chain picker then amount + destination (same flow as deposit) */}
-      <Sheet
-        open={withdrawSheetOpen}
-        onOpenChange={(open) => {
-          setWithdrawSheetOpen(open);
-          if (!open) {
-            setWithdrawStep("chain");
-            setWithdrawQuote(null);
-            setWithdrawAmount("");
-            setWithdrawDestination("");
-          }
-        }}
-      >
-        <SheetContent
-          side="bottom"
-          className="bg-white/[0.06] backdrop-blur-xl border border-white/10 text-white w-full max-w-[100%] sm:max-w-md mx-auto rounded-t-2xl overflow-hidden flex flex-col shadow-2xl"
-          style={{ paddingBottom: "calc(1rem + var(--safe-area-inset-bottom, 0px))" }}
-        >
-          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#12d585]/50 via-[#08b16b]/40 to-transparent rounded-t-2xl" aria-hidden />
-          <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/30" aria-hidden />
-          {withdrawStep === "chain" ? (
-            <>
-              <SheetHeader className="text-center pt-2">
-                <SheetTitle className="text-white text-xl">Withdraw</SheetTitle>
-              </SheetHeader>
-              <p className="text-sm text-white/70 text-center px-4 -mt-1">Choose a chain to withdraw to</p>
-              <div className="p-4 space-y-3 flex-1 overflow-y-auto">
-                {(
-                  [
-                    { id: "solana" as const, label: "Solana" },
-                    { id: "base" as const, label: "Base" },
-                    { id: "bnb" as const, label: "BNB Chain" },
-                  ] as const
-                ).map(({ id, label }) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => {
-                      setWithdrawNetwork(id);
-                      setWithdrawAmount("");
-                      setWithdrawDestination("");
-                      setWithdrawQuote(null);
-                      setWithdrawStep("form");
-                    }}
-                    data-tap-haptic
-                    className="w-full min-h-[44px] rounded-[12px] border border-white/20 bg-white/5 hover:bg-white/10 backdrop-blur-sm flex items-center justify-center px-4 py-3 touch-manipulation font-medium transition-colors hover:border-[#12d585]/30"
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center gap-3 p-4 border-b border-white/10">
-                <button
-                  type="button"
-                  onClick={() => (!withdrawQuote ? setWithdrawStep("chain") : setWithdrawQuote(null))}
-                  data-tap-haptic
-                  className="p-2 -ml-2 rounded-full hover:bg-white/10 min-w-[44px] min-h-[44px] flex items-center justify-center touch-manipulation"
-                  aria-label="Back"
-                >
-                  <ArrowLeft className="w-5 h-5" />
-                </button>
-                <h2 className="text-lg font-semibold flex-1 text-center pr-10">Withdraw</h2>
-              </div>
-              <div className="p-4 flex-1 overflow-y-auto space-y-4">
-                <p className="text-sm text-white/70 text-center">
-                  Withdraw USDC to {withdrawNetwork === "solana" ? "Solana" : withdrawNetwork === "base" ? "Base" : "BNB Chain"}. You will receive USDC on the selected network.
-                </p>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-white/80">Amount (USDC)</label>
-                  <div className="flex gap-2">
-                    <Input
-                      type="number"
-                      placeholder="0.00"
-                      value={withdrawAmount}
-                      onChange={(e) => setWithdrawAmount(e.target.value)}
-                      className="flex-1 min-w-0 min-h-[44px] bg-white/5 border-white/10 rounded-[12px]"
-                    />
-                    <Button
-                      variant="outline"
-                      onClick={() => setWithdrawAmount(usdcBalance.toFixed(2))}
-                      className="min-h-[44px] shrink-0 border-white/20 hover:bg-white/10"
-                    >
-                      Max
-                    </Button>
+                  <div className="p-4 space-y-3 flex-1 overflow-y-auto">
+                    {(
+                      [
+                        { id: "solana" as const, label: "Solana" },
+                        { id: "base" as const, label: "Base" },
+                        { id: "bnb" as const, label: "BNB Chain" },
+                      ] as const
+                    ).map(({ id, label }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => {
+                          setWithdrawNetwork(id);
+                          setWithdrawAmount("");
+                          setWithdrawDestination("");
+                          setWithdrawQuote(null);
+                          setWithdrawStep("form");
+                        }}
+                        data-tap-haptic
+                        className="w-full min-h-[44px] rounded-[12px] border border-white/20 bg-white/5 hover:bg-white/10 backdrop-blur-sm flex items-center justify-center px-4 py-3 touch-manipulation font-medium transition-colors hover:border-[#12d585]/30"
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
-                  <p className="text-xs text-white/50">Available: {usdcBalance.toFixed(2)} USDC</p>
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-white/80">
-                    Destination address ({withdrawNetwork === "solana" ? "Solana" : withdrawNetwork === "base" ? "Base" : "BNB"})
-                  </label>
-                  <Input
-                    type="text"
-                    placeholder={withdrawNetwork === "solana" ? "Enter Solana address" : "Enter 0x address"}
-                    value={withdrawDestination}
-                    onChange={(e) => setWithdrawDestination(e.target.value)}
-                    className="min-w-0 min-h-[44px] bg-white/5 border-white/10 rounded-[12px]"
-                  />
-                </div>
-                {!withdrawQuote ? (
-                  <Button
-                    onClick={fetchWithdrawQuote}
-                    disabled={withdrawQuoteLoading || !withdrawAmount || !withdrawDestination.trim()}
-                    className="w-full min-h-[44px] rounded-[12px] bg-gradient-to-r from-[#12d585] to-[#08b16b] text-[#000000] font-medium hover:opacity-90"
-                  >
-                    {withdrawQuoteLoading ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Getting quote...
-                      </>
-                    ) : (
-                      "Get quote"
-                    )}
-                  </Button>
-                ) : (
-                  <div className="space-y-3">
-                    <p className="text-sm text-white/80 text-center">Review and confirm withdraw</p>
-                    <div className="flex gap-2">
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3 p-4 border-b border-white/10">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        !withdrawQuote
+                          ? setWithdrawStep("chain")
+                          : setWithdrawQuote(null)
+                      }
+                      data-tap-haptic
+                      className="p-2 -ml-2 rounded-full hover:bg-white/10 min-w-[44px] min-h-[44px] flex items-center justify-center touch-manipulation"
+                      aria-label="Back"
+                    >
+                      <ArrowLeft className="w-5 h-5" />
+                    </button>
+                    <h2 className="text-lg font-semibold flex-1 text-center pr-10">
+                      Withdraw
+                    </h2>
+                  </div>
+                  <div className="p-4 flex-1 overflow-y-auto space-y-4">
+                    <p className="text-sm text-white/70 text-center">
+                      Withdraw USDC to{" "}
+                      {withdrawNetwork === "solana"
+                        ? "Solana"
+                        : withdrawNetwork === "base"
+                          ? "Base"
+                          : "BNB Chain"}
+                      . You will receive USDC on the selected network.
+                    </p>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-white/80">
+                        Amount (USDC)
+                      </label>
+                      <div className="flex gap-2">
+                        <Input
+                          type="number"
+                          placeholder="0.00"
+                          value={withdrawAmount}
+                          onChange={(e) => setWithdrawAmount(e.target.value)}
+                          className="flex-1 min-w-0 min-h-[44px] bg-white/5 border-white/10 rounded-[12px]"
+                        />
+                        <Button
+                          variant="outline"
+                          onClick={() =>
+                            setWithdrawAmount(usdcBalance.toFixed(2))
+                          }
+                          className="min-h-[44px] shrink-0 border-white/20 hover:bg-white/10"
+                        >
+                          Max
+                        </Button>
+                      </div>
+                      <p className="text-xs text-white/50">
+                        Available: {usdcBalance.toFixed(2)} USDC
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-white/80">
+                        Destination address (
+                        {withdrawNetwork === "solana"
+                          ? "Solana"
+                          : withdrawNetwork === "base"
+                            ? "Base"
+                            : "BNB"}
+                        )
+                      </label>
+                      <Input
+                        type="text"
+                        placeholder={
+                          withdrawNetwork === "solana"
+                            ? "Enter Solana address"
+                            : "Enter 0x address"
+                        }
+                        value={withdrawDestination}
+                        onChange={(e) => setWithdrawDestination(e.target.value)}
+                        className="min-w-0 min-h-[44px] bg-white/5 border-white/10 rounded-[12px]"
+                      />
+                    </div>
+                    {!withdrawQuote ? (
                       <Button
-                        variant="outline"
-                        className="flex-1 min-h-[44px] border-white/20 hover:bg-white/10"
-                        onClick={() => setWithdrawQuote(null)}
-                        disabled={withdrawExecuting}
+                        onClick={fetchWithdrawQuote}
+                        disabled={
+                          withdrawQuoteLoading ||
+                          !withdrawAmount ||
+                          !withdrawDestination.trim()
+                        }
+                        className="w-full min-h-[44px] rounded-[12px] bg-gradient-to-r from-[#12d585] to-[#08b16b] text-[#000000] font-medium hover:opacity-90"
                       >
-                        Back
-                      </Button>
-                      <Button
-                        className="flex-1 min-h-[44px] rounded-[12px] bg-gradient-to-r from-[#12d585] to-[#08b16b] text-[#000000] font-medium hover:opacity-90"
-                        onClick={executeWithdraw}
-                        disabled={withdrawExecuting}
-                      >
-                        {withdrawExecuting ? (
+                        {withdrawQuoteLoading ? (
                           <>
                             <Loader2 className="w-4 h-4 animate-spin" />
-                            Sending...
+                            Getting quote...
                           </>
                         ) : (
-                          "Confirm"
+                          "Get quote"
                         )}
                       </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
-
-      {/* Settings sheet (cog) - bottom sheet, PWA safe area */}
-      <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <SheetContent
-          side="bottom"
-          className="bg-white/[0.06] backdrop-blur-xl border border-white/10 text-white w-full max-w-[100%] sm:max-w-md mx-auto rounded-t-2xl overflow-y-auto shadow-2xl"
-          style={{ paddingBottom: "calc(1rem + var(--safe-area-inset-bottom, 0px))" }}
-        >
-          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#12d585]/50 via-[#08b16b]/40 to-transparent rounded-t-2xl" aria-hidden />
-          <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/30" aria-hidden />
-          <SheetHeader className="text-center pt-2">
-            <SheetTitle className="text-white text-xl">Settings</SheetTitle>
-          </SheetHeader>
-          <div className="mt-6 space-y-1 overflow-y-auto flex-1 min-h-0">
-            {/* Push Notifications Toggle */}
-            <div className="flex items-center justify-between gap-3 py-3 rounded-xl hover:bg-white/5 active:bg-white/10 -mx-2 px-3 transition-colors min-h-[44px] touch-manipulation">
-              <div className="flex items-center gap-3 min-w-0 flex-1">
-                <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
-                  <Bell className="w-4 h-4 text-white/70" />
-                </div>
-                <div className="min-w-0">
-                  <p className="font-medium text-sm">Push Notifications</p>
-                  <p className="text-xs text-white/60">Get notified about watched wallet trades</p>
-                </div>
-              </div>
-              <button
-                onClick={handleTogglePush}
-                disabled={isTogglingPush}
-                  data-tap-haptic
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  pushEnabled ? "bg-accent-primary" : "bg-white/20"
-                } disabled:opacity-50`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    pushEnabled ? "translate-x-6" : "translate-x-1"
-                  }`}
-                />
-              </button>
-            </div>
-
-            {/* Public Wallet Toggle */}
-            {walletAddress && (
-              <div className="flex items-center justify-between gap-3 py-3 rounded-xl hover:bg-white/5 active:bg-white/10 -mx-2 px-3 transition-colors border-t border-white/6 min-h-[44px] touch-manipulation">
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
-                    {isPublic ? (
-                      <Globe className="w-4 h-4 text-accent-primary" />
                     ) : (
-                      <GlobeLock className="w-4 h-4 text-white/70" />
+                      <div className="space-y-3">
+                        <p className="text-sm text-white/80 text-center">
+                          Review and confirm withdraw
+                        </p>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            className="flex-1 min-h-[44px] border-white/20 hover:bg-white/10"
+                            onClick={() => setWithdrawQuote(null)}
+                            disabled={withdrawExecuting}
+                          >
+                            Back
+                          </Button>
+                          <Button
+                            className="flex-1 min-h-[44px] rounded-[12px] bg-gradient-to-r from-[#12d585] to-[#08b16b] text-[#000000] font-medium hover:opacity-90"
+                            onClick={executeWithdraw}
+                            disabled={withdrawExecuting}
+                          >
+                            {withdrawExecuting ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                Sending...
+                              </>
+                            ) : (
+                              "Confirm"
+                            )}
+                          </Button>
+                        </div>
+                      </div>
                     )}
                   </div>
-                  <div className="min-w-0">
-                    <p className="font-medium text-sm">Public Wallet</p>
+                </>
+              )}
+            </SheetContent>
+          </Sheet>
+
+          {/* Settings sheet (cog) - bottom sheet, PWA safe area */}
+          <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+            <SheetContent
+              side="bottom"
+              className="bg-white/[0.06] backdrop-blur-xl border border-white/10 text-white w-full max-w-[100%] sm:max-w-md mx-auto rounded-t-2xl overflow-y-auto shadow-2xl"
+              style={{
+                paddingBottom:
+                  "calc(1rem + var(--safe-area-inset-bottom, 0px))",
+              }}
+            >
+              <div
+                className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#12d585]/50 via-[#08b16b]/40 to-transparent rounded-t-2xl"
+                aria-hidden
+              />
+              <div
+                className="absolute top-2.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/30"
+                aria-hidden
+              />
+              <SheetHeader className="text-center pt-2">
+                <SheetTitle className="text-white text-xl">Settings</SheetTitle>
+              </SheetHeader>
+              <div className="mt-6 space-y-1 overflow-y-auto flex-1 min-h-0">
+                {/* Push Notifications Toggle */}
+                <div className="flex items-center justify-between gap-3 py-3 rounded-xl hover:bg-white/5 active:bg-white/10 -mx-2 px-3 transition-colors min-h-[44px] touch-manipulation">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
+                      <Bell className="w-4 h-4 text-white/70" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm">Push Notifications</p>
+                      <p className="text-xs text-white/60">
+                        Get notified about watched wallet trades
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleTogglePush}
+                    disabled={isTogglingPush}
+                    data-tap-haptic
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      pushEnabled ? "bg-accent-primary" : "bg-white/20"
+                    } disabled:opacity-50`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        pushEnabled ? "translate-x-6" : "translate-x-1"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* Public Wallet Toggle */}
+                {walletAddress && (
+                  <div className="flex items-center justify-between gap-3 py-3 rounded-xl hover:bg-white/5 active:bg-white/10 -mx-2 px-3 transition-colors border-t border-white/6 min-h-[44px] touch-manipulation">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
+                        {isPublic ? (
+                          <Globe className="w-4 h-4 text-accent-primary" />
+                        ) : (
+                          <GlobeLock className="w-4 h-4 text-white/70" />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-medium text-sm">Public Wallet</p>
+                        <p className="text-xs text-white/60">
+                          {isPublic
+                            ? "Your wallet is visible to others"
+                            : "Your wallet is private"}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleTogglePublic}
+                      disabled={isTogglingPublic}
+                      data-tap-haptic
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        isPublic ? "bg-accent-primary" : "bg-white/20"
+                      } disabled:opacity-50`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          isPublic ? "translate-x-6" : "translate-x-1"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                )}
+
+                {/* Remove Wallet */}
+                {walletAddress && (
+                  <button
+                    onClick={async () => {
+                      if (
+                        !confirm(
+                          "Are you sure you want to remove your wallet? You will need to set it up again.",
+                        )
+                      ) {
+                        return;
+                      }
+                      setIsRemovingWallet(true);
+                      try {
+                        await removeWallet();
+                        setSettingsOpen(false);
+                        navigate("/auth/wallet-setup");
+                      } catch (error) {
+                        console.error("Remove wallet error:", error);
+                      } finally {
+                        setIsRemovingWallet(false);
+                      }
+                    }}
+                    data-tap-haptic
+                    className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-[#FF4757]/10 active:bg-[#FF4757]/15 transition-colors text-left group min-h-[48px] mt-2"
+                  >
+                    <div className="w-9 h-9 rounded-lg bg-[#FF4757]/10 flex items-center justify-center flex-shrink-0">
+                      <Trash2 className="w-4 h-4 text-[#FF4757]" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm text-[#FF4757]">
+                        {isRemovingWallet ? "Removing..." : "Remove Wallet"}
+                      </p>
+                      <p className="text-xs text-white/60">
+                        Disconnect and delete wallet from account
+                      </p>
+                    </div>
+                  </button>
+                )}
+
+                {/* Delete account */}
+                <button
+                  onClick={() => {
+                    setSettingsOpen(false);
+                    setShowDeleteConfirmModal(true);
+                  }}
+                  data-tap-haptic
+                  className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-[#FF4757]/10 active:bg-[#FF4757]/15 transition-colors text-left group min-h-[48px]"
+                >
+                  <div className="w-9 h-9 rounded-lg bg-[#FF4757]/10 flex items-center justify-center flex-shrink-0">
+                    <Trash2 className="w-4 h-4 text-[#FF4757]" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm text-[#FF4757]">
+                      Delete account
+                    </p>
                     <p className="text-xs text-white/60">
-                      {isPublic ? "Your wallet is visible to others" : "Your wallet is private"}
+                      Permanently delete your account and all data
                     </p>
                   </div>
-                </div>
-                <button
-                  onClick={handleTogglePublic}
-                  disabled={isTogglingPublic}
-                  data-tap-haptic
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    isPublic ? "bg-accent-primary" : "bg-white/20"
-                  } disabled:opacity-50`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      isPublic ? "translate-x-6" : "translate-x-1"
-                    }`}
-                  />
                 </button>
               </div>
-            )}
+            </SheetContent>
+          </Sheet>
 
-            {/* Remove Wallet */}
-            {walletAddress && (
-              <button
-                onClick={async () => {
-                  if (
-                    !confirm(
-                      "Are you sure you want to remove your wallet? You will need to set it up again.",
-                    )
-                  ) {
-                    return;
-                  }
-                  setIsRemovingWallet(true);
-                  try {
-                    await removeWallet();
-                    setSettingsOpen(false);
-                    navigate("/auth/wallet-setup");
-                  } catch (error) {
-                    console.error("Remove wallet error:", error);
-                  } finally {
-                    setIsRemovingWallet(false);
-                  }
-                }}
-                data-tap-haptic
-                className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-[#FF4757]/10 active:bg-[#FF4757]/15 transition-colors text-left group min-h-[48px] mt-2"
-              >
-                <div className="w-9 h-9 rounded-lg bg-[#FF4757]/10 flex items-center justify-center flex-shrink-0">
-                  <Trash2 className="w-4 h-4 text-[#FF4757]" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm text-[#FF4757]">
-                    {isRemovingWallet ? "Removing..." : "Remove Wallet"}
-                  </p>
-                  <p className="text-xs text-white/60">Disconnect and delete wallet from account</p>
-                </div>
-              </button>
-            )}
+          {/* Delete account confirmation modal - double verification */}
+          <AlertDialog
+            open={showDeleteConfirmModal}
+            onOpenChange={setShowDeleteConfirmModal}
+          >
+            <AlertDialogContent className="bg-[#0f0f0f] border-white/10 text-white">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete account?</AlertDialogTitle>
+                <AlertDialogDescription className="text-white/70">
+                  This will permanently delete your account and all data from
+                  our platform. This cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="bg-white/10 border-white/10 text-white hover:bg-white/15">
+                  Cancel
+                </AlertDialogCancel>
+                <button
+                  onClick={async () => {
+                    setIsDeletingAccount(true);
+                    try {
+                      await deleteAccount();
+                      setShowDeleteConfirmModal(false);
+                      navigate("/");
+                    } catch {
+                      // toast already shown by deleteAccount
+                    } finally {
+                      setIsDeletingAccount(false);
+                    }
+                  }}
+                  disabled={isDeletingAccount}
+                  data-tap-haptic
+                  className="bg-[#FF4757] hover:bg-[#FF4757]/90 text-white px-4 py-2 rounded-lg font-medium disabled:opacity-50"
+                >
+                  {isDeletingAccount ? "Deleting…" : "Delete my account"}
+                </button>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
 
-            {/* Delete account */}
-            <button
-              onClick={() => {
-                setSettingsOpen(false);
-                setShowDeleteConfirmModal(true);
-              }}
-              data-tap-haptic
-              className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-[#FF4757]/10 active:bg-[#FF4757]/15 transition-colors text-left group min-h-[48px]"
-            >
-              <div className="w-9 h-9 rounded-lg bg-[#FF4757]/10 flex items-center justify-center flex-shrink-0">
-                <Trash2 className="w-4 h-4 text-[#FF4757]" />
+          {/* Disconnect */}
+          <motion.div variants={item}>
+            <Card glass className="overflow-hidden border-white/10">
+              <div className="p-4 sm:p-6">
+                <button
+                  onClick={async () => {
+                    try {
+                      await signOut();
+                      navigate("/");
+                    } catch (error) {
+                      console.error("Sign out error:", error);
+                    }
+                  }}
+                  disabled={loading}
+                  data-tap-haptic
+                  className="w-full flex items-center justify-center gap-3 py-3 min-h-[48px] rounded-xl border border-white/10 hover:border-[#FF4757]/30 hover:bg-[#FF4757]/5 active:bg-[#FF4757]/10 text-[#FF4757] transition-all duration-200 disabled:opacity-50"
+                >
+                  <LogOut className="w-5 h-5" />
+                  <span className="font-medium">Disconnect</span>
+                </button>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-sm text-[#FF4757]">Delete account</p>
-                <p className="text-xs text-white/60">Permanently delete your account and all data</p>
-              </div>
-            </button>
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      {/* Delete account confirmation modal - double verification */}
-      <AlertDialog open={showDeleteConfirmModal} onOpenChange={setShowDeleteConfirmModal}>
-        <AlertDialogContent className="bg-[#0f0f0f] border-white/10 text-white">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete account?</AlertDialogTitle>
-            <AlertDialogDescription className="text-white/70">
-              This will permanently delete your account and all data from our platform. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="bg-white/10 border-white/10 text-white hover:bg-white/15">
-              Cancel
-            </AlertDialogCancel>
-            <button
-              onClick={async () => {
-                setIsDeletingAccount(true);
-                try {
-                  await deleteAccount();
-                  setShowDeleteConfirmModal(false);
-                  navigate("/");
-                } catch {
-                  // toast already shown by deleteAccount
-                } finally {
-                  setIsDeletingAccount(false);
-                }
-              }}
-              disabled={isDeletingAccount}
-              data-tap-haptic
-              className="bg-[#FF4757] hover:bg-[#FF4757]/90 text-white px-4 py-2 rounded-lg font-medium disabled:opacity-50"
-            >
-              {isDeletingAccount ? "Deleting…" : "Delete my account"}
-            </button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Disconnect */}
-      <motion.div variants={item}>
-        <Card glass className="overflow-hidden border-white/10">
-          <div className="p-4 sm:p-6">
-            <button
-              onClick={async () => {
-                try {
-                  await signOut();
-                  navigate("/");
-                } catch (error) {
-                  console.error("Sign out error:", error);
-                }
-              }}
-              disabled={loading}
-              data-tap-haptic
-              className="w-full flex items-center justify-center gap-3 py-3 min-h-[48px] rounded-xl border border-white/10 hover:border-[#FF4757]/30 hover:bg-[#FF4757]/5 active:bg-[#FF4757]/10 text-[#FF4757] transition-all duration-200 disabled:opacity-50"
-            >
-              <LogOut className="w-5 h-5" />
-              <span className="font-medium">Disconnect</span>
-            </button>
-          </div>
-        </Card>
-      </motion.div>
-    </motion.div>
-    </>
+            </Card>
+          </motion.div>
+        </motion.div>
+      </>
     </PullToRefresh>
   );
 }

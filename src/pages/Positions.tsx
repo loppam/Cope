@@ -8,12 +8,14 @@ import {
   RefreshCw,
   Loader2,
 } from "lucide-react";
-import { formatCurrency, formatPercentage, shortenAddress, getApiBase } from "@/lib/utils";
-import { useAuth } from "@/contexts/AuthContext";
 import {
-  getWalletPnLSummary,
-  getWalletPortfolioWithPnL,
-} from "@/lib/birdeye";
+  formatCurrency,
+  formatPercentage,
+  shortenAddress,
+  getApiBase,
+} from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
+import { getWalletPnLSummary, getWalletPortfolioWithPnL } from "@/lib/birdeye";
 import { fetchNativePrices } from "@/lib/coingecko";
 import { apiCache, UI_CACHE_TTL_MS } from "@/lib/cache";
 import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
@@ -25,10 +27,15 @@ const BASE_ETH_RESERVE = 0.0005;
 const BNB_RESERVE = 0.001;
 
 function sellableAmount(position: { mint: string; amount: number }): number {
-  if (position.mint === SOL_MINT || position.mint === "So11111111111111111111111111111111111111111")
+  if (
+    position.mint === SOL_MINT ||
+    position.mint === "So11111111111111111111111111111111111111111"
+  )
     return Math.max(0, position.amount - SOL_RESERVE);
-  if (position.mint === "base-eth") return Math.max(0, position.amount - BASE_ETH_RESERVE);
-  if (position.mint === "bnb-bnb") return Math.max(0, position.amount - BNB_RESERVE);
+  if (position.mint === "base-eth")
+    return Math.max(0, position.amount - BASE_ETH_RESERVE);
+  if (position.mint === "bnb-bnb")
+    return Math.max(0, position.amount - BNB_RESERVE);
   return position.amount;
 }
 
@@ -357,247 +364,260 @@ export function Positions() {
 
   return (
     <PullToRefresh onRefresh={handlePullRefresh}>
-    <div className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8">
-      <div className="mb-6 sm:mb-8">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-          <h1 className="text-2xl sm:text-3xl font-bold">Positions</h1>
-          <button
-            onClick={() => {
-              if (walletAddress) {
-                apiCache.clear(`wallet_positions_${walletAddress}`);
-                apiCache.clear(`wallet_pnl_${walletAddress}`);
-              }
-              fetchPositions(true);
-            }}
-            disabled={refreshing}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl bg-white/10 hover:bg-white/15 text-sm transition-colors disabled:opacity-50 active:scale-[0.98] w-full sm:w-auto"
-          >
-            <RefreshCw
-              className={`w-4 h-4 flex-shrink-0 ${refreshing ? "animate-spin" : ""}`}
-            />
-            Refresh
-          </button>
+      <div className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8">
+        <div className="mb-6 sm:mb-8">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <h1 className="text-2xl sm:text-3xl font-bold">Positions</h1>
+            <button
+              onClick={() => {
+                if (walletAddress) {
+                  apiCache.clear(`wallet_positions_${walletAddress}`);
+                  apiCache.clear(`wallet_pnl_${walletAddress}`);
+                }
+                fetchPositions(true);
+              }}
+              disabled={refreshing}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl bg-white/10 hover:bg-white/15 text-sm transition-colors disabled:opacity-50 active:scale-[0.98] w-full sm:w-auto"
+            >
+              <RefreshCw
+                className={`w-4 h-4 flex-shrink-0 ${refreshing ? "animate-spin" : ""}`}
+              />
+              Refresh
+            </button>
+          </div>
+
+          {/* Portfolio Summary */}
+          <Card glass className="mb-6 overflow-hidden">
+            <div className="h-1 bg-gradient-to-r from-[#12d585]/40 via-[#08b16b]/30 to-transparent" />
+            <div className="p-4 sm:p-6 text-center">
+              <p className="text-sm text-white/60 mb-1">Total Value</p>
+              <h2 className="text-2xl sm:text-3xl font-bold mb-1">
+                {formatCurrency(totalValue)}
+              </h2>
+              <p
+                className={`text-lg ${
+                  totalPnl >= 0 ? "text-[#12d585]" : "text-[#FF4757]"
+                }`}
+              >
+                {formatCurrency(totalPnl)} ({formatPercentage(totalPnlPercent)})
+              </p>
+              {summary && (
+                <div className="mt-4 pt-4 border-t border-white/10 grid grid-cols-2 gap-3 sm:gap-4 text-xs">
+                  <div>
+                    <p className="text-white/60">Realized</p>
+                    <p
+                      className={`font-semibold ${summary.pnl.realized_profit_usd >= 0 ? "text-[#12d585]" : "text-[#FF4757]"}`}
+                    >
+                      {formatCurrency(summary.pnl.realized_profit_usd)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-white/60">Unrealized</p>
+                    <p
+                      className={`font-semibold ${summary.pnl.unrealized_usd >= 0 ? "text-[#12d585]" : "text-[#FF4757]"}`}
+                    >
+                      {formatCurrency(summary.pnl.unrealized_usd)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-white/60">Total Invested</p>
+                    <p className="font-semibold">
+                      {formatCurrency(summary.cashflow_usd.total_invested)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-white/60">Win Rate</p>
+                    <p className="font-semibold">
+                      {formatPercentage(summary.counts.win_rate * 100)}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </Card>
         </div>
 
-        {/* Portfolio Summary */}
-        <Card glass className="mb-6 overflow-hidden">
-          <div className="h-1 bg-gradient-to-r from-[#12d585]/40 via-[#08b16b]/30 to-transparent" />
-          <div className="p-4 sm:p-6 text-center">
-            <p className="text-sm text-white/60 mb-1">Total Value</p>
-            <h2 className="text-2xl sm:text-3xl font-bold mb-1">
-              {formatCurrency(totalValue)}
-            </h2>
-            <p
-              className={`text-lg ${
-                totalPnl >= 0 ? "text-[#12d585]" : "text-[#FF4757]"
-              }`}
-            >
-              {formatCurrency(totalPnl)} ({formatPercentage(totalPnlPercent)})
-            </p>
-            {summary && (
-              <div className="mt-4 pt-4 border-t border-white/10 grid grid-cols-2 gap-3 sm:gap-4 text-xs">
-                <div>
-                  <p className="text-white/60">Realized</p>
-                  <p
-                    className={`font-semibold ${summary.pnl.realized_profit_usd >= 0 ? "text-[#12d585]" : "text-[#FF4757]"}`}
-                  >
-                    {formatCurrency(summary.pnl.realized_profit_usd)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-white/60">Unrealized</p>
-                  <p
-                    className={`font-semibold ${summary.pnl.unrealized_usd >= 0 ? "text-[#12d585]" : "text-[#FF4757]"}`}
-                  >
-                    {formatCurrency(summary.pnl.unrealized_usd)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-white/60">Total Invested</p>
-                  <p className="font-semibold">
-                    {formatCurrency(summary.cashflow_usd.total_invested)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-white/60">Win Rate</p>
-                  <p className="font-semibold">
-                    {formatPercentage(summary.counts.win_rate * 100)}
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-        </Card>
-      </div>
+        {/* Positions List */}
+        {/* Note: Token values from API are already in USD - displayed directly */}
+        {/* SOL/ETH/BNB hidden when sellableAmount <= 0 (nothing to sell, all reserved for gas) */}
+        <div className="space-y-2 sm:space-y-3">
+          {displayedPositions.length > 0 ? (
+            displayedPositions.map((position) => {
+              const isSOL =
+                position.mint === SOL_MINT ||
+                position.mint === "So11111111111111111111111111111111111111111";
+              const isUSDC = position.mint === SOLANA_USDC_MINT;
+              const chainLabel =
+                position.chain === "base"
+                  ? "Base"
+                  : position.chain === "bnb"
+                    ? "BNB"
+                    : "Solana";
 
-      {/* Positions List */}
-      {/* Note: Token values from API are already in USD - displayed directly */}
-      {/* SOL/ETH/BNB hidden when sellableAmount <= 0 (nothing to sell, all reserved for gas) */}
-      <div className="space-y-2 sm:space-y-3">
-        {displayedPositions.length > 0 ? (
-          displayedPositions.map((position) => {
-            const isSOL =
-              position.mint === SOL_MINT ||
-              position.mint === "So11111111111111111111111111111111111111111";
-            const isUSDC = position.mint === SOLANA_USDC_MINT;
-            const chainLabel = position.chain === "base" ? "Base" : position.chain === "bnb" ? "BNB" : "Solana";
-
-            return (
-              <Card
-                key={`${position.chain ?? "solana"}-${position.mint}`}
-                glass
-                className="cursor-pointer hover:border-white/20 transition-colors overflow-hidden active:scale-[0.99]"
-                onClick={() => {
-                  navigate("/app/trade", {
-                    state: { mint: position.mint, chain: position.chain },
-                  });
-                }}
-              >
-                <div className="h-0.5 bg-gradient-to-r from-[#12d585]/20 via-transparent to-transparent" />
-                <div className="p-4 sm:p-5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      {position.image ? (
-                        <img
-                          src={position.image}
-                          alt={position.symbol}
-                          className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex-shrink-0"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).style.display =
-                              "none";
-                            (
-                              e.target as HTMLImageElement
-                            ).nextElementSibling?.classList.remove("hidden");
-                          }}
+              return (
+                <Card
+                  key={`${position.chain ?? "solana"}-${position.mint}`}
+                  glass
+                  className="cursor-pointer hover:border-white/20 transition-colors overflow-hidden active:scale-[0.99]"
+                  onClick={() => {
+                    navigate("/app/trade", {
+                      state: { mint: position.mint, chain: position.chain },
+                    });
+                  }}
+                >
+                  <div className="h-0.5 bg-gradient-to-r from-[#12d585]/20 via-transparent to-transparent" />
+                  <div className="p-4 sm:p-5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        {position.image ? (
+                          <img
+                            src={position.image}
+                            alt={position.symbol}
+                            className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex-shrink-0"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display =
+                                "none";
+                              (
+                                e.target as HTMLImageElement
+                              ).nextElementSibling?.classList.remove("hidden");
+                            }}
+                          />
+                        ) : null}
+                        <div
+                          className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-[#12d585] to-[#08b16b] flex-shrink-0 ${position.image ? "hidden" : ""}`}
                         />
-                      ) : null}
-                      <div
-                        className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-[#12d585] to-[#08b16b] flex-shrink-0 ${position.image ? "hidden" : ""}`}
-                      />
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="font-semibold text-sm sm:text-base truncate">
-                            {position.name}
-                          </h3>
-                          {position.chain && (
-                            <span
-                              className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
-                                position.chain === "base"
-                                  ? "bg-blue-500/20 text-blue-300"
-                                  : position.chain === "bnb"
-                                    ? "bg-amber-500/20 text-amber-300"
-                                    : "bg-[#12d585]/20 text-[#12d585]"
-                              }`}
-                            >
-                              {chainLabel}
-                            </span>
-                          )}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="font-semibold text-sm sm:text-base truncate">
+                              {position.name}
+                            </h3>
+                            {position.chain && (
+                              <span
+                                className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                                  position.chain === "base"
+                                    ? "bg-blue-500/20 text-blue-300"
+                                    : position.chain === "bnb"
+                                      ? "bg-amber-500/20 text-amber-300"
+                                      : "bg-[#12d585]/20 text-[#12d585]"
+                                }`}
+                              >
+                                {chainLabel}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs sm:text-sm text-white/50 truncate">
+                            {sellableAmount(position).toLocaleString(
+                              undefined,
+                              {
+                                minimumFractionDigits: 0,
+                                maximumFractionDigits:
+                                  position.symbol === "SOL" ||
+                                  position.symbol === "ETH" ||
+                                  position.symbol === "BNB"
+                                    ? 4
+                                    : 2,
+                              },
+                            )}{" "}
+                            {position.symbol}
+                          </p>
                         </div>
-                        <p className="text-xs sm:text-sm text-white/50 truncate">
-                          {sellableAmount(position).toLocaleString(undefined, {
-                            minimumFractionDigits: 0,
-                            maximumFractionDigits: position.symbol === "SOL" || position.symbol === "ETH" || position.symbol === "BNB" ? 4 : 2,
-                          })}{" "}
-                          {position.symbol}
-                        </p>
                       </div>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <p className="font-semibold">
-                        {formatCurrency(position.value)}
-                      </p>
-                      <p
-                        className={`text-sm flex items-center gap-1 justify-end ${
-                          position.pnl >= 0
-                            ? "text-[#12d585]"
-                            : "text-[#FF4757]"
-                        }`}
-                      >
-                        {position.pnl >= 0 ? (
-                          <TrendingUp className="w-3 h-3" />
-                        ) : (
-                          <TrendingDown className="w-3 h-3" />
-                        )}
-                        {formatPercentage(position.pnlPercent)}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Token details - hide for SOL and USDC (native/stablecoin) */}
-                  {!isSOL && !isUSDC && (
-                    <div className="pt-3 border-t border-white/6 space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-white/60">Total P&L</span>
-                        <span
-                          className={`font-medium ${
+                      <div className="text-right flex-shrink-0">
+                        <p className="font-semibold">
+                          {formatCurrency(position.value)}
+                        </p>
+                        <p
+                          className={`text-sm flex items-center gap-1 justify-end ${
                             position.pnl >= 0
                               ? "text-[#12d585]"
                               : "text-[#FF4757]"
                           }`}
                         >
-                          {formatCurrency(position.pnl)} (
-                          {formatPercentage(position.pnlPercent)})
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div>
-                          <span className="text-white/60">Realized: </span>
-                          <span
-                            className={
-                              position.realized >= 0
-                                ? "text-[#12d585]"
-                                : "text-[#FF4757]"
-                            }
-                          >
-                            {formatCurrency(position.realized)}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-white/60">Unrealized: </span>
-                          <span
-                            className={
-                              position.unrealized >= 0
-                                ? "text-[#12d585]"
-                                : "text-[#FF4757]"
-                            }
-                          >
-                            {formatCurrency(position.unrealized)}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-white/60">Cost Basis: </span>
-                          <span>{formatCurrency(position.costBasis)}</span>
-                        </div>
-                        <div>
-                          <span className="text-white/60">Trades: </span>
-                          <span>
-                            {position.tokenData?.total_transactions ||
-                              position.txns ||
-                              0}
-                          </span>
-                        </div>
+                          {position.pnl >= 0 ? (
+                            <TrendingUp className="w-3 h-3" />
+                          ) : (
+                            <TrendingDown className="w-3 h-3" />
+                          )}
+                          {formatPercentage(position.pnlPercent)}
+                        </p>
                       </div>
                     </div>
-                  )}
+
+                    {/* Token details - hide for SOL and USDC (native/stablecoin) */}
+                    {!isSOL && !isUSDC && (
+                      <div className="pt-3 border-t border-white/6 space-y-2">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-white/60">Total P&L</span>
+                          <span
+                            className={`font-medium ${
+                              position.pnl >= 0
+                                ? "text-[#12d585]"
+                                : "text-[#FF4757]"
+                            }`}
+                          >
+                            {formatCurrency(position.pnl)} (
+                            {formatPercentage(position.pnlPercent)})
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div>
+                            <span className="text-white/60">Realized: </span>
+                            <span
+                              className={
+                                position.realized >= 0
+                                  ? "text-[#12d585]"
+                                  : "text-[#FF4757]"
+                              }
+                            >
+                              {formatCurrency(position.realized)}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-white/60">Unrealized: </span>
+                            <span
+                              className={
+                                position.unrealized >= 0
+                                  ? "text-[#12d585]"
+                                  : "text-[#FF4757]"
+                              }
+                            >
+                              {formatCurrency(position.unrealized)}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-white/60">Cost Basis: </span>
+                            <span>{formatCurrency(position.costBasis)}</span>
+                          </div>
+                          <div>
+                            <span className="text-white/60">Trades: </span>
+                            <span>
+                              {position.tokenData?.total_transactions ||
+                                position.txns ||
+                                0}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </Card>
+              );
+            })
+          ) : (
+            <Card glass className="overflow-hidden">
+              <div className="h-1 bg-gradient-to-r from-[#12d585]/20 via-transparent to-transparent" />
+              <div className="py-12 sm:py-16 text-center px-4">
+                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-white/5 flex items-center justify-center mx-auto mb-4">
+                  <DollarSign className="w-8 h-8 sm:w-10 sm:h-10 text-white/30" />
                 </div>
-              </Card>
-            );
-          })
-        ) : (
-          <Card glass className="overflow-hidden">
-            <div className="h-1 bg-gradient-to-r from-[#12d585]/20 via-transparent to-transparent" />
-            <div className="py-12 sm:py-16 text-center px-4">
-              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-white/5 flex items-center justify-center mx-auto mb-4">
-                <DollarSign className="w-8 h-8 sm:w-10 sm:h-10 text-white/30" />
+                <p className="text-white/60 text-sm sm:text-base">
+                  No positions yet
+                </p>
               </div>
-              <p className="text-white/60 text-sm sm:text-base">
-                No positions yet
-              </p>
-            </div>
-          </Card>
-        )}
+            </Card>
+          )}
+        </div>
       </div>
-    </div>
     </PullToRefresh>
   );
 }

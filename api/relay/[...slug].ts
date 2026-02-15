@@ -77,7 +77,9 @@ type EvmTokenPosition = {
   decimals: number;
 };
 
-async function getEvmTokenPositions(address: string): Promise<EvmTokenPosition[]> {
+async function getEvmTokenPositions(
+  address: string,
+): Promise<EvmTokenPosition[]> {
   const apiKey = process.env.MORALIS_API_KEY;
   if (!apiKey) return [];
 
@@ -115,12 +117,19 @@ async function getEvmTokenPositions(address: string): Promise<EvmTokenPosition[]
           if (bal <= 0 && value <= 0) continue;
 
           const addr = (t.token_address ?? "").toLowerCase();
-          const isNative = t.native_token || !addr || addr === NATIVE_ETH_PLACEHOLDER;
-          const mint = isNative ? (chain === "base" ? "base-eth" : "bnb-bnb") : addr;
+          const isNative =
+            t.native_token || !addr || addr === NATIVE_ETH_PLACEHOLDER;
+          const mint = isNative
+            ? chain === "base"
+              ? "base-eth"
+              : "bnb-bnb"
+            : addr;
 
           tokens.push({
             mint,
-            symbol: (t.symbol ?? (chain === "base" ? "ETH" : "BNB")).toUpperCase(),
+            symbol: (
+              t.symbol ?? (chain === "base" ? "ETH" : "BNB")
+            ).toUpperCase(),
             name: t.name ?? (chain === "base" ? "Ethereum (Base)" : "BNB"),
             amount: bal,
             value,
@@ -139,7 +148,10 @@ async function getEvmTokenPositions(address: string): Promise<EvmTokenPosition[]
 }
 
 // Inlined to avoid Vercel ERR_MODULE_NOT_FOUND for api/lib/decrypt
-async function deriveKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
+async function deriveKey(
+  password: string,
+  salt: Uint8Array,
+): Promise<CryptoKey> {
   const encoder = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
@@ -149,20 +161,32 @@ async function deriveKey(password: string, salt: Uint8Array): Promise<CryptoKey>
     ["deriveBits", "deriveKey"],
   );
   return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: new Uint8Array(salt), iterations: 100000, hash: "SHA-256" },
+    {
+      name: "PBKDF2",
+      salt: new Uint8Array(salt),
+      iterations: 100000,
+      hash: "SHA-256",
+    },
     keyMaterial,
     { name: "AES-GCM", length: 256 },
     false,
     ["encrypt", "decrypt"],
   );
 }
-async function decryptAes(encryptedData: string, password: string): Promise<string> {
+async function decryptAes(
+  encryptedData: string,
+  password: string,
+): Promise<string> {
   const combined = new Uint8Array(Buffer.from(encryptedData, "base64"));
   const salt = combined.slice(0, 16);
   const iv = combined.slice(16, 28);
   const encrypted = combined.slice(28);
   const key = await deriveKey(password, salt);
-  const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, encrypted);
+  const decrypted = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv },
+    key,
+    encrypted,
+  );
   return new TextDecoder().decode(decrypted);
 }
 async function decryptWalletCredentials(
@@ -356,8 +380,8 @@ async function sendSolFromFunder(
 }
 
 // EVM funder: top-up amounts per chain (gas reserve)
-const EVM_FUNDER_BASE_WEI = BigInt(5e14);  // 0.0005 ETH
-const EVM_FUNDER_BNB_WEI = BigInt(1e15);   // 0.001 BNB
+const EVM_FUNDER_BASE_WEI = BigInt(5e14); // 0.0005 ETH
+const EVM_FUNDER_BNB_WEI = BigInt(1e15); // 0.001 BNB
 
 function getEvmFunderWallet(chainId: number): Wallet | null {
   const raw = process.env.EVM_FUNDER_PRIVATE_KEY;
@@ -1068,12 +1092,20 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
     const storedWalletAddress = userData?.walletAddress as string | undefined;
 
     // EVM step: chainId 8453 (Base) or 56 (BNB)
-    const d = data && typeof data === "object" ? (data as Record<string, unknown>) : null;
+    const d =
+      data && typeof data === "object"
+        ? (data as Record<string, unknown>)
+        : null;
     const chainId = typeof d?.chainId === "number" ? d.chainId : undefined;
     if (chainId === 8453 || chainId === 56) {
       if (!mnemonic?.trim()) {
-        console.warn("[execute-step] EVM step but no mnemonic", { userId, stepIndex });
-        return res.status(400).json({ error: "EVM step requires mnemonic backup" });
+        console.warn("[execute-step] EVM step but no mnemonic", {
+          userId,
+          stepIndex,
+        });
+        return res
+          .status(400)
+          .json({ error: "EVM step requires mnemonic backup" });
       }
       const evmWallet = HDNodeWallet.fromPhrase(
         mnemonic.trim(),
@@ -1143,20 +1175,25 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
               hasFunder: !!getEvmFunderWallet(chainId),
             });
             return res.status(500).json({
-              error: errMsg.slice(0, 200) || "Transaction failed. Please try again.",
+              error:
+                errMsg.slice(0, 200) || "Transaction failed. Please try again.",
               signature: "",
               status: "Failed",
             });
           }
 
-          const amountWei = chainId === 8453 ? EVM_FUNDER_BASE_WEI : EVM_FUNDER_BNB_WEI;
+          const amountWei =
+            chainId === 8453 ? EVM_FUNDER_BASE_WEI : EVM_FUNDER_BNB_WEI;
           const fundHash = await sendNativeFromEvmFunder(
             userAddress,
             amountWei,
             chainId,
           );
           if (!fundHash) {
-            console.warn("[execute-step] EVM funder top-up failed on attempt", attempt + 1);
+            console.warn(
+              "[execute-step] EVM funder top-up failed on attempt",
+              attempt + 1,
+            );
             return res.status(500).json({
               error: "Insufficient funds. Top-up failed. Please try again.",
               signature: "",
@@ -1420,7 +1457,11 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       const maxAttempts = 10;
       let attempt = 0;
 
-      while (walletAddress && walletAddress.length >= 32 && attempt < maxAttempts) {
+      while (
+        walletAddress &&
+        walletAddress.length >= 32 &&
+        attempt < maxAttempts
+      ) {
         // Compute funding amount: dynamic fee ×2, or fixed 0.005 ×2, capped
         let lamportsToSend = SOL_FUNDER_AMOUNT_LAMPORTS * 2;
         try {
@@ -1432,10 +1473,7 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
           const rentBuffer = 2_000_000;
           const computeBuffer = 500_000;
           const computed = (baseFee + rentBuffer + computeBuffer) * 2;
-          lamportsToSend = Math.min(
-            Math.max(computed, 2_000_000),
-            20_000_000,
-          );
+          lamportsToSend = Math.min(Math.max(computed, 2_000_000), 20_000_000);
           console.log("[execute-step] dynamic funding x2", {
             baseFee,
             lamportsToSend,
@@ -1447,7 +1485,10 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
 
         const fundSig = await sendSolFromFunder(walletAddress, lamportsToSend);
         if (!fundSig) {
-          console.warn("[execute-step] funder top-up failed on attempt", attempt + 1);
+          console.warn(
+            "[execute-step] funder top-up failed on attempt",
+            attempt + 1,
+          );
           break;
         }
         console.log("[execute-step] funded wallet for retry", {
@@ -1474,13 +1515,21 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
           return res.status(200).json({ signature: sig, status: "Success" });
         } catch (retryErr: unknown) {
           const retryLogs = (retryErr as Error & { logs?: string[] }).logs;
-          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          const retryMsg =
+            retryErr instanceof Error ? retryErr.message : String(retryErr);
           const stillInsufficient =
-            /insufficient lamports|Transfer: insufficient|0x1788|6024/i.test(retryMsg) ||
+            /insufficient lamports|Transfer: insufficient|0x1788|6024/i.test(
+              retryMsg,
+            ) ||
             (Array.isArray(retryLogs) &&
-              retryLogs.some((l) => /insufficient lamports|need \d+|0x1788/.test(String(l))));
+              retryLogs.some((l) =>
+                /insufficient lamports|need \d+|0x1788/.test(String(l)),
+              ));
           if (!stillInsufficient) {
-            console.warn("[execute-step] retry failed with non-SOL error", retryMsg);
+            console.warn(
+              "[execute-step] retry failed with non-SOL error",
+              retryMsg,
+            );
             break;
           }
           attempt++;
@@ -1863,13 +1912,18 @@ const COINGECKO_SIMPLE_BASE = "https://api.coingecko.com/api/v3/simple";
 const DEFAULT_ETH_PRICE = 3000;
 const DEFAULT_BNB_PRICE = 600;
 
-async function coingeckoNativePricesHandler(req: VercelRequest, res: VercelResponse) {
+async function coingeckoNativePricesHandler(
+  req: VercelRequest,
+  res: VercelResponse,
+) {
   if (req.method !== "GET")
     return res.status(405).json({ error: "Method not allowed" });
   try {
     const apiKey = process.env.COINGECKO_API_KEY;
     const url = `${COINGECKO_SIMPLE_BASE}/price?ids=ethereum,binancecoin&vs_currencies=usd`;
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
     if (apiKey) headers["x-cg-demo-api-key"] = apiKey;
     const coinRes = await fetch(url, { method: "GET", headers });
     const raw = await coinRes.text();
@@ -1890,8 +1944,14 @@ async function coingeckoNativePricesHandler(req: VercelRequest, res: VercelRespo
         _fallback: true,
       });
     }
-    const eth = typeof data?.ethereum?.usd === "number" ? data.ethereum.usd : DEFAULT_ETH_PRICE;
-    const bnb = typeof data?.binancecoin?.usd === "number" ? data.binancecoin.usd : DEFAULT_BNB_PRICE;
+    const eth =
+      typeof data?.ethereum?.usd === "number"
+        ? data.ethereum.usd
+        : DEFAULT_ETH_PRICE;
+    const bnb =
+      typeof data?.binancecoin?.usd === "number"
+        ? data.binancecoin.usd
+        : DEFAULT_BNB_PRICE;
     return res.status(200).json({ eth, bnb });
   } catch (e: unknown) {
     console.error("coingecko-native-prices error:", e);
@@ -2241,13 +2301,11 @@ async function executeBridgeCustodialHandler(
           const s = statusJson?.status;
           if (s === "success" || s === "completed") break;
           if (s === "refunded") {
-            return res.status(200).json({ status: "refunded", message: "Bridge was refunded" });
+            return res
+              .status(200)
+              .json({ status: "refunded", message: "Bridge was refunded" });
           }
-          if (
-            s === "failure" ||
-            s === "failed" ||
-            s === "reverted"
-          ) {
+          if (s === "failure" || s === "failed" || s === "reverted") {
             return res.status(502).json({ error: "Bridge step failed" });
           }
         }

@@ -149,7 +149,13 @@ export function Trade() {
 
   // Auto-detect EVM chain when user pastes 0x address without chain (parallel probe via token-search)
   useEffect(() => {
-    if (!mint?.trim() || !isEvmMint || (tradeChain === "base" || tradeChain === "bnb")) return;
+    if (
+      !mint?.trim() ||
+      !isEvmMint ||
+      tradeChain === "base" ||
+      tradeChain === "bnb"
+    )
+      return;
     let cancelled = false;
     (async () => {
       try {
@@ -267,18 +273,22 @@ export function Trade() {
           const data = await res.json();
           let evmBal = 0;
           if (res.ok && data.evmAddress) {
-            const tokens = (data.tokens as Array<{ mint: string; amount: number }>) ?? [];
+            const tokens =
+              (data.tokens as Array<{ mint: string; amount: number }>) ?? [];
             const match = tokens.find((t) => t.mint === token.mint);
             evmBal = match?.amount ?? 0;
             if (evmBal === 0) {
               if (token.mint === "base-eth") evmBal = data.base?.native ?? 0;
               else if (token.mint === "bnb-bnb") evmBal = data.bnb?.native ?? 0;
-              else if (token.mint === "base-usdc") evmBal = data.base?.usdc ?? 0;
+              else if (token.mint === "base-usdc")
+                evmBal = data.base?.usdc ?? 0;
               else if (token.mint === "bnb-usdc") evmBal = data.bnb?.usdc ?? 0;
             }
           }
           setTokenBalance(evmBal);
-          const solanaUsdc = await getUsdcBalance(userProfile.walletAddress).catch(() => 0);
+          const solanaUsdc = await getUsdcBalance(
+            userProfile.walletAddress,
+          ).catch(() => 0);
           if (!cancelled) setUsdcBalance(solanaUsdc);
         } else {
           // SOL is native – use RPC balance so trade terminal matches open positions. Other SPL tokens use Birdeye.
@@ -293,7 +303,9 @@ export function Trade() {
               setUsdcBalance(solanaUsdc);
             }
           } else {
-            const solanaUsdc = await getUsdcBalance(userProfile.walletAddress).catch(() => 0);
+            const solanaUsdc = await getUsdcBalance(
+              userProfile.walletAddress,
+            ).catch(() => 0);
             if (!cancelled) setUsdcBalance(solanaUsdc);
             if (token?.mint && !isEvmToken) {
               const balances = await getWalletTokenBalance(
@@ -321,7 +333,14 @@ export function Trade() {
     return () => {
       cancelled = true;
     };
-  }, [token?.mint, token?.chain, userProfile?.walletAddress, user, isEvmToken, balanceRefreshKey]);
+  }, [
+    token?.mint,
+    token?.chain,
+    userProfile?.walletAddress,
+    user,
+    isEvmToken,
+    balanceRefreshKey,
+  ]);
 
   // Refetch balances when global refresh fires (e.g. pull-to-refresh on Home)
   useEffect(() => {
@@ -338,7 +357,8 @@ export function Trade() {
     fetchDetailsMintRef.current = address;
     setLoading(true);
     const chainId = getChainId(chain);
-    const nativeDecimals = address === "base-eth" || address === "bnb-bnb" ? 18 : 6;
+    const nativeDecimals =
+      address === "base-eth" || address === "bnb-bnb" ? 18 : 6;
     const base: TokenSearchResult =
       currentToken?.mint === address
         ? currentToken
@@ -356,15 +376,26 @@ export function Trade() {
           : {
               id: `${chainId}-${address}`,
               mint: address,
-              name: address === "base-eth" ? "Ethereum (Base)" : address === "bnb-bnb" ? "BNB" : "",
-              symbol: address === "base-eth" ? "ETH" : address === "bnb-bnb" ? "BNB" : "",
+              name:
+                address === "base-eth"
+                  ? "Ethereum (Base)"
+                  : address === "bnb-bnb"
+                    ? "BNB"
+                    : "",
+              symbol:
+                address === "base-eth"
+                  ? "ETH"
+                  : address === "bnb-bnb"
+                    ? "BNB"
+                    : "",
               decimals: nativeDecimals,
               hasSocials: false,
               chain,
               chainId,
             };
     const isStale = () => fetchDetailsMintRef.current !== address;
-    const useMoralis = isEvmAddress(address) && (chain === "base" || chain === "bnb");
+    const useMoralis =
+      isEvmAddress(address) && (chain === "base" || chain === "bnb");
 
     if (useMoralis) {
       try {
@@ -760,7 +791,8 @@ export function Trade() {
   };
 
   const handleConfirmSwap = async () => {
-    if (!relayQuote || !user) return;
+    if (!relayQuote || !user || !swapQuote || !userProfile?.walletAddress)
+      return;
 
     setSwapping(true);
     setShowQuoteModal(false);
@@ -768,8 +800,52 @@ export function Trade() {
     try {
       const tokenId = await user.getIdToken();
       const base = getApiBase();
-      const steps = Array.isArray((relayQuote as { steps?: unknown[] })?.steps)
-        ? (relayQuote as { steps: unknown[] }).steps
+
+      // Refresh quote right before execute to get fresh amounts, blockhash, and balance state
+      let quoteToExecute = relayQuote;
+      const amountRaw = String(swapQuote.inputAmount || "");
+      const isEvmSell =
+        swapDirection === "sell" &&
+        (token?.chain === "base" || token?.chain === "bnb");
+      const canRefresh =
+        amountRaw &&
+        swapQuote.inputMint &&
+        swapQuote.outputMint &&
+        (!isEvmSell || evmAddress);
+      if (canRefresh) {
+        const body: Record<string, unknown> = {
+          inputMint: swapQuote.inputMint,
+          outputMint: swapQuote.outputMint,
+          amount: amountRaw,
+          slippageBps: swapQuote.slippage ?? slippage,
+          userWallet: isEvmSell ? evmAddress : userProfile.walletAddress,
+          tradeType: swapDirection === "buy" ? "buy" : "sell",
+        };
+        if (swapDirection === "buy" && (tradeChain === "base" || tradeChain === "bnb")) {
+          body.outputChainId = tradeChain === "base" ? 8453 : 56;
+          body.recipient = evmAddress ?? undefined;
+        }
+        if (isEvmSell) {
+          body.inputChainId = token?.chainId ?? (token?.chain === "base" ? 8453 : 56);
+          body.inputChain = token?.chain ?? "solana";
+          body.recipient = userProfile.walletAddress;
+        }
+        const refreshRes = await fetch(`${base}/api/relay/swap-quote`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${tokenId}`,
+          },
+          body: JSON.stringify(body),
+        });
+        const freshQuote = await refreshRes.json();
+        if (refreshRes.ok && Array.isArray(freshQuote?.steps) && freshQuote.steps.length > 0) {
+          quoteToExecute = freshQuote;
+        }
+      }
+
+      const steps = Array.isArray((quoteToExecute as { steps?: unknown[] })?.steps)
+        ? (quoteToExecute as { steps: unknown[] }).steps
         : [];
       let lastSignature: string | null = null;
       let lastChainId: number | undefined;
@@ -782,7 +858,7 @@ export function Trade() {
             Authorization: `Bearer ${tokenId}`,
           },
           body: JSON.stringify({
-            quoteResponse: relayQuote,
+            quoteResponse: quoteToExecute,
             stepIndex,
           }),
         });
@@ -805,70 +881,75 @@ export function Trade() {
         action: {
           label: "View",
           onClick: () =>
-            window.open(getExplorerTxUrl(lastSignature!, lastChainId), "_blank"),
+            window.open(
+              getExplorerTxUrl(lastSignature!, lastChainId),
+              "_blank",
+            ),
         },
       });
 
       if (userProfile?.walletAddress) {
-          const newBalance = await getSolBalance(userProfile.walletAddress);
-          await updateBalance(newBalance);
-          // Refetch positions so "your position" / sell balance and USDC balance update
-          const wasEvmSell = swapDirection === "sell" && (token?.chain === "base" || token?.chain === "bnb");
-          try {
-            if (wasEvmSell && token?.mint && user) {
-              const tokenId = await user.getIdToken();
-              const base = getApiBase();
-              const res = await fetch(`${base}/api/relay/evm-balances`, {
-                headers: { Authorization: `Bearer ${tokenId}` },
-              });
-              const data = await res.json();
-              if (res.ok && data.tokens) {
-                const match = (data.tokens as Array<{ mint: string; amount: number }>).find(
-                  (t) => t.mint === token.mint
-                );
-                setTokenBalance(match?.amount ?? 0);
-              }
-            } else {
-              const boughtMint = token?.mint ?? crossChainToken?.address;
-              const isBoughtEvm = boughtMint && isEvmAddress(boughtMint);
-              if (swapDirection === "sell" && token?.mint) {
+        const newBalance = await getSolBalance(userProfile.walletAddress);
+        await updateBalance(newBalance);
+        // Refetch positions so "your position" / sell balance and USDC balance update
+        const wasEvmSell =
+          swapDirection === "sell" &&
+          (token?.chain === "base" || token?.chain === "bnb");
+        try {
+          if (wasEvmSell && token?.mint && user) {
+            const tokenId = await user.getIdToken();
+            const base = getApiBase();
+            const res = await fetch(`${base}/api/relay/evm-balances`, {
+              headers: { Authorization: `Bearer ${tokenId}` },
+            });
+            const data = await res.json();
+            if (res.ok && data.tokens) {
+              const match = (
+                data.tokens as Array<{ mint: string; amount: number }>
+              ).find((t) => t.mint === token.mint);
+              setTokenBalance(match?.amount ?? 0);
+            }
+          } else {
+            const boughtMint = token?.mint ?? crossChainToken?.address;
+            const isBoughtEvm = boughtMint && isEvmAddress(boughtMint);
+            if (swapDirection === "sell" && token?.mint) {
+              const balances = await getWalletTokenBalance(
+                userProfile.walletAddress,
+                [token.mint],
+              );
+              setTokenBalance(balances[token.mint] ?? 0);
+            } else if (swapDirection === "buy") {
+              if (boughtMint && isBoughtEvm && user) {
+                const tokenId = await user.getIdToken();
+                const base = getApiBase();
+                const res = await fetch(`${base}/api/relay/evm-balances`, {
+                  headers: { Authorization: `Bearer ${tokenId}` },
+                });
+                const data = await res.json();
+                if (res.ok && data.tokens) {
+                  const match = (
+                    data.tokens as Array<{ mint: string; amount: number }>
+                  ).find((t) => t.mint === boughtMint);
+                  setTokenBalance(match?.amount ?? 0);
+                }
+              } else if (boughtMint) {
                 const balances = await getWalletTokenBalance(
                   userProfile.walletAddress,
-                  [token.mint],
+                  [boughtMint],
                 );
-                setTokenBalance(balances[token.mint] ?? 0);
-              } else if (swapDirection === "buy") {
-                if (boughtMint && isBoughtEvm && user) {
-                  const tokenId = await user.getIdToken();
-                  const base = getApiBase();
-                  const res = await fetch(`${base}/api/relay/evm-balances`, {
-                    headers: { Authorization: `Bearer ${tokenId}` },
-                  });
-                  const data = await res.json();
-                  if (res.ok && data.tokens) {
-                    const match = (data.tokens as Array<{ mint: string; amount: number }>).find(
-                      (t) => t.mint === boughtMint
-                    );
-                    setTokenBalance(match?.amount ?? 0);
-                  }
-                } else if (boughtMint) {
-                  const balances = await getWalletTokenBalance(
-                    userProfile.walletAddress,
-                    [boughtMint],
-                  );
-                  setTokenBalance(balances[boughtMint] ?? 0);
-                }
-                const usdcBalances = await getWalletTokenBalance(
-                  userProfile.walletAddress,
-                  [SOLANA_USDC_MINT],
-                );
-                setUsdcBalance(usdcBalances[SOLANA_USDC_MINT] ?? 0);
+                setTokenBalance(balances[boughtMint] ?? 0);
               }
+              const usdcBalances = await getWalletTokenBalance(
+                userProfile.walletAddress,
+                [SOLANA_USDC_MINT],
+              );
+              setUsdcBalance(usdcBalances[SOLANA_USDC_MINT] ?? 0);
             }
-          } catch {
-            // ignore
           }
+        } catch {
+          // ignore
         }
+      }
 
       setAmount("");
       setSellAmount("");
@@ -1023,7 +1104,9 @@ export function Trade() {
                             title="Copy address"
                           >
                             <Copy className="w-4 h-4" />
-                            <span className="hidden sm:inline">Copy address</span>
+                            <span className="hidden sm:inline">
+                              Copy address
+                            </span>
                           </button>
                         )}
                         <button
@@ -1352,10 +1435,13 @@ export function Trade() {
                     <p className="text-sm text-white/60 mb-2 truncate">
                       {loadingBalance
                         ? "Your position: ..."
-                        : `Your position: ${sellableBalance.toLocaleString(undefined, {
-                            minimumFractionDigits: 0,
-                            maximumFractionDigits: 6,
-                          })} ${token.symbol}`}
+                        : `Your position: ${sellableBalance.toLocaleString(
+                            undefined,
+                            {
+                              minimumFractionDigits: 0,
+                              maximumFractionDigits: 6,
+                            },
+                          )} ${token.symbol}`}
                     </p>
                     <label className="block text-sm font-medium mb-2">
                       Sell Amount ({token.symbol})

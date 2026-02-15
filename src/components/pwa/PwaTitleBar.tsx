@@ -17,12 +17,6 @@ export function PwaTitleBar() {
         appRegion: "drag",
       }}
     >
-      <span
-        className="ml-4 truncate text-sm font-medium text-white/90"
-        style={{ WebkitAppRegion: "no-drag", appRegion: "no-drag" }}
-      >
-        COPE
-      </span>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { motion } from "motion/react";
 import { Button } from "@/components/Button";
@@ -13,11 +13,12 @@ import {
   GlobeLock,
   Settings,
   DollarSign,
-  ArrowUpDown,
   ArrowLeft,
   Copy,
   TrendingUp,
   TrendingDown,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { getApiBase } from "@/lib/utils";
@@ -87,6 +88,7 @@ export function Profile() {
   const [usdcBalanceLoading, setUsdcBalanceLoading] = useState(true);
   const [openPositions, setOpenPositions] = useState<TokenPosition[]>([]);
   const [closedPositions, setClosedPositions] = useState<TokenPosition[]>([]);
+  const [closedExpanded, setClosedExpanded] = useState(false);
   const [followersCount, setFollowersCount] = useState<number | null>(null);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [isPublic, setIsPublic] = useState(userProfile?.isPublic !== false);
@@ -150,12 +152,15 @@ export function Profile() {
   }, [walletAddress]);
 
   useEffect(() => {
-    const onRefresh = () => {
-      if (walletAddress) fetchBalance();
-      setRefreshTrigger((k) => k + 1);
+    const handleRefresh = () => {
+      if (walletAddress) {
+        apiCache.clear(`profile_positions_${walletAddress}`);
+        fetchBalance();
+        setRefreshTrigger((r) => r + 1);
+      }
     };
-    window.addEventListener("cope-refresh-balance", onRefresh);
-    return () => window.removeEventListener("cope-refresh-balance", onRefresh);
+    window.addEventListener("cope-refresh-balance", handleRefresh);
+    return () => window.removeEventListener("cope-refresh-balance", handleRefresh);
   }, [walletAddress]);
 
   // Open deposit sheet when navigated with ?open=deposit (e.g. from Home)
@@ -239,6 +244,7 @@ export function Profile() {
         }
 
         const combined: TokenPosition[] = [];
+        const closed: TokenPosition[] = [];
         const SOLANA_LOGO = "https://assets.coingecko.com/coins/images/4128/small/solana.png";
 
         // 1) USDC first: Solana + Base + BNB combined (one row)
@@ -257,29 +263,73 @@ export function Profile() {
         }
         setUsdcBalance(totalUsdc);
 
-        // 2) SOL (show whenever balance > 0; value from price or 0)
+        // 2) SOL (open when value > 0; else closed for non-tradeable)
         if (solBalance > 0) {
           const solValue = solPrice > 0 ? solBalance * solPrice : 0;
-          combined.push({
+          const solPos: TokenPosition = {
             mint: SOL_MINT,
             symbol: "SOL",
             name: "Solana",
             image: SOLANA_LOGO,
             amount: solBalance,
             value: solValue,
-          });
+          };
+          if (solValue > 0) combined.push(solPos);
+          else closed.push(solPos);
         }
 
-        // 4) Other EVM tokens (ETH, BNB, then rest) — only when amount > 0 and value > 0
+        // 4) EVM tokens (ETH, BNB, others) — open when amount > 0 and value > 0; else closed
         if (evmData?.evmAddress) {
+          const addedMints = new Set<string>();
+          if (evmData.base?.native > 0) {
+            addedMints.add("base-eth");
+            const evmPnl = evmPnlByMint.get("base-eth");
+            const val = evmData.base.native * nativePrices.eth;
+            const pos = {
+              mint: "base-eth",
+              symbol: "ETH",
+              name: "Ethereum (Base)",
+              amount: evmData.base.native,
+              value: val,
+              pnl: evmPnl?.pnl,
+              pnlPercent: evmPnl?.pnlPercent,
+              chain: "base" as const,
+              image: undefined as string | undefined,
+            };
+            if (val > 0) combined.push(pos);
+            else closed.push(pos);
+          }
+          if (evmData.bnb?.native > 0) {
+            addedMints.add("bnb-bnb");
+            const evmPnl = evmPnlByMint.get("bnb-bnb");
+            const val = evmData.bnb.native * nativePrices.bnb;
+            const pos = {
+              mint: "bnb-bnb",
+              symbol: "BNB",
+              name: "BNB",
+              amount: evmData.bnb.native,
+              value: val,
+              pnl: evmPnl?.pnl,
+              pnlPercent: evmPnl?.pnlPercent,
+              chain: "bnb" as const,
+              image: undefined as string | undefined,
+            };
+            if (val > 0) combined.push(pos);
+            else closed.push(pos);
+          }
+          const BASE_USDC_ADDR = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+          const BNB_USDC_ADDR = "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d";
           if (Array.isArray(evmData.tokens) && evmData.tokens.length > 0) {
             for (const t of evmData.tokens) {
               const amount = t.amount ?? 0;
               const value = t.value ?? 0;
-              if (amount <= 0 || value <= 0) continue;
-              const evmPnl = evmPnlByMint.get(t.mint);
-              combined.push({
-                mint: t.mint,
+              const m = (t.mint ?? "").toLowerCase();
+              if (addedMints.has(m)) continue;
+              if (m === BASE_USDC_ADDR || m === BNB_USDC_ADDR) continue;
+              addedMints.add(m);
+              const evmPnl = evmPnlByMint.get(m);
+              const pos: TokenPosition = {
+                mint: m,
                 symbol: t.symbol ?? "???",
                 name: t.name ?? "Unknown Token",
                 image: t.image,
@@ -288,39 +338,14 @@ export function Profile() {
                 pnl: evmPnl?.pnl,
                 pnlPercent: evmPnl?.pnlPercent,
                 chain: t.chain ?? "base",
-              });
-            }
-          } else {
-            if (evmData.base?.native > 0) {
-              const evmPnl = evmPnlByMint.get("base-eth");
-              combined.push({
-                mint: "base-eth",
-                symbol: "ETH",
-                name: "Ethereum (Base)",
-                amount: evmData.base.native,
-                value: evmData.base.native * nativePrices.eth,
-                pnl: evmPnl?.pnl,
-                pnlPercent: evmPnl?.pnlPercent,
-                chain: "base",
-              });
-            }
-            if (evmData.bnb?.native > 0) {
-              const evmPnl = evmPnlByMint.get("bnb-bnb");
-              combined.push({
-                mint: "bnb-bnb",
-                symbol: "BNB",
-                name: "BNB",
-                amount: evmData.bnb.native,
-                value: evmData.bnb.native * nativePrices.bnb,
-                pnl: evmPnl?.pnl,
-                pnlPercent: evmPnl?.pnlPercent,
-                chain: "bnb",
-              });
+              };
+              if (amount > 0 && value > 0) combined.push(pos);
+              else closed.push(pos);
             }
           }
         }
 
-        // 5) SPL tokens (exclude SOL/USDC already added) — only when balance > 0 and value > 0
+        // 5) SPL tokens (exclude SOL/USDC) — open when balance > 0 and value > 0; else closed
         const pnlByMint = pnlRes?.tokens ?? {};
         for (const t of positionsRes.tokens) {
           const mint = t.token.mint;
@@ -329,7 +354,6 @@ export function Profile() {
           if (symbol === "SOL") continue;
           const balance = t.balance ?? 0;
           const value = t.value || 0;
-          if (balance <= 0 || value <= 0) continue;
           const p = pnlByMint[mint];
           const pnl = p?.total ?? 0;
           const totalInvested = p?.total_invested ?? 0;
@@ -337,7 +361,7 @@ export function Profile() {
           let pnlPercent: number | undefined;
           if (totalInvested > 0) pnlPercent = (pnl / totalInvested) * 100;
           else if (costBasis > 0) pnlPercent = (pnl / costBasis) * 100;
-          combined.push({
+          const pos: TokenPosition = {
             mint,
             symbol: t.token.symbol || mint.slice(0, 8),
             name: t.token.name || "Unknown",
@@ -346,13 +370,15 @@ export function Profile() {
             value,
             pnl,
             pnlPercent,
-          });
+          };
+          if (balance > 0 && value > 0) combined.push(pos);
+          else closed.push(pos);
         }
 
         setOpenPositions(combined);
-        setClosedPositions([]);
+        setClosedPositions(closed);
         if (!cancelled) {
-          apiCache.set(cacheKey, { openPositions: combined, closedPositions: [] }, UI_CACHE_TTL_MS);
+          apiCache.set(cacheKey, { openPositions: combined, closedPositions: closed }, UI_CACHE_TTL_MS);
         }
       } catch {
         if (!cancelled) {
@@ -627,9 +653,7 @@ export function Profile() {
   };
 
   // Only show positions with amount > 0 and value >= 0 (no ghost/zero balances)
-  const displayedOpenPositions = useMemo(() => {
-    return openPositions.filter((p) => p.amount > 0 && p.value >= 0);
-  }, [openPositions]);
+  const displayedOpenPositions = openPositions; // openPositions now only contains tradeable (amount > 0 && value > 0)
 
   const handlePullRefresh = async () => {
     if (walletAddress) await fetchBalance();
@@ -861,31 +885,50 @@ export function Profile() {
                     )}
                   </div>
                   <div className="mt-4 pt-4 border-t border-white/10">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-sm font-medium">Closed positions</p>
-                      <button className="flex items-center gap-1 text-xs text-white/50 hover:text-white/70">
-                        Sort by <ArrowUpDown className="w-3 h-3" /> Recent
-                      </button>
-                    </div>
-                    {closedPositions.length === 0 ? (
-                      <p className="text-sm text-white/50">No closed positions</p>
-                    ) : (
-                      <ul className="space-y-2">
-                        {closedPositions.map((pos) => (
-                          <li key={pos.mint} className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5">
-                            {pos.image ? (
-                              <img src={pos.image} alt="" className="w-8 h-8 rounded-full object-cover" />
-                            ) : (
-                              <div className="w-8 h-8 rounded-full bg-white/10" />
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium truncate">{pos.symbol}</p>
-                              <p className="text-xs text-white/50">Closed</p>
-                            </div>
-                            <p className="text-sm text-[#12d585]">+${pos.value.toFixed(2)}</p>
-                          </li>
-                        ))}
-                      </ul>
+                    <button
+                      type="button"
+                      data-tap-haptic
+                      className="flex w-full items-center justify-between min-h-[44px] rounded-lg hover:bg-white/5 -m-2 p-2 transition-colors"
+                      onClick={() => setClosedExpanded((v) => !v)}
+                    >
+                      <div className="flex items-center gap-2">
+                        {closedExpanded ? (
+                          <ChevronUp className="w-4 h-4 text-white/50 flex-shrink-0" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4 text-white/50 flex-shrink-0" />
+                        )}
+                        <p className="text-sm font-medium">Closed positions</p>
+                        {closedPositions.length > 0 && (
+                          <span className="text-xs text-white/50">({closedPositions.length})</span>
+                        )}
+                      </div>
+                    </button>
+                    {closedExpanded && (
+                      <>
+                        {closedPositions.length === 0 ? (
+                          <p className="text-sm text-white/50 mt-2 pl-6">No closed positions</p>
+                        ) : (
+                          <ul className="space-y-2 mt-2 pl-2">
+                            {closedPositions.map((pos) => (
+                              <li key={pos.mint} className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5">
+                                {pos.image ? (
+                                  <img src={pos.image} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden"); }} />
+                                ) : null}
+                                <div className={`w-8 h-8 rounded-full bg-white/10 flex-shrink-0 ${pos.image ? "hidden" : ""}`} />
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-medium truncate">{pos.symbol}</p>
+                                  <p className="text-xs text-white/50">
+                                    {pos.amount > 0 ? `${pos.amount.toLocaleString()} ${pos.symbol}` : "0 held"}
+                                  </p>
+                                </div>
+                                <p className="text-sm flex-shrink-0">
+                                  {pos.value > 0 ? `$${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+                                </p>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </>
                     )}
                   </div>
                   <div className="mt-2 flex justify-end">

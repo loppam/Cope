@@ -75,22 +75,23 @@ export function Home() {
     evmData: {
       base?: { usdc?: number; native?: number };
       bnb?: { usdc?: number; native?: number };
-      tokens?: { value?: number }[];
+      tokens?: Array<{ value?: number }>;
     } | null,
     prices: { eth: number; bnb: number },
   ): number {
     if (!evmData) return 0;
+    let fromTokens = 0;
     if (Array.isArray(evmData.tokens) && evmData.tokens.length > 0) {
-      return evmData.tokens.reduce((s, t) => s + (t?.value ?? 0), 0);
+      fromTokens = evmData.tokens.reduce((s, t) => s + (t?.value ?? 0), 0);
     }
     const b = evmData.base ?? { usdc: 0, native: 0 };
     const n = evmData.bnb ?? { usdc: 0, native: 0 };
-    return (
+    const fromBaseBnb =
       (b.usdc ?? 0) +
       (b.native ?? 0) * prices.eth +
       (n.usdc ?? 0) +
-      (n.native ?? 0) * prices.bnb
-    );
+      (n.native ?? 0) * prices.bnb;
+    return fromTokens > 0 ? fromTokens : fromBaseBnb;
   }
 
   // Fetch balance for header (USDC + Solana positions + SOL + EVM)
@@ -203,6 +204,7 @@ export function Home() {
   useEffect(() => {
     const onRefresh = () => {
       if (!walletAddress || !user) return;
+      apiCache.clear(`balance_${user.uid}`);
       setBalanceLoading(true);
       const base = getApiBase();
       Promise.all([

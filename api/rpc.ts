@@ -82,8 +82,8 @@ export default async function handler(
 
   try {
     if (action === "sol-balance") {
-      const result = await rpcRequest<string>("getBalance", [address]);
-      const lamports = typeof result === "number" ? result : parseInt(String(result), 10);
+      const result = await rpcRequest<{ context?: unknown; value?: number }>("getBalance", [address]);
+      const lamports = typeof result?.value === "number" ? result.value : 0;
       const balance = Number.isFinite(lamports) ? lamports / 1e9 : 0;
       console.log("[api/rpc] ok", { action, balance });
       res.status(200).json({ balance });

@@ -26,7 +26,7 @@ import {
   getPriceImpactColor,
   formatPriceImpact,
 } from "@/lib/jupiter-swap";
-import { getSolBalance } from "@/lib/rpc";
+import { getSolBalance, getUsdcBalance } from "@/lib/rpc";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   DollarSign,
@@ -81,6 +81,7 @@ export function Trade() {
   const [loadingBalance, setLoadingBalance] = useState(false);
   // USDC balance (UI units) for Buy section display
   const [usdcBalance, setUsdcBalance] = useState<number | null>(null);
+  const [balanceRefreshKey, setBalanceRefreshKey] = useState(0);
 
   const quickAmounts = [10, 50, 100];
   const slippagePresets = [50, 100, 200]; // 0.5%, 1%, 2%
@@ -277,39 +278,31 @@ export function Trade() {
             }
           }
           setTokenBalance(evmBal);
-          const usdcBalances = await getWalletTokenBalance(
-            userProfile.walletAddress,
-            [SOLANA_USDC_MINT],
-          );
-          if (!cancelled) setUsdcBalance(usdcBalances[SOLANA_USDC_MINT] ?? 0);
+          const solanaUsdc = await getUsdcBalance(userProfile.walletAddress).catch(() => 0);
+          if (!cancelled) setUsdcBalance(solanaUsdc);
         } else {
           // SOL is native – use RPC balance so trade terminal matches open positions. Other SPL tokens use Birdeye.
           const isSol = token?.mint === SOL_MINT;
           if (isSol) {
-            const [solBal, usdcBalances] = await Promise.all([
+            const [solBal, solanaUsdc] = await Promise.all([
               getSolBalance(userProfile.walletAddress),
-              getWalletTokenBalance(userProfile.walletAddress, [SOLANA_USDC_MINT]),
+              getUsdcBalance(userProfile.walletAddress).catch(() => 0),
             ]);
             if (!cancelled) {
               setTokenBalance(solBal);
-              setUsdcBalance(usdcBalances[SOLANA_USDC_MINT] ?? 0);
+              setUsdcBalance(solanaUsdc);
             }
           } else {
-            const mints =
-              token?.mint && !isEvmToken
-                ? [token.mint, SOLANA_USDC_MINT]
-                : [SOLANA_USDC_MINT];
-            const balances = await getWalletTokenBalance(
-              userProfile.walletAddress,
-              mints,
-            );
-            if (!cancelled) {
-              if (token?.mint && !isEvmToken) {
-                setTokenBalance(balances[token.mint] ?? 0);
-              } else {
-                setTokenBalance(0);
-              }
-              setUsdcBalance(balances[SOLANA_USDC_MINT] ?? 0);
+            const solanaUsdc = await getUsdcBalance(userProfile.walletAddress).catch(() => 0);
+            if (!cancelled) setUsdcBalance(solanaUsdc);
+            if (token?.mint && !isEvmToken) {
+              const balances = await getWalletTokenBalance(
+                userProfile.walletAddress,
+                [token.mint],
+              );
+              if (!cancelled) setTokenBalance(balances[token.mint] ?? 0);
+            } else {
+              if (!cancelled) setTokenBalance(0);
             }
           }
         }
@@ -328,7 +321,14 @@ export function Trade() {
     return () => {
       cancelled = true;
     };
-  }, [token?.mint, token?.chain, userProfile?.walletAddress, user, isEvmToken]);
+  }, [token?.mint, token?.chain, userProfile?.walletAddress, user, isEvmToken, balanceRefreshKey]);
+
+  // Refetch balances when global refresh fires (e.g. pull-to-refresh on Home)
+  useEffect(() => {
+    const onRefresh = () => setBalanceRefreshKey((k) => k + 1);
+    window.addEventListener("cope-refresh-balance", onRefresh);
+    return () => window.removeEventListener("cope-refresh-balance", onRefresh);
+  }, []);
 
   const fetchTokenDetails = async (
     address: string,

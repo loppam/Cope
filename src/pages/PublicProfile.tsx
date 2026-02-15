@@ -202,9 +202,11 @@ export function PublicProfile() {
           });
         }
 
-        // 3) EVM (ETH, BNB)
+        // 3) EVM (ETH, BNB, other tokens) — always add native when > 0; add Moralis tokens with dedupe
         if (evmAddress && evmData) {
+          const addedMints = new Set<string>();
           if (baseBal.native > 0) {
+            addedMints.add("base-eth");
             const evmPnl = evmPnlByMint.get("base-eth");
             combined.push({
               mint: "base-eth",
@@ -218,6 +220,7 @@ export function PublicProfile() {
             });
           }
           if (bnbBal.native > 0) {
+            addedMints.add("bnb-bnb");
             const evmPnl = evmPnlByMint.get("bnb-bnb");
             combined.push({
               mint: "bnb-bnb",
@@ -229,6 +232,31 @@ export function PublicProfile() {
               pnlPercent: evmPnl?.pnlPercent,
               chain: "bnb",
             });
+          }
+          const BASE_USDC_ADDR = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+          const BNB_USDC_ADDR = "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d";
+          if (Array.isArray(evmData.tokens) && evmData.tokens.length > 0) {
+            for (const t of evmData.tokens) {
+              const amount = t.amount ?? 0;
+              const value = t.value ?? 0;
+              if (amount <= 0 || value <= 0) continue;
+              const m = (t.mint ?? "").toLowerCase();
+              if (addedMints.has(m)) continue;
+              if (m === BASE_USDC_ADDR || m === BNB_USDC_ADDR) continue;
+              addedMints.add(m);
+              const evmPnl = evmPnlByMint.get(m);
+              combined.push({
+                mint: m,
+                symbol: t.symbol ?? "???",
+                name: t.name ?? "Unknown Token",
+                image: t.image,
+                amount,
+                value,
+                pnl: evmPnl?.pnl,
+                pnlPercent: evmPnl?.pnlPercent,
+                chain: t.chain ?? "base",
+              });
+            }
           }
         }
 

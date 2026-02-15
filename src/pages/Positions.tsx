@@ -133,6 +133,32 @@ export function Positions() {
       }
 
       const positionsData: Position[] = [];
+      const hasSolInTokens = positionsResponse.tokens.some(
+        (t) =>
+          t.token.mint === SOL_MINT ||
+          t.token.mint === "So11111111111111111111111111111111111111111",
+      );
+      if (currentSolBalance > 0 && !hasSolInTokens) {
+        positionsData.push({
+          mint: SOL_MINT,
+          symbol: "SOL",
+          name: "Solana",
+          image: undefined,
+          amount: currentSolBalance,
+          value: currentSolBalance * currentSolPrice,
+          pnl: 0,
+          pnlPercent: 0,
+          realized: 0,
+          unrealized: 0,
+          costBasis: 0,
+          tokenData: undefined,
+          buys: 0,
+          sells: 0,
+          txns: 0,
+          holders: 0,
+          chain: "solana",
+        });
+      }
       for (const positionToken of positionsResponse.tokens) {
         const mint = positionToken.token.mint;
         const isSOL =
@@ -348,7 +374,10 @@ export function Positions() {
 
   useEffect(() => {
     const onRefresh = () => {
-      if (walletAddress) fetchPositions(true);
+      if (walletAddress) {
+        apiCache.clear(`positions_${walletAddress}`);
+        fetchPositions(true);
+      }
     };
     window.addEventListener("cope-refresh-balance", onRefresh);
     return () => window.removeEventListener("cope-refresh-balance", onRefresh);

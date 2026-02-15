@@ -338,6 +338,7 @@ export function Trade() {
     fetchDetailsMintRef.current = address;
     setLoading(true);
     const chainId = getChainId(chain);
+    const nativeDecimals = address === "base-eth" || address === "bnb-bnb" ? 18 : 6;
     const base: TokenSearchResult =
       currentToken?.mint === address
         ? currentToken
@@ -347,7 +348,7 @@ export function Trade() {
               mint: address,
               name: crossChainToken.name || "",
               symbol: crossChainToken.symbol || "",
-              decimals: 6,
+              decimals: nativeDecimals,
               hasSocials: false,
               chain,
               chainId,
@@ -355,9 +356,9 @@ export function Trade() {
           : {
               id: `${chainId}-${address}`,
               mint: address,
-              name: "",
-              symbol: "",
-              decimals: 6,
+              name: address === "base-eth" ? "Ethereum (Base)" : address === "bnb-bnb" ? "BNB" : "",
+              symbol: address === "base-eth" ? "ETH" : address === "bnb-bnb" ? "BNB" : "",
+              decimals: nativeDecimals,
               hasSocials: false,
               chain,
               chainId,

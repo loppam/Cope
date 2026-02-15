@@ -1174,9 +1174,12 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
               errMsg: errMsg.slice(0, 120),
               hasFunder: !!getEvmFunderWallet(chainId),
             });
+            const isExecutionReverted = /execution reverted|reverted/i.test(errMsg);
+            const userError = isExecutionReverted
+              ? "Swap failed. Price may have moved. Try increasing slippage tolerance and try again."
+              : errMsg.slice(0, 200) || "Transaction failed. Please try again.";
             return res.status(500).json({
-              error:
-                errMsg.slice(0, 200) || "Transaction failed. Please try again.",
+              error: userError,
               signature: "",
               status: "Failed",
             });
@@ -1544,6 +1547,88 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
         : "Transaction failed. Please try again.";
     return res.status(500).json({
       error: userMessage,
+      signature: "",
+      status: "Failed",
+    });
+  }
+}
+
+async function jupiterExecuteHandler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
+  try {
+    ensureFirebase();
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer "))
+      return res.status(401).json({ error: "Unauthorized" });
+    const decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
+    const userId = decoded?.uid ?? "";
+    const body = (req.body as { transaction?: string; requestId?: string }) ?? {};
+    const transactionB64 = (body.transaction ?? "").trim();
+    const requestId = (body.requestId ?? "").trim();
+    if (!transactionB64 || !requestId) {
+      return res.status(400).json({
+        error: "Missing transaction or requestId",
+      });
+    }
+    const encryptionSecret = process.env.ENCRYPTION_SECRET;
+    if (!encryptionSecret) {
+      return res.status(503).json({ error: "ENCRYPTION_SECRET not configured" });
+    }
+    const db = getAdminDb();
+    const userSnap = await db.collection("users").doc(userId).get();
+    const userData = userSnap.data();
+    const encryptedSecretKey = userData?.encryptedSecretKey;
+    if (!encryptedSecretKey) {
+      return res.status(400).json({ error: "Wallet credentials not found" });
+    }
+    const { secretKey } = await decryptWalletCredentials(
+      userId,
+      userData?.encryptedMnemonic,
+      encryptedSecretKey,
+      encryptionSecret,
+    );
+    const wallet = Keypair.fromSecretKey(secretKey);
+    const txBuffer = Buffer.from(transactionB64, "base64");
+    const tx = VersionedTransaction.deserialize(txBuffer);
+    tx.sign([wallet]);
+    const signedB64 = Buffer.from(tx.serialize()).toString("base64");
+    const apiKey = process.env.JUPITER_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({ error: "JUPITER_API_KEY not configured" });
+    }
+    const jupRes = await fetch("https://api.jup.ag/ultra/v1/execute", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+      },
+      body: JSON.stringify({
+        signedTransaction: signedB64,
+        requestId,
+      }),
+    });
+    const jupData = (await jupRes.json()) as {
+      status?: string;
+      signature?: string;
+      error?: string;
+    };
+    if (!jupRes.ok) {
+      const errMsg = jupData?.error ?? `Jupiter execute failed: ${jupRes.status}`;
+      return res.status(jupRes.status >= 500 ? 502 : 400).json({
+        error: errMsg,
+        signature: "",
+        status: "Failed",
+      });
+    }
+    return res.status(200).json({
+      signature: jupData.signature ?? "",
+      status: jupData.status ?? "Success",
+    });
+  } catch (e: unknown) {
+    console.error("[jupiter-execute] error", e);
+    return res.status(500).json({
+      error: e instanceof Error ? e.message : "Internal server error",
       signature: "",
       status: "Failed",
     });
@@ -2363,6 +2448,7 @@ const ROUTES: Record<
   (req: VercelRequest, res: VercelResponse) => Promise<void | VercelResponse>
 > = {
   "deposit-quote": depositQuoteHandler,
+  "jupiter-execute": jupiterExecuteHandler,
   "swap-quote": swapQuoteHandler,
   "withdraw-quote": withdrawQuoteHandler,
   "execute-step": executeStepHandler,
@@ -2385,7 +2471,7 @@ export default async function handler(
   const path = (req.url ?? "").split("?")[0];
   const segments = path.split("/").filter(Boolean);
   const action = segments[segments.length - 1];
-  if (action === "swap-quote" || action === "execute-step") {
+  if (action === "swap-quote" || action === "execute-step" || action === "jupiter-execute") {
     console.log("[relay] request", { action, method: req.method });
   }
   const routeHandler = action ? ROUTES[action] : undefined;

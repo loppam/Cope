@@ -14,7 +14,7 @@ interface ImportMetaEnv {
   readonly VITE_JUPITER_API_KEY?: string;
   readonly VITE_JUPITER_REFERRAL_ACCOUNT?: string;
   readonly VITE_JUPITER_REFERRAL_FEE_BPS?: string;
-  /** Server-side only now; client uses /api/solanatracker proxy */
+  /** Deprecated; app uses Birdeye for wallet/PnL/scanner */
   readonly VITE_SOLANATRACKER_API_KEY?: string;
   readonly VITE_SOLANATRACKER_RPC_API_KEY?: string;
   /** Server-side only now; client uses /api/birdeye proxy */

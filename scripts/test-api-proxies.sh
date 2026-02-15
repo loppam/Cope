@@ -84,13 +84,9 @@ test_ok "Jupiter price" \
   "$BASE/api/jupiter/price/v3?ids=So11111111111111111111111111111111111111112"
 echo ""
 
-# SolanaTracker (wallet, pnl - key for profile/positions)
-echo "--- SolanaTracker ---"
-test_ok "SolanaTracker wallet" \
-  "$BASE/api/solanatracker/wallet/So11111111111111111111111111111111111111112"
-test_ok "SolanaTracker pnl" \
-  "$BASE/api/solanatracker/pnl/So11111111111111111111111111111111111111112"
-echo ""
+# SolanaTracker proxy kept for backward compat; app uses Birdeye for wallet/PnL/scanner
+# test_ok "SolanaTracker wallet" "$BASE/api/solanatracker/wallet/..."
+# test_ok "SolanaTracker pnl" "$BASE/api/solanatracker/pnl/..."
 
 # Relay (critical for funding/deposits/withdrawals)
 echo "--- Relay (funding tech) ---"

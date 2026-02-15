@@ -2,7 +2,7 @@
  * GET /api/rpc
  * Proxies Solana RPC so API keys stay server-side.
  * Query: action=sol-balance|usdc-balance|token-accounts, address=<wallet>
- * Env: SOLANATRACKER_RPC_API_KEY, SOLANATRACKER_API_KEY, SOLANA_RPC_URL, or HELIUS_API_KEY
+ * Env (preferred first): SOLANA_RPC_URL, HELIUS_API_KEY. Fallback: SOLANATRACKER_RPC_API_KEY.
  */
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
@@ -10,28 +10,20 @@ const SOLANA_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
 function getRpcSource(): string {
-  if (process.env.SOLANATRACKER_RPC_API_KEY) return "solanatracker_rpc";
-  if (process.env.SOLANATRACKER_API_KEY) return "solanatracker_api";
   if (process.env.SOLANA_RPC_URL) return "SOLANA_RPC_URL";
   if (process.env.HELIUS_API_KEY) return "helius";
+  if (process.env.SOLANATRACKER_RPC_API_KEY) return "solanatracker_rpc";
+  if (process.env.SOLANATRACKER_API_KEY) return "solanatracker_api";
   return "public";
 }
 
 function getRpcUrl(): string {
-  const solanatrackerRpc = process.env.SOLANATRACKER_RPC_API_KEY;
-  if (solanatrackerRpc) {
-    return `https://rpc-mainnet.solanatracker.io/?api_key=${solanatrackerRpc}`;
-  }
-  const solanatrackerApi = process.env.SOLANATRACKER_API_KEY;
-  if (solanatrackerApi) {
-    return `https://rpc-mainnet.solanatracker.io/?api_key=${solanatrackerApi}`;
-  }
-  if (process.env.SOLANA_RPC_URL) {
-    return process.env.SOLANA_RPC_URL;
-  }
+  if (process.env.SOLANA_RPC_URL) return process.env.SOLANA_RPC_URL;
   if (process.env.HELIUS_API_KEY) {
     return `https://rpc.helius.xyz/?api-key=${process.env.HELIUS_API_KEY}`;
   }
+  const key = process.env.SOLANATRACKER_RPC_API_KEY ?? process.env.SOLANATRACKER_API_KEY;
+  if (key) return `https://rpc-mainnet.solanatracker.io/?api_key=${key}`;
   return "https://api.mainnet-beta.solana.com";
 }
 

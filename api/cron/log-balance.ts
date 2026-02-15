@@ -23,13 +23,12 @@ function isUserPublic(data: { isPublic?: boolean }): boolean {
 }
 
 function getRpcUrl(): string {
-  const key =
-    process.env.SOLANATRACKER_RPC_API_KEY ?? process.env.SOLANATRACKER_API_KEY;
-  if (key) {
-    return `https://rpc-mainnet.solanatracker.io/?api_key=${key}`;
+  if (process.env.SOLANA_RPC_URL) return process.env.SOLANA_RPC_URL;
+  if (process.env.HELIUS_API_KEY) {
+    return `https://rpc.helius.xyz/?api-key=${process.env.HELIUS_API_KEY}`;
   }
-  const url = process.env.SOLANA_RPC_URL;
-  if (url) return url;
+  const key = process.env.SOLANATRACKER_RPC_API_KEY ?? process.env.SOLANATRACKER_API_KEY;
+  if (key) return `https://rpc-mainnet.solanatracker.io/?api_key=${key}`;
   return "https://api.mainnet-beta.solana.com";
 }
 

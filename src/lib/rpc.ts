@@ -8,12 +8,13 @@ const RPC_RETRY_MAX = 4;
 const RPC_RETRY_DELAYS_MS = [2000, 4000, 6000, 8000];
 
 function getRpcUrl(): string {
-  const key = import.meta.env.VITE_SOLANATRACKER_RPC_API_KEY ?? import.meta.env.VITE_SOLANATRACKER_API_KEY;
-  if (key) {
-    return `https://rpc-mainnet.solanatracker.io/?api_key=${key}`;
-  }
   const url = import.meta.env.VITE_SOLANA_RPC_URL;
   if (url) return url;
+  if (import.meta.env.VITE_HELIUS_API_KEY) {
+    return `https://rpc.helius.xyz/?api-key=${import.meta.env.VITE_HELIUS_API_KEY}`;
+  }
+  const key = import.meta.env.VITE_SOLANATRACKER_RPC_API_KEY ?? import.meta.env.VITE_SOLANATRACKER_API_KEY;
+  if (key) return `https://rpc-mainnet.solanatracker.io/?api_key=${key}`;
   return "https://api.mainnet-beta.solana.com";
 }
 

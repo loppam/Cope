@@ -1173,17 +1173,19 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
         undefined,
         ETH_DERIVATION_PATH,
       );
+      const gasLimit =
+        typeof d?.gas === "string"
+          ? BigInt(d.gas)
+          : typeof d?.gas === "number"
+            ? BigInt(d.gas)
+            : undefined;
       const txRequest: TransactionRequest = {
         from: d?.from as string,
         to: d?.to as string,
         data: d?.data as string,
         value: typeof d?.value === "string" ? BigInt(d.value) : undefined,
         gasLimit:
-          typeof d?.gas === "string"
-            ? BigInt(d.gas)
-            : typeof d?.gas === "number"
-              ? BigInt(d.gas)
-              : undefined,
+          gasLimit ?? 500000n,
         maxFeePerGas:
           typeof d?.maxFeePerGas === "string"
             ? BigInt(d.maxFeePerGas)
@@ -1239,7 +1241,7 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
               errMsg,
             );
             const userError = isExecutionReverted
-              ? "Swap failed. Price may have moved. Try increasing slippage tolerance and try again."
+              ? "Swap failed. Price may have moved (try higher slippage), or check that you have sufficient balance and have approved the token if prompted."
               : errMsg.slice(0, 200) || "Transaction failed. Please try again.";
             return res.status(500).json({
               error: userError,
@@ -2386,17 +2388,18 @@ async function executeBridgeCustodialHandler(
           if (!evmWallet) {
             return res.status(400).json({ error: "EVM step but no mnemonic" });
           }
+          const evmGas =
+            typeof d.gas === "string"
+              ? BigInt(d.gas)
+              : typeof d.gas === "number"
+                ? BigInt(d.gas)
+                : undefined;
           const txRequest: TransactionRequest = {
             from: d.from as string,
             to: d.to as string,
             data: d.data as string,
             value: typeof d.value === "string" ? BigInt(d.value) : undefined,
-            gasLimit:
-              typeof d.gas === "string"
-                ? BigInt(d.gas)
-                : typeof d.gas === "number"
-                  ? BigInt(d.gas)
-                  : undefined,
+            gasLimit: evmGas ?? 500000n,
             maxFeePerGas:
               typeof d.maxFeePerGas === "string"
                 ? BigInt(d.maxFeePerGas)

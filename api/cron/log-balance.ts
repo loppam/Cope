@@ -3,7 +3,8 @@
  * with retries on 429/502. Store in users/{uid}: balanceCurrent, balanceCurrentAt,
  * balancePrev, balancePrevAt. Home reads 24h from user profile.
  * Runs daily at 00:05 UTC. Auth: Bearer CRON_SECRET.
- * Uses direct Solana Tracker RPC (no api/rpc proxy). EVM via api/cron/evm-balance.
+ * Uses Birdeye current-net-worth for Solana (SOL, USDC, SPL positions).
+ * EVM via api/cron/evm-balance. Falls back to RPC when baseUrl unavailable.
  */
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
@@ -230,19 +231,57 @@ export default async function handler(
     let written = 0;
     for (const { uid, walletAddress } of users) {
       try {
-        const [usdc, solBal, positionsRes, evmRes] = await Promise.all([
-          getUsdcBalanceServer(walletAddress).catch(() => null),
-          getSolBalanceServer(walletAddress).catch(() => null),
-          baseUrl
-            ? fetchWithRetry(
-                `${baseUrl}/api/solanatracker/wallet/${walletAddress}`,
-                { retries: 3 },
-              )
-                .then((r) => r.json().catch(() => null))
-                .catch(() => null)
-            : Promise.resolve(null),
+        let usdcVal = 0;
+        let solVal = 0;
+        let splVal = 0;
+
+        if (baseUrl) {
+          // Birdeye current-net-worth: one call for SOL, USDC, and SPL positions (all values in USD)
+          const birdeyeRes = await fetchWithRetry(
+            `${baseUrl}/api/birdeye/wallet-current-net-worth?wallet=${encodeURIComponent(walletAddress)}&limit=100`,
+            { retries: 3 },
+          )
+            .then((r) => r.json().catch(() => null))
+            .catch(() => null);
+
+          if (birdeyeRes == null) continue;
+
+          const items =
+            (birdeyeRes as { data?: { items?: Array<{ address?: string; value?: string | number }> } })
+              ?.data?.items ?? [];
+          const parseVal = (v: string | number | undefined): number => {
+            if (typeof v === "number" && Number.isFinite(v)) return v;
+            if (typeof v === "string") {
+              const n = parseFloat(v);
+              return Number.isFinite(n) ? n : 0;
+            }
+            return 0;
+          };
+          for (const item of items) {
+            const addr = (item?.address ?? "").toString().trim();
+            const val = parseVal(item?.value);
+            if (addr === SOLANA_USDC_MINT) {
+              usdcVal += val;
+            } else if (addr === SOL_MINT || addr === "So11111111111111111111111111111111111111111") {
+              solVal += val;
+            } else if (addr) {
+              splVal += val;
+            }
+          }
+        } else {
+          // Fallback: RPC for USDC and SOL when baseUrl unavailable
+          const [usdc, solBal] = await Promise.all([
+            getUsdcBalanceServer(walletAddress).catch(() => null),
+            getSolBalanceServer(walletAddress).catch(() => null),
+          ]);
+          if (usdc == null || solBal == null) continue;
+          usdcVal = usdc;
+          solVal = (solBal ?? 0) * (solPrice ?? 0);
+        }
+
+        const evmRes =
           baseUrl && cronSecret
-            ? fetchWithRetry(
+            ? await fetchWithRetry(
                 `${baseUrl}/api/cron/evm-balance?uid=${encodeURIComponent(uid)}`,
                 {
                   headers: { Authorization: `Bearer ${cronSecret}` },
@@ -251,35 +290,9 @@ export default async function handler(
               )
                 .then((r) => (r.ok ? r.json().catch(() => null) : null))
                 .catch(() => null)
-            : Promise.resolve(null),
-        ]);
-
-        if (
-          usdc == null ||
-          solBal == null ||
-          (baseUrl && positionsRes == null)
-        ) {
-          continue;
-        }
-
-        const tokens =
-          (positionsRes as { tokens?: Array<{ token?: { mint?: string; symbol?: string }; value?: number }> })
-            ?.tokens ?? [];
-        let splVal = 0;
-        for (const t of tokens) {
-          const mint = t.token?.mint;
-          const symbol = (t.token?.symbol ?? "").toUpperCase();
-          if (
-            mint === SOL_MINT ||
-            mint === SOLANA_USDC_MINT ||
-            symbol === "SOL"
-          )
-            continue;
-          splVal += t.value ?? 0;
-        }
-        const solVal = (solBal ?? 0) * (solPrice ?? 0);
+            : null;
         const evmVal = evmBalanceUsd(evmRes, nativePrices);
-        const total = usdc + solVal + evmVal + splVal;
+        const total = usdcVal + solVal + evmVal + splVal;
 
         const userRef = db.collection("users").doc(uid);
         const userSnap = await userRef.get();

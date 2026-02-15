@@ -12,12 +12,8 @@ import { formatCurrency, formatPercentage, shortenAddress, getApiBase } from "@/
 import { useAuth } from "@/contexts/AuthContext";
 import {
   getWalletPnLSummary,
-  getWalletPnL,
-  TokenPnLData,
-  getWalletPositions,
-  getSolPrice,
-} from "@/lib/solanatracker";
-import { getSolBalance, getUsdcBalance } from "@/lib/rpc";
+  getWalletPortfolioWithPnL,
+} from "@/lib/birdeye";
 import { fetchNativePrices } from "@/lib/coingecko";
 import { apiCache, UI_CACHE_TTL_MS } from "@/lib/cache";
 import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
@@ -50,7 +46,7 @@ interface Position {
   realized: number;
   unrealized: number;
   costBasis: number;
-  tokenData?: TokenPnLData;
+  tokenData?: unknown;
   buys?: number;
   sells?: number;
   txns?: number;
@@ -101,111 +97,66 @@ export function Positions() {
         }
       }
 
-      // Phase 1: Load positions + SOL/USDC balance/price first so the list shows immediately
-      const positionsResponse = await getWalletPositions(
-        walletAddress,
-        !forceRefresh,
-      );
-
-      let currentSolBalance = 0;
-      let currentSolPrice = 150;
-      let currentUsdcBalance = 0;
+      // Phase 1: Birdeye unified portfolio (SOL, USDC, SPL positions + PnL) + native prices
       let nativePrices = { eth: 3000, bnb: 600 };
+      let portfolio: Awaited<ReturnType<typeof getWalletPortfolioWithPnL>>;
       try {
-        const [balance, price, usdcBal, prices] = await Promise.all([
-          getSolBalance(walletAddress),
-          getSolPrice(),
-          getUsdcBalance(walletAddress),
+        const [port, prices] = await Promise.all([
+          getWalletPortfolioWithPnL(walletAddress),
           fetchNativePrices(),
         ]);
-        currentSolBalance = balance;
-        currentSolPrice = price;
-        currentUsdcBalance = usdcBal;
+        portfolio = port;
         nativePrices = prices;
-        setSolBalance(balance);
-        setSolPrice(price);
-        setUsdcBalance(usdcBal);
+        setSolBalance(portfolio.solBalance);
+        setUsdcBalance(portfolio.usdcBalance);
+        setSolPrice(0); // Not used; portfolio has value per token
       } catch (error) {
-        console.warn("Failed to fetch SOL/USDC balance or price:", error);
-        currentSolBalance = solBalance;
-        currentSolPrice = solPrice;
-        currentUsdcBalance = usdcBalance;
+        console.warn("Failed to fetch Birdeye portfolio:", error);
+        portfolio = {
+          solBalance: 0,
+          usdcBalance: 0,
+          positions: [],
+          totalUsd: 0,
+        };
       }
 
       const positionsData: Position[] = [];
-      const hasSolInTokens = positionsResponse.tokens.some(
-        (t) =>
-          t.token.mint === SOL_MINT ||
-          t.token.mint === "So11111111111111111111111111111111111111111",
-      );
-      if (currentSolBalance > 0 && !hasSolInTokens) {
+      // USDC row (Solana USDC only; Base/BNB USDC added from EVM below)
+      if (portfolio.usdcBalance > 0) {
         positionsData.push({
-          mint: SOL_MINT,
-          symbol: "SOL",
-          name: "Solana",
+          mint: SOLANA_USDC_MINT,
+          symbol: "USDC",
+          name: "USD Coin",
           image: undefined,
-          amount: currentSolBalance,
-          value: currentSolBalance * currentSolPrice,
+          amount: portfolio.usdcBalance,
+          value: portfolio.usdcBalance,
           pnl: 0,
           pnlPercent: 0,
           realized: 0,
           unrealized: 0,
           costBasis: 0,
           tokenData: undefined,
-          buys: 0,
-          sells: 0,
-          txns: 0,
-          holders: 0,
           chain: "solana",
         });
       }
-      for (const positionToken of positionsResponse.tokens) {
-        const mint = positionToken.token.mint;
-        const isSOL =
-          mint === SOL_MINT ||
-          mint === "So11111111111111111111111111111111111111111";
-        const isUSDC = mint === SOLANA_USDC_MINT;
-
-        let tokenValue = positionToken.value || 0;
-        let tokenAmount = positionToken.balance || 0;
-
-        if (isSOL) {
-          tokenValue = currentSolBalance * currentSolPrice;
-          tokenAmount = currentSolBalance;
-        } else if (isUSDC) {
-          tokenAmount = currentUsdcBalance;
-          tokenValue = currentUsdcBalance * 1;
-        }
-
-        if (tokenValue > 0) {
-          positionsData.push({
-            mint,
-            symbol: isSOL
-              ? "SOL"
-              : isUSDC
-                ? "USDC"
-                : positionToken.token.symbol || shortenAddress(mint),
-            name: isSOL
-              ? "Solana"
-              : isUSDC
-                ? "USD Coin"
-                : positionToken.token.name || "Unknown Token",
-            image: positionToken.token.image,
-            amount: tokenAmount,
-            value: tokenValue,
-            pnl: 0,
-            pnlPercent: 0,
-            realized: 0,
-            unrealized: 0,
-            costBasis: 0,
-            tokenData: undefined,
-            buys: positionToken.buys,
-            sells: positionToken.sells,
-            txns: positionToken.txns,
-            holders: positionToken.holders,
-            chain: "solana",
-          });
-        }
+      // SPL positions (SOL + other tokens) from Birdeye
+      for (const t of portfolio.positions) {
+        if (t.value <= 0) continue;
+        positionsData.push({
+          mint: t.mint,
+          symbol: t.symbol || shortenAddress(t.mint),
+          name: t.name || "Unknown Token",
+          image: t.image,
+          amount: t.amount,
+          value: t.value,
+          pnl: t.pnl ?? 0,
+          pnlPercent: t.pnlPercent ?? 0,
+          realized: t.realized ?? 0,
+          unrealized: t.unrealized ?? 0,
+          costBasis: t.costBasis ?? 0,
+          tokenData: undefined,
+          chain: "solana",
+        });
       }
 
       if (user) {
@@ -310,16 +261,7 @@ export function Positions() {
       setLoading(false);
       setRefreshing(false);
 
-      // Yield so the UI actually paints the positions-first state (avoids batching with phase 2)
-      await new Promise((r) => setTimeout(r, 0));
-      // Brief delay before loading PnL so positions are visible first
-      await new Promise((r) => setTimeout(r, 1000));
-
-      // Phase 2: Load PnL and merge into positions (may be cached)
-      const pnlResponse = await getWalletPnL(
-        walletAddress,
-        !forceRefresh,
-      ).catch(() => ({ tokens: {} }));
+      // Phase 2: Load PnL summary for aggregate stats (PnL per token already in positionsData)
       let summaryData: any = { data: { summary: null } };
       try {
         summaryData = await getWalletPnLSummary(walletAddress);
@@ -328,34 +270,15 @@ export function Positions() {
       }
       setSummary(summaryData.data?.summary ?? null);
 
-      const pnlTokens: Record<string, TokenPnLData> = pnlResponse.tokens || {};
-      const merged = positionsData.map((pos) => {
-        const tokenPnL = pnlTokens[pos.mint];
-        const total = tokenPnL?.total ?? 0;
-        const totalInvested = tokenPnL?.total_invested ?? 0;
-        const costBasis = tokenPnL?.cost_basis ?? 0;
-        let pnlPercent = 0;
-        if (totalInvested > 0) pnlPercent = (total / totalInvested) * 100;
-        else if (costBasis > 0) pnlPercent = (total / costBasis) * 100;
-        return {
-          ...pos,
-          pnl: total,
-          pnlPercent,
-          realized: tokenPnL?.realized ?? 0,
-          unrealized: tokenPnL?.unrealized ?? 0,
-          costBasis,
-          tokenData: tokenPnL,
-        };
-      });
-      setPositions(merged);
+      setPositions(positionsData);
       apiCache.set(
         `positions_${walletAddress}`,
         {
-          positions: merged,
+          positions: positionsData,
           summary: summaryData.data?.summary ?? null,
-          solBalance: currentSolBalance,
-          solPrice: currentSolPrice,
-          usdcBalance: currentUsdcBalance,
+          solBalance: portfolio.solBalance,
+          solPrice: 0,
+          usdcBalance: portfolio.usdcBalance,
         },
         UI_CACHE_TTL_MS,
       );

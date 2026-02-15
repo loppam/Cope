@@ -33,10 +33,8 @@ import {
 import { db } from "@/lib/firebase";
 import { WalletNotification } from "@/lib/notifications";
 import { shortenAddress, formatCurrency, getApiBase } from "@/lib/utils";
-import { getUsdcBalance, getSolBalance } from "@/lib/rpc";
-import { getWalletPositions, getSolPrice } from "@/lib/solanatracker";
+import { getWalletPortfolioWithPnL } from "@/lib/birdeye";
 import { fetchNativePrices } from "@/lib/coingecko";
-import { SOL_MINT, SOLANA_USDC_MINT } from "@/lib/constants";
 import { apiCache, UI_CACHE_TTL_MS } from "@/lib/cache";
 import { toast } from "sonner";
 import { DocumentHead } from "@/components/DocumentHead";
@@ -125,28 +123,24 @@ export function Home() {
             .catch(() => null),
         );
 
-        const [usdc, positionsRes, solBal, solPrice, nativePrices, evmData] = await Promise.all([
-          getUsdcBalance(walletAddress).catch(() => 0),
-          getWalletPositions(walletAddress, true).catch(() => ({ total: 0, tokens: [], totalSol: 0 })),
-          getSolBalance(walletAddress).catch(() => 0),
-          getSolPrice().catch(() => 0),
+        const [portfolio, nativePrices, evmData] = await Promise.all([
+          getWalletPortfolioWithPnL(walletAddress).catch(() => ({
+            solBalance: 0,
+            usdcBalance: 0,
+            positions: [],
+            totalUsd: 0,
+          })),
           fetchNativePrices(),
           tokenPromise,
         ]);
         if (cancelled) return;
 
-        // Same total as Profile: USDC (Solana + Base + BNB via evmVal) + SOL + EVM + SPL
-        const solVal = (solBal ?? 0) * (solPrice ?? 0);
+        // Total: Solana (USDC + positions) + EVM
+        const solanaVal =
+          portfolio.usdcBalance +
+          portfolio.positions.reduce((s, p) => s + (p.value ?? 0), 0);
         const evmVal = evmBalanceUsd(evmData, nativePrices);
-        const tokens = (positionsRes as { tokens?: Array<{ token: { mint: string; symbol?: string }; value?: number }> })?.tokens ?? [];
-        let splVal = 0;
-        for (const t of tokens) {
-          const mint = t.token?.mint;
-          const symbol = (t.token?.symbol ?? "").toUpperCase();
-          if (mint === SOL_MINT || mint === SOLANA_USDC_MINT || symbol === "SOL") continue;
-          splVal += t.value ?? 0;
-        }
-        const total = usdc + solVal + evmVal + splVal;
+        const total = solanaVal + evmVal;
 
         setTotalBalance(total);
 
@@ -208,10 +202,12 @@ export function Home() {
       setBalanceLoading(true);
       const base = getApiBase();
       Promise.all([
-        getUsdcBalance(walletAddress).catch(() => 0),
-        getWalletPositions(walletAddress, false).catch(() => ({ total: 0 })),
-        getSolBalance(walletAddress).catch(() => 0),
-        getSolPrice().catch(() => 0),
+        getWalletPortfolioWithPnL(walletAddress).catch(() => ({
+          solBalance: 0,
+          usdcBalance: 0,
+          positions: [],
+          totalUsd: 0,
+        })),
         fetchNativePrices(),
         user.getIdToken().then((t) =>
           fetch(`${base}/api/relay/evm-balances`, {
@@ -220,18 +216,12 @@ export function Home() {
             .then((r) => r.json())
             .catch(() => null),
         ),
-      ]).then(([usdc, positionsRes, solBal, solPrice, nativePrices, evmData]) => {
-        const solVal = (solBal ?? 0) * (solPrice ?? 0);
+      ]).then(([portfolio, nativePrices, evmData]) => {
+        const solanaVal =
+          portfolio.usdcBalance +
+          portfolio.positions.reduce((s, p) => s + (p.value ?? 0), 0);
         const evmVal = evmBalanceUsd(evmData, nativePrices);
-        const tokens = (positionsRes as { tokens?: Array<{ token: { mint: string; symbol?: string }; value?: number }> })?.tokens ?? [];
-        let splVal = 0;
-        for (const t of tokens) {
-          const mint = t.token?.mint;
-          const symbol = (t.token?.symbol ?? "").toUpperCase();
-          if (mint === SOL_MINT || mint === SOLANA_USDC_MINT || symbol === "SOL") continue;
-          splVal += t.value ?? 0;
-        }
-        const total = usdc + solVal + evmVal + splVal;
+        const total = solanaVal + evmVal;
         setTotalBalance(total);
       }).catch(() => setTotalBalance(null)).finally(() => setBalanceLoading(false));
     };
@@ -521,7 +511,7 @@ export function Home() {
               <p className="text-2xl sm:text-3xl font-bold tracking-tight text-white truncate">
                 {balanceLoading || totalBalance == null
                   ? "$0.00"
-                  : `$${totalBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                  : `$${(totalBalance ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </p>
               <p
                 className={`text-sm mt-0.5 ${
@@ -540,7 +530,7 @@ export function Home() {
             <button
               onClick={() => navigate("/app/profile?open=deposit")}
               data-tap-haptic
-              className="tap-press flex-shrink-0 min-h-[44px] min-w-[44px] px-4 py-2.5 rounded-xl bg-[#3B82F6] hover:bg-[#2563EB] text-white font-medium text-sm transition-colors"
+              className="tap-press flex-shrink-0 min-h-[44px] min-w-[44px] px-4 py-2.5 rounded-xl bg-[#12d585] hover:bg-[#08b16b] text-[#000000] font-medium text-sm transition-colors"
             >
               Deposit
             </button>

@@ -1,5 +1,262 @@
 // Birdeye API - scanner/PnL calls proxied via /api/birdeye so API key stays server-side
 import { getApiBase } from "./utils";
+import { SOL_MINT, SOLANA_USDC_MINT } from "./constants";
+
+/** Wallet portfolio item from Birdeye wallet/v2/current-net-worth (replacement for deprecated token_list) */
+export interface BirdeyeCurrentNetWorthItem {
+  address: string;
+  decimals?: number;
+  balance?: string;
+  amount?: number;
+  price?: number;
+  value?: string | number;
+  network?: string;
+  name?: string;
+  symbol?: string;
+  logo_uri?: string;
+}
+
+export interface BirdeyeCurrentNetWorthResponse {
+  success: boolean;
+  data?: {
+    wallet_address?: string;
+    total_value?: string | number;
+    currency?: string;
+    items?: BirdeyeCurrentNetWorthItem[];
+  };
+}
+
+function parseItemAmount(item: BirdeyeCurrentNetWorthItem): number {
+  if (typeof item?.amount === "number" && Number.isFinite(item.amount)) return item.amount;
+  return 0;
+}
+
+function parseItemValue(item: BirdeyeCurrentNetWorthItem): number {
+  const v = item?.value;
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = parseFloat(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
+}
+
+/**
+ * Get SOL and USDC balances for a Solana wallet via Birdeye wallet current-net-worth.
+ * Uses GET /wallet/v2/current-net-worth (replacement for deprecated token_list).
+ * Also used by Trade terminal for USDC and SOL token balances.
+ */
+export async function getWalletSolAndUsdcBalances(
+  walletAddress: string
+): Promise<{ solBalance: number; usdcBalance: number }> {
+  const base = getApiBase();
+  const params = new URLSearchParams({ wallet: walletAddress, limit: "100" });
+  const res = await fetch(`${base}/api/birdeye/wallet-token-list?${params.toString()}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(
+      (err as { error?: string }).error ||
+        (err as { message?: string }).message ||
+        `Birdeye current-net-worth: ${res.status}`
+    );
+  }
+  const data = (await res.json()) as BirdeyeCurrentNetWorthResponse;
+  let solBalance = 0;
+  let usdcBalance = 0;
+  const items = data?.data?.items ?? [];
+  for (const item of items) {
+    const addr = (item?.address ?? "").toString().trim();
+    const amount = parseItemAmount(item);
+    if (addr === SOL_MINT || addr === "So11111111111111111111111111111111111111111") {
+      solBalance += amount;
+    } else if (addr === SOLANA_USDC_MINT) {
+      usdcBalance += amount;
+    }
+  }
+  return {
+    solBalance: Number.isFinite(solBalance) ? solBalance : 0,
+    usdcBalance: Number.isFinite(usdcBalance) ? usdcBalance : 0,
+  };
+}
+
+/** Unified position with balance and PnL - from Birdeye token_list + wallet/v2/pnl */
+export interface WalletPortfolioPosition {
+  mint: string;
+  symbol: string;
+  name: string;
+  image?: string;
+  amount: number;
+  value: number;
+  pnl?: number;
+  pnlPercent?: number;
+  realized?: number;
+  unrealized?: number;
+  costBasis?: number;
+}
+
+/** Unified wallet portfolio: SOL, USDC, SPL positions, and per-token PnL (Birdeye only) */
+export interface WalletPortfolioWithPnL {
+  solBalance: number;
+  usdcBalance: number;
+  positions: WalletPortfolioPosition[];
+  totalUsd: number;
+}
+
+/**
+ * Birdeye PnL per-token response structure
+ */
+interface BirdeyePnlTokenData {
+  symbol?: string;
+  decimals?: number;
+  quantity?: {
+    holding?: number;
+    total_bought_amount?: number;
+    total_sold_amount?: number;
+  };
+  cashflow_usd?: {
+    total_invested?: number;
+    total_sold?: number;
+    current_value?: number;
+    cost_of_quantity_sold?: number;
+  };
+  pnl?: {
+    realized_profit_usd?: number;
+    unrealized_usd?: number;
+    total_usd?: number;
+    total_percent?: number;
+  };
+}
+
+/**
+ * Get full Solana wallet portfolio (SOL, USDC, SPL tokens) with per-token PnL in one flow.
+ * Uses Birdeye wallet/v2/current-net-worth for positions + wallet/v2/pnl for PnL.
+ * Replaces deprecated token_list. Also used by Trade terminal for Solana token balances.
+ */
+export async function getWalletPortfolioWithPnL(
+  walletAddress: string
+): Promise<WalletPortfolioWithPnL> {
+  const base = getApiBase();
+
+  // 1) Get portfolio from current-net-worth (replacement for deprecated token_list)
+  const listParams = new URLSearchParams({ wallet: walletAddress, limit: "100" });
+  const listRes = await fetch(`${base}/api/birdeye/wallet-token-list?${listParams.toString()}`);
+  if (!listRes.ok) {
+    const err = await listRes.json().catch(() => ({}));
+    throw new Error(
+      (err as { error?: string }).error ||
+        (err as { message?: string }).message ||
+        `Birdeye current-net-worth: ${listRes.status}`
+    );
+  }
+  const listData = (await listRes.json()) as BirdeyeCurrentNetWorthResponse;
+  const items = listData?.data?.items ?? [];
+  let solBalance = 0;
+  let usdcBalance = 0;
+  const positions: WalletPortfolioPosition[] = [];
+  const tokenAddresses: string[] = [];
+
+  for (const item of items) {
+    const addr = (item?.address ?? "").toString().trim();
+    const amount = parseItemAmount(item);
+    const valueUsd = parseItemValue(item);
+
+    if (addr === SOL_MINT || addr === "So11111111111111111111111111111111111111111") {
+      solBalance += amount;
+    } else if (addr === SOLANA_USDC_MINT) {
+      usdcBalance += amount;
+    }
+    // All tokens (including SOL for PnL) - only include SPL tokens with balance in positions
+    if (addr && addr !== SOLANA_USDC_MINT) {
+      if (addr === SOL_MINT || addr === "So11111111111111111111111111111111111111111") {
+        if (amount > 0) {
+          positions.push({
+            mint: SOL_MINT,
+            symbol: "SOL",
+            name: item?.name ?? "Solana",
+            image: item?.logo_uri,
+            amount,
+            value: valueUsd,
+          });
+          tokenAddresses.push(addr);
+        }
+      } else if (amount > 0) {
+        positions.push({
+          mint: addr,
+          symbol: (item?.symbol ?? "?").toString(),
+          name: (item?.name ?? "Unknown").toString(),
+          image: item?.logo_uri,
+          amount,
+          value: valueUsd,
+        });
+        tokenAddresses.push(addr);
+      }
+    }
+  }
+
+  // 2) Fetch PnL for token addresses (max 50 per request; batch if needed)
+  const pnlByMint = new Map<string, { pnl: number; pnlPercent?: number; realized?: number; unrealized?: number; costBasis?: number }>();
+  const BATCH_SIZE = 50;
+  for (let i = 0; i < tokenAddresses.length; i += BATCH_SIZE) {
+    const batch = tokenAddresses.slice(i, i + BATCH_SIZE);
+    const pnlParams = new URLSearchParams({
+      wallet: walletAddress,
+      token_addresses: batch.join(","),
+    });
+    const pnlRes = await fetch(`${base}/api/birdeye/wallet-pnl?${pnlParams.toString()}`);
+    if (!pnlRes.ok) {
+      // Non-fatal: continue without PnL for this batch
+      continue;
+    }
+    const pnlData = (await pnlRes.json()) as {
+      success?: boolean;
+      data?: { tokens?: Record<string, BirdeyePnlTokenData> };
+    };
+    const tokens = pnlData?.data?.tokens ?? {};
+    for (const [mint, t] of Object.entries(tokens)) {
+      const p = t as BirdeyePnlTokenData;
+      const totalUsd = p?.pnl?.total_usd ?? 0;
+      const totalPercent = p?.pnl?.total_percent;
+      const realized = p?.pnl?.realized_profit_usd ?? 0;
+      const unrealized = p?.pnl?.unrealized_usd ?? 0;
+      const costBasis = p?.cashflow_usd?.total_invested ?? 0;
+      pnlByMint.set(mint, {
+        pnl: totalUsd,
+        pnlPercent: totalPercent,
+        realized,
+        unrealized,
+        costBasis,
+      });
+    }
+    if (i + BATCH_SIZE < tokenAddresses.length) {
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+
+  // 3) Merge PnL into positions
+  for (const pos of positions) {
+    const pnl = pnlByMint.get(pos.mint);
+    if (pnl) {
+      pos.pnl = pnl.pnl;
+      pos.pnlPercent = pnl.pnlPercent;
+      pos.realized = pnl.realized;
+      pos.unrealized = pnl.unrealized;
+      pos.costBasis = pnl.costBasis;
+    }
+  }
+
+  const tvRaw = listData?.data?.total_value;
+  const totalUsd =
+    (typeof tvRaw === "number" && Number.isFinite(tvRaw) ? tvRaw : 0) ||
+    (typeof tvRaw === "string" ? parseFloat(tvRaw) : 0) ||
+    positions.reduce((s, p) => s + (p.value ?? 0), 0) + usdcBalance;
+
+  return {
+    solBalance: Number.isFinite(solBalance) ? solBalance : 0,
+    usdcBalance: Number.isFinite(usdcBalance) ? usdcBalance : 0,
+    positions,
+    totalUsd: Number.isFinite(totalUsd) ? totalUsd : 0,
+  };
+}
 
 /**
  * Delay helper function
@@ -172,6 +429,16 @@ export async function getWalletPnLSummary(
 }
 
 /**
+ * Per-token stats for a wallet (for accordion breakdown and average ROI).
+ */
+export interface ScannerTokenStat {
+  mint: string;
+  totalInvested: number;
+  totalPnl: number; // totalRemoved - totalInvested for this token
+  roiPct: number | null; // (totalPnl / totalInvested) * 100, or null if totalInvested <= 0
+}
+
+/**
  * Scanner functionality - Find wallets that traded multiple tokens
  */
 export interface ScannerWallet {
@@ -181,18 +448,22 @@ export interface ScannerWallet {
   tokens: string[];
   totalInvested: number; // Total USD invested (buy transactions)
   totalRemoved: number; // Total USD removed (sell transactions)
+  /** Per-token invested, PnL, and ROI for accordion breakdown */
+  tokenStats: ScannerTokenStat[];
+  /** Average of each token's ROI % (only tokens with valid ROI); null if none */
+  averageRoiPct: number | null;
 }
 
-
 /**
- * Scan for wallets that traded multiple tokens using transaction data
- * 
+ * Scan for wallets that traded multiple tokens using Birdeye token transactions.
+ * Replaces Solana Tracker top-traders API.
+ *
  * Flow:
- * 1. For each token, fetch transactions (up to 10 pages = 1000 transactions)
+ * 1. For each token, fetch transactions from Birdeye (up to 1000 per token)
  * 2. Extract unique wallet addresses from transaction 'owner' field
  * 3. Cross-check wallets across tokens to find those that traded 2+ tokens
- * 4. Calculate total invested from transaction volumes
- * 5. Sort by highest investment to lowest
+ * 4. Track per-(wallet,token) invested and removed from tx volumes
+ * 5. Build tokenStats, averageRoiPct, sort by total PnL (desc)
  */
 export async function scanWalletsForTokens(
   tokenMints: string[],
@@ -205,94 +476,68 @@ export async function scanWalletsForTokens(
     for (let i = 0; i < tokenMints.length; i++) {
       const mint = tokenMints[i];
       try {
-        // Get up to 1000 transactions (10 pages × 100 transactions) for each token
         const transactions = await getTokenTransactionsPaginated(mint, 10, 'swap');
         allTransactionsByToken.push(transactions);
-        
-        // Add delay between tokens (600ms) to respect rate limits
-        if (i < tokenMints.length - 1) {
-          await delay(600);
-        }
+        if (i < tokenMints.length - 1) await delay(600);
       } catch (error) {
         console.error(`Error getting transactions for token ${mint}:`, error);
-        // Push empty array to maintain array alignment
         allTransactionsByToken.push([]);
       }
     }
 
-    // Step 2: Extract unique wallet addresses from transactions and build intersection map
-    // Also track total investment and total removed per wallet
+    // Step 2: Track per (wallet, token) invested and removed; aggregate per wallet
     const walletTokenMap = new Map<string, Set<string>>();
     const walletTransactionCount = new Map<string, number>();
-    const walletInvestmentMap = new Map<string, number>(); // Track total USD invested (buy transactions)
-    const walletRemovedMap = new Map<string, number>(); // Track total USD removed (sell transactions)
+    const walletTokenStats = new Map<string, Map<string, { invested: number; removed: number }>>();
 
     allTransactionsByToken.forEach((transactions, index) => {
       const tokenMint = tokenMints[index];
-      const seenWallets = new Set<string>(); // Track unique wallets per token
-      
+      const seenWallets = new Set<string>();
+
       transactions.forEach((tx) => {
         const wallet = tx.owner;
-        if (!wallet) return; // Skip if no owner
-        
-        // Initialize wallet tracking if not seen before
+        if (!wallet) return;
+
         if (!walletTokenMap.has(wallet)) {
           walletTokenMap.set(wallet, new Set());
           walletTransactionCount.set(wallet, 0);
-          walletInvestmentMap.set(wallet, 0);
-          walletRemovedMap.set(wallet, 0);
+          walletTokenStats.set(wallet, new Map());
         }
-        
-        // Add this token to the wallet's set (only once per token)
+
         if (!seenWallets.has(wallet)) {
           walletTokenMap.get(wallet)!.add(tokenMint);
           seenWallets.add(wallet);
         }
-        
-        // Increment transaction count for this wallet
         walletTransactionCount.set(wallet, walletTransactionCount.get(wallet)! + 1);
-        
-        // Track investment (buy) and removed (sell) separately
-        // For buy: volume_usd represents what the wallet spent (investment)
-        // For sell: volume_usd represents what the wallet received (removed)
-        // We can also calculate from from/to fields for more accuracy
+
         let investedUsd = 0;
         let removedUsd = 0;
-        
         if (tx.side === 'buy' || tx.tx_type === 'buy') {
-          // Buy transaction: wallet is spending money to get tokens
-          // Investment = USD value of what they spent
           if (tx.from && tx.from.price && tx.from.ui_change_amount) {
-            // from.ui_change_amount is negative for buys (spending)
             investedUsd = tx.from.price * Math.abs(tx.from.ui_change_amount);
           } else {
-            // Fallback to volume_usd
             investedUsd = tx.volume_usd || 0;
           }
-          const currentInvestment = walletInvestmentMap.get(wallet) || 0;
-          walletInvestmentMap.set(wallet, currentInvestment + investedUsd);
         } else if (tx.side === 'sell' || tx.tx_type === 'sell') {
-          // Sell transaction: wallet is receiving money from selling tokens
-          // Removed = USD value of what they received
           if (tx.to && tx.to.price && tx.to.ui_change_amount) {
-            // to.ui_change_amount is positive for sells (receiving)
             removedUsd = tx.to.price * tx.to.ui_change_amount;
           } else {
-            // Fallback to volume_usd
             removedUsd = tx.volume_usd || 0;
           }
-          const currentRemoved = walletRemovedMap.get(wallet) || 0;
-          walletRemovedMap.set(wallet, currentRemoved + removedUsd);
         } else {
-          // For 'swap' or unknown types, use volume_usd as investment
           investedUsd = tx.volume_usd || 0;
-          const currentInvestment = walletInvestmentMap.get(wallet) || 0;
-          walletInvestmentMap.set(wallet, currentInvestment + investedUsd);
         }
+
+        const tokenMap = walletTokenStats.get(wallet)!;
+        const prev = tokenMap.get(tokenMint) ?? { invested: 0, removed: 0 };
+        tokenMap.set(tokenMint, {
+          invested: prev.invested + investedUsd,
+          removed: prev.removed + removedUsd,
+        });
       });
     });
 
-    // Step 3: Filter wallets that match criteria (traded 2+ tokens, with min trades)
+    // Step 3: Filter wallets that match criteria
     const candidateWallets = Array.from(walletTokenMap.entries())
       .filter(([wallet, tokens]) => {
         const matches = tokens.size;
@@ -301,29 +546,42 @@ export async function scanWalletsForTokens(
       })
       .map(([wallet]) => wallet);
 
-    if (candidateWallets.length === 0) {
-      return [];
-    }
+    if (candidateWallets.length === 0) return [];
 
-    // Step 4: Map to scanner wallet format and sort by total invested
+    // Step 4: Build ScannerWallet with tokenStats and averageRoiPct
     const wallets: ScannerWallet[] = candidateWallets.map((wallet) => {
-      const walletTokens = Array.from(walletTokenMap.get(wallet) || []);
-      const matched = walletTokens.length;
-      const totalInvested = walletInvestmentMap.get(wallet) || 0;
-      const totalRemoved = walletRemovedMap.get(wallet) || 0;
+      const tokens = Array.from(walletTokenMap.get(wallet) || []);
+      const tokenMap = walletTokenStats.get(wallet) || new Map();
+      const tokenStats: ScannerTokenStat[] = tokens.map((mint) => {
+        const s = tokenMap.get(mint) ?? { invested: 0, removed: 0 };
+        const totalInvested = s.invested;
+        const totalPnl = s.removed - s.invested;
+        const roiPct = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : null;
+        return { mint, totalInvested, totalPnl, roiPct };
+      });
+      const totalInvested = tokenStats.reduce((a, t) => a + t.totalInvested, 0);
+      const totalRemoved = tokenStats.reduce((a, t) => a + (t.totalInvested + t.totalPnl), 0); // removed = invested + pnl
+      const roiValues = tokenStats.map((t) => t.roiPct).filter((r): r is number => r !== null);
+      const averageRoiPct = roiValues.length > 0 ? roiValues.reduce((a, b) => a + b, 0) / roiValues.length : null;
 
       return {
         address: wallet,
-        matched,
+        matched: tokens.length,
         total: tokenMints.length,
-        tokens: walletTokens,
+        tokens,
         totalInvested,
         totalRemoved,
+        tokenStats,
+        averageRoiPct,
       };
     });
 
-    // Step 5: Sort by highest investment to lowest
-    return wallets.sort((a, b) => b.totalInvested - a.totalInvested);
+    // Step 5: Sort by total PnL (desc)
+    return wallets.sort((a, b) => {
+      const pnlA = a.totalRemoved - a.totalInvested;
+      const pnlB = b.totalRemoved - b.totalInvested;
+      return pnlB - pnlA;
+    });
   } catch (error) {
     console.error('Error scanning wallets:', error);
     throw error;

@@ -41,6 +41,7 @@ import { PullToRefresh } from "@/components/PullToRefresh";
 import { shortenAddress } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { getUsdcBalance } from "@/lib/rpc";
+import { getWalletPortfolioWithPnL } from "@/lib/birdeye";
 import {
   getPushNotificationStatus,
   requestPermissionAndGetPushToken,
@@ -51,14 +52,12 @@ import {
 import { updatePublicWalletStatus } from "@/lib/auth";
 import { syncWebhook } from "@/lib/webhook";
 import { getFollowersCount } from "@/lib/profile";
-import { getWalletPositions, getWalletPnL, getSolPrice } from "@/lib/solanatracker";
-import { getSolBalance } from "@/lib/rpc";
 import { fetchNativePrices } from "@/lib/coingecko";
 import { getWalletProfitability } from "@/lib/moralis";
 import { getIntentStatus } from "@/lib/relay";
 import { toast } from "sonner";
 import type { WatchedWallet } from "@/lib/auth";
-import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
+import { SOLANA_USDC_MINT } from "@/lib/constants";
 import { apiCache, UI_CACHE_TTL_MS } from "@/lib/cache";
 import { Input } from "@/components/Input";
 import { Loader2 } from "lucide-react";
@@ -196,12 +195,14 @@ export function Profile() {
 
     (async () => {
       try {
-        // Phase 1: positions + balances (Solana Tracker throttle applies to getWalletPositions)
-        const [positionsRes, solBalance, solPrice, solanaUsdc, nativePrices, evmData] = await Promise.all([
-          getWalletPositions(walletAddress, true).catch(() => ({ total: 0, tokens: [], totalSol: 0 })),
-          getSolBalance(walletAddress).catch(() => 0),
-          getSolPrice().catch(() => 0),
-          getUsdcBalance(walletAddress).catch(() => 0),
+        // Phase 1: Birdeye unified portfolio (SOL, USDC, SPL positions + PnL) + prices + EVM
+        const [portfolio, nativePrices, evmData] = await Promise.all([
+          getWalletPortfolioWithPnL(walletAddress).catch(() => ({
+            solBalance: 0,
+            usdcBalance: 0,
+            positions: [],
+            totalUsd: 0,
+          })),
           fetchNativePrices(),
           user
             ? user.getIdToken().then((token) =>
@@ -216,14 +217,9 @@ export function Profile() {
 
         if (cancelled) return;
 
-        // Delay 1s before Phase 2 to respect Solana Tracker 1 req/sec
-        await new Promise((r) => setTimeout(r, 1000));
-        if (cancelled) return;
-
-        // Phase 2: Solana PnL + Moralis EVM PnL (parallel)
+        // Phase 2: Moralis EVM PnL only (Solana PnL already in portfolio)
         const evmAddress = evmData?.evmAddress;
-        const [pnlRes, evmPnlBase, evmPnlBnb] = await Promise.all([
-          getWalletPnL(walletAddress, true),
+        const [evmPnlBase, evmPnlBnb] = await Promise.all([
           evmAddress
             ? getWalletProfitability(evmAddress, "base")
             : Promise.resolve([]),
@@ -248,6 +244,8 @@ export function Profile() {
         const SOLANA_LOGO = "https://assets.coingecko.com/coins/images/4128/small/solana.png";
 
         // 1) USDC first: Solana + Base + BNB combined (one row)
+        const solBalance = portfolio.solBalance;
+        const solanaUsdc = portfolio.usdcBalance;
         const baseUsdc = evmData?.base?.usdc ?? 0;
         const bnbUsdc = evmData?.bnb?.usdc ?? 0;
         const totalUsdc = (Number.isFinite(solanaUsdc) ? solanaUsdc : 0) + baseUsdc + bnbUsdc;
@@ -263,20 +261,7 @@ export function Profile() {
         }
         setUsdcBalance(totalUsdc);
 
-        // 2) SOL (open when value > 0; else closed for non-tradeable)
-        if (solBalance > 0) {
-          const solValue = solPrice > 0 ? solBalance * solPrice : 0;
-          const solPos: TokenPosition = {
-            mint: SOL_MINT,
-            symbol: "SOL",
-            name: "Solana",
-            image: SOLANA_LOGO,
-            amount: solBalance,
-            value: solValue,
-          };
-          if (solValue > 0) combined.push(solPos);
-          else closed.push(solPos);
-        }
+        // 2) SOL is in portfolio.positions (handled in step 5)
 
         // 4) EVM tokens (ETH, BNB, others) — open when amount > 0 and value > 0; else closed
         if (evmData?.evmAddress) {
@@ -345,33 +330,22 @@ export function Profile() {
           }
         }
 
-        // 5) SPL tokens (exclude SOL/USDC) — open when balance > 0 and value > 0; else closed
-        const pnlByMint = pnlRes?.tokens ?? {};
-        for (const t of positionsRes.tokens) {
-          const mint = t.token.mint;
-          const symbol = (t.token.symbol || "").toUpperCase();
-          if (mint === SOL_MINT || mint === SOLANA_USDC_MINT) continue;
-          if (symbol === "SOL") continue;
-          const balance = t.balance ?? 0;
-          const value = t.value || 0;
-          const p = pnlByMint[mint];
-          const pnl = p?.total ?? 0;
-          const totalInvested = p?.total_invested ?? 0;
-          const costBasis = p?.cost_basis ?? 0;
-          let pnlPercent: number | undefined;
-          if (totalInvested > 0) pnlPercent = (pnl / totalInvested) * 100;
-          else if (costBasis > 0) pnlPercent = (pnl / costBasis) * 100;
+        // 5) SPL tokens from Birdeye portfolio (includes SOL; exclude USDC) — open when value > 0; else closed
+        for (const t of portfolio.positions) {
+          const mint = t.mint;
+          const symbol = (t.symbol || "").toUpperCase();
+          if (mint === SOLANA_USDC_MINT) continue;
           const pos: TokenPosition = {
             mint,
-            symbol: t.token.symbol || mint.slice(0, 8),
-            name: t.token.name || "Unknown",
-            image: t.token.image,
-            amount: balance,
-            value,
-            pnl,
-            pnlPercent,
+            symbol: t.symbol || mint.slice(0, 8),
+            name: t.name || "Unknown",
+            image: t.image,
+            amount: t.amount,
+            value: t.value,
+            pnl: t.pnl,
+            pnlPercent: t.pnlPercent,
           };
-          if (balance > 0 && value > 0) combined.push(pos);
+          if (t.amount > 0 && t.value > 0) combined.push(pos);
           else closed.push(pos);
         }
 
@@ -784,7 +758,7 @@ export function Profile() {
                   <div className="mt-4 pt-4 border-t border-white/10">
                     <p className="text-2xl sm:text-3xl font-bold">
                       {usdcBalanceLoading
-                        ? "—"
+                        ? "$0.00"
                         : `$${openPositions.reduce((s, p) => s + p.value, 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                     </p>
                     <p className="text-xs text-white/50 mt-0.5">Total wallet balance (both wallets)</p>
@@ -798,7 +772,7 @@ export function Profile() {
                         <p className="text-sm text-white/60">Cash balance</p>
                         <p className="font-semibold">
                           {usdcBalanceLoading
-                            ? "—"
+                            ? "$0.00"
                             : `$${usdcBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         </p>
                       </div>
@@ -922,7 +896,7 @@ export function Profile() {
                                   </p>
                                 </div>
                                 <p className="text-sm flex-shrink-0">
-                                  {pos.value > 0 ? `$${pos.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+                                  {`$${(pos.value ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                                 </p>
                               </li>
                             ))}

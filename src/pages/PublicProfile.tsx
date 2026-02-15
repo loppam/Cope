@@ -22,15 +22,10 @@ import {
   type PublicProfileByHandle,
 } from "@/lib/profile";
 import { getUsdcBalance } from "@/lib/rpc";
-import {
-  getWalletPositions,
-  getWalletPnL,
-  getSolPrice,
-} from "@/lib/solanatracker";
-import { getSolBalance } from "@/lib/rpc";
+import { getWalletPortfolioWithPnL } from "@/lib/birdeye";
 import { fetchNativePrices } from "@/lib/coingecko";
 import { getWalletProfitability } from "@/lib/moralis";
-import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
+import { SOLANA_USDC_MINT } from "@/lib/constants";
 import { DocumentHead } from "@/components/DocumentHead";
 
 interface TokenPosition {
@@ -119,18 +114,8 @@ export function PublicProfile() {
 
     (async () => {
       try {
-        const [
-          positionsRes,
-          solBalance,
-          solPrice,
-          solanaUsdc,
-          nativePrices,
-          evmData,
-        ] = await Promise.all([
-          getWalletPositions(profile!.walletAddress, true),
-          getSolBalance(profile!.walletAddress),
-          getSolPrice(),
-          getUsdcBalance(profile!.walletAddress),
+        const [portfolio, nativePrices, evmData] = await Promise.all([
+          getWalletPortfolioWithPnL(profile!.walletAddress),
           fetchNativePrices(),
           profile!.evmAddress
             ? fetch(
@@ -143,12 +128,8 @@ export function PublicProfile() {
 
         if (cancelled) return;
 
-        await new Promise((r) => setTimeout(r, 1000));
-        if (cancelled) return;
-
         const evmAddress = profile!.evmAddress;
-        const [pnlRes, evmPnlBase, evmPnlBnb] = await Promise.all([
-          getWalletPnL(profile!.walletAddress, true),
+        const [evmPnlBase, evmPnlBnb] = await Promise.all([
           evmAddress
             ? getWalletProfitability(evmAddress, "base")
             : Promise.resolve([]),
@@ -171,6 +152,7 @@ export function PublicProfile() {
         }
 
         const combined: TokenPosition[] = [];
+        const solanaUsdc = portfolio.usdcBalance;
         const baseBal = evmData?.base ?? { usdc: 0, native: 0 };
         const bnbBal = evmData?.bnb ?? { usdc: 0, native: 0 };
 
@@ -190,17 +172,7 @@ export function PublicProfile() {
         }
         if (!cancelled) setUsdcBalance(totalUsdc);
 
-        // 2) SOL
-        if (solBalance > 0) {
-          const solValue = solPrice > 0 ? solBalance * solPrice : 0;
-          combined.push({
-            mint: SOL_MINT,
-            symbol: "SOL",
-            name: "Solana",
-            amount: solBalance,
-            value: solValue,
-          });
-        }
+        // 2) SOL is in portfolio.positions (handled in step 4)
 
         // 3) EVM (ETH, BNB, other tokens) — always add native when > 0; add Moralis tokens with dedupe
         if (evmAddress && evmData) {
@@ -260,32 +232,19 @@ export function PublicProfile() {
           }
         }
 
-        // 4) SPL tokens (exclude SOL/USDC)
-        const pnlByMint = pnlRes?.tokens ?? {};
-        for (const t of positionsRes.tokens) {
-          const mint = t.token.mint;
-          const symbol = (t.token.symbol || "").toUpperCase();
-          if (mint === SOL_MINT || mint === SOLANA_USDC_MINT) continue;
-          if (symbol === "SOL") continue;
-          const balance = t.balance ?? 0;
-          const value = t.value || 0;
-          if (balance <= 0 || value <= 0) continue;
-          const p = pnlByMint[mint];
-          const pnl = p?.total ?? 0;
-          const totalInvested = p?.total_invested ?? 0;
-          const costBasis = p?.cost_basis ?? 0;
-          let pnlPercent: number | undefined;
-          if (totalInvested > 0) pnlPercent = (pnl / totalInvested) * 100;
-          else if (costBasis > 0) pnlPercent = (pnl / costBasis) * 100;
+        // 4) SPL tokens from Birdeye portfolio (exclude USDC)
+        for (const t of portfolio.positions) {
+          if (t.mint === SOLANA_USDC_MINT) continue;
+          if (t.amount <= 0 || t.value <= 0) continue;
           combined.push({
-            mint,
-            symbol: t.token.symbol || mint.slice(0, 8),
-            name: t.token.name || "Unknown",
-            image: t.token.image,
-            amount: balance,
-            value,
-            pnl,
-            pnlPercent,
+            mint: t.mint,
+            symbol: t.symbol || t.mint.slice(0, 8),
+            name: t.name || "Unknown",
+            image: t.image,
+            amount: t.amount,
+            value: t.value,
+            pnl: t.pnl,
+            pnlPercent: t.pnlPercent,
           });
         }
         if (!cancelled) setOpenPositions(combined);
@@ -552,7 +511,7 @@ export function PublicProfile() {
                       <div className="mt-4 pt-4 border-t border-white/10">
                         <p className="text-2xl sm:text-3xl font-bold">
                           {usdcBalanceLoading
-                            ? "—"
+                            ? "$0.00"
                             : `$${openPositions
                                 .reduce((s, p) => s + p.value, 0)
                                 .toLocaleString("en-US", {
@@ -575,7 +534,7 @@ export function PublicProfile() {
                             </p>
                             <p className="font-semibold">
                               {usdcBalanceLoading
-                                ? "—"
+                                ? "$0.00"
                                 : `$${usdcBalance.toLocaleString("en-US", {
                                     minimumFractionDigits: 2,
                                     maximumFractionDigits: 2,

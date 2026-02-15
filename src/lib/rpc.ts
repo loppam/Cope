@@ -1,5 +1,5 @@
-// Solana RPC utilities - client-side direct calls to Solana Tracker RPC (or fallback)
-// Env: VITE_SOLANATRACKER_RPC_API_KEY, VITE_SOLANATRACKER_API_KEY, or VITE_SOLANA_RPC_URL
+// Solana balance utilities - uses Birdeye wallet token list for SOL and USDC (no Solana Tracker RPC)
+import { getWalletSolAndUsdcBalances } from "./birdeye";
 
 const SOLANA_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -38,14 +38,12 @@ async function rpcRequest<T>(method: string, params: unknown[]): Promise<T> {
 }
 
 /**
- * Get SOL balance for a wallet address (client-side RPC).
- * Solana getBalance returns { context: { slot }, value: <lamports> }, not a raw number.
+ * Get SOL balance for a wallet address via Birdeye wallet token list.
  */
 export async function getSolBalance(walletAddress: string): Promise<number> {
   try {
-    const result = await rpcRequest<{ context?: unknown; value?: number }>("getBalance", [walletAddress]);
-    const lamports = typeof result?.value === "number" ? result.value : 0;
-    return Number.isFinite(lamports) ? lamports / 1e9 : 0;
+    const { solBalance } = await getWalletSolAndUsdcBalances(walletAddress);
+    return solBalance;
   } catch (error) {
     console.error("Error fetching SOL balance:", error);
     throw error;
@@ -53,30 +51,12 @@ export async function getSolBalance(walletAddress: string): Promise<number> {
 }
 
 /**
- * Get USDC balance for a Solana wallet (client-side RPC).
+ * Get USDC balance for a Solana wallet via Birdeye wallet token list.
  */
 export async function getUsdcBalance(walletAddress: string): Promise<number> {
   try {
-    const result = await rpcRequest<{ value: Array<{ account: { data: unknown } }> }>(
-      "getTokenAccountsByOwner",
-      [walletAddress, { mint: SOLANA_USDC_MINT }, { encoding: "jsonParsed" }]
-    );
-    let total = 0;
-    const value = result?.value ?? [];
-    for (const { account } of value) {
-      const parsed = (account?.data as { parsed?: { info?: { tokenAmount?: { uiAmount?: number; uiAmountString?: string; amount?: string; decimals?: number } } } })?.parsed?.info?.tokenAmount;
-      if (!parsed) continue;
-      let uiAmount = parsed.uiAmount ?? 0;
-      if (uiAmount === 0 && parsed.uiAmountString != null) {
-        const n = parseFloat(parsed.uiAmountString);
-        if (Number.isFinite(n)) uiAmount = n;
-      }
-      if (uiAmount === 0 && parsed.amount != null && parsed.decimals != null) {
-        uiAmount = Number(parsed.amount) / Math.pow(10, parsed.decimals);
-      }
-      total += uiAmount;
-    }
-    return total;
+    const { usdcBalance } = await getWalletSolAndUsdcBalances(walletAddress);
+    return usdcBalance;
   } catch (error) {
     console.error("Error fetching USDC balance:", error);
     throw error;

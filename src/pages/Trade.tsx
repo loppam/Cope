@@ -545,7 +545,12 @@ export function Trade() {
   };
 
   const handleBuy = async () => {
-    const isCrossChain = tradeChain !== "solana" && crossChainToken;
+    // Use Relay for SOL USDC -> Base/BNB; Jupiter for SOL USDC -> SOL/SPL
+    const outputIsEvm =
+      tradeChain === "base" ||
+      tradeChain === "bnb" ||
+      (token?.chain === "base" || token?.chain === "bnb");
+    const isCrossChain = outputIsEvm;
     if (!amount || !userProfile?.walletAddress || !user) {
       toast.error("Missing required information", {
         description: "Please connect your wallet and enter an amount",
@@ -558,7 +563,11 @@ export function Trade() {
       });
       return;
     }
-    if (isCrossChain && !crossChainToken) {
+    if (
+      isCrossChain &&
+      !crossChainToken &&
+      !(token && (token.chain === "base" || token.chain === "bnb"))
+    ) {
       toast.error("Select a token", {
         description: `Choose a token on ${tradeChain === "base" ? "Base" : "BNB"}`,
       });
@@ -590,7 +599,9 @@ export function Trade() {
     try {
       const tokenId = await user.getIdToken();
       const base = getApiBase();
-      const outputMint = isCrossChain ? crossChainToken!.address : token!.mint;
+      const outputMint = isCrossChain
+        ? (crossChainToken?.address ?? token!.mint)
+        : token!.mint;
       const amountRaw = Math.floor(amountNum * 1e6).toString();
 
       if (isCrossChain) {
@@ -722,7 +733,7 @@ export function Trade() {
             userWallet: evmAddress,
             recipient: userProfile.walletAddress,
             tradeType: "sell",
-            inputChainId: token.chainId ?? 792703809,
+            inputChainId: getChainId(token.chain === "bnb" ? "bnb" : "base"),
             inputChain: token.chain ?? "solana",
           }),
         });
@@ -838,7 +849,9 @@ export function Trade() {
             body.recipient = evmAddress ?? undefined;
           }
           if (isEvmSell) {
-            body.inputChainId = token?.chainId ?? (token?.chain === "base" ? 8453 : 56);
+            body.inputChainId = getChainId(
+              token?.chain === "bnb" ? "bnb" : "base",
+            );
             body.inputChain = token?.chain ?? "solana";
             body.recipient = userProfile.walletAddress;
           }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router";
 import { motion } from "motion/react";
 import { Button } from "@/components/Button";
@@ -28,8 +28,6 @@ import {
   getDocs,
   doc,
   getDoc,
-  setDoc,
-  serverTimestamp,
   Timestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -136,6 +134,7 @@ export function Home() {
         ]);
         if (cancelled) return;
 
+        // Same total as Profile: USDC (Solana + Base + BNB via evmVal) + SOL + EVM + SPL
         const solVal = (solBal ?? 0) * (solPrice ?? 0);
         const evmVal = evmBalanceUsd(evmData, nativePrices);
         const tokens = (positionsRes as { tokens?: Array<{ token: { mint: string; symbol?: string }; value?: number }> })?.tokens ?? [];
@@ -150,16 +149,37 @@ export function Home() {
 
         setTotalBalance(total);
 
-        const snapRef = doc(db, "balanceSnapshots", user!.uid);
-        const snap = await getDoc(snapRef).catch(() => null);
-        const data = snap?.data();
-        const prev = data?.prev ?? 0;
-        const prevAt = (data?.prevAt as Timestamp)?.toMillis?.() ?? 0;
         const now = Date.now();
-        const hoursAgo = (now - prevAt) / (60 * 60 * 1000);
+        const HOURS_MIN = 18;
+        const HOURS_MAX = 30;
 
+        // Prefer 24h from user doc (cron), fallback to balanceSnapshots
+        let prev = 0;
+        let prevAt = 0;
+        const profilePrev = userProfile?.balancePrev;
+        const profilePrevAt = userProfile?.balancePrevAt;
+        if (
+          profilePrev != null &&
+          (typeof profilePrev === "number" || typeof profilePrev === "string")
+        ) {
+          prev = typeof profilePrev === "number" ? profilePrev : parseFloat(profilePrev) || 0;
+          if (profilePrevAt != null) {
+            prevAt =
+              typeof profilePrevAt === "number"
+                ? profilePrevAt
+                : (profilePrevAt as Timestamp)?.toMillis?.() ?? 0;
+          }
+        }
+        if (prevAt === 0) {
+          const snapRef = doc(db, "balanceSnapshots", user!.uid);
+          const snap = await getDoc(snapRef).catch(() => null);
+          const data = snap?.data();
+          prev = data?.prev ?? 0;
+          prevAt = (data?.prevAt as Timestamp)?.toMillis?.() ?? 0;
+        }
+        const hoursAgo = prevAt > 0 ? (now - prevAt) / (60 * 60 * 1000) : 0;
         let balance24h: number | null = null;
-        if (prevAt > 0 && hoursAgo >= 18 && hoursAgo <= 30) {
+        if (prevAt > 0 && hoursAgo >= HOURS_MIN && hoursAgo <= HOURS_MAX) {
           balance24h = total - prev;
           setBalance24h(balance24h);
         } else {
@@ -169,23 +189,6 @@ export function Home() {
         if (!cancelled) {
           apiCache.set(cacheKey, { totalBalance: total, balance24h }, UI_CACHE_TTL_MS);
         }
-
-        const currentAt = (data?.currentAt as Timestamp)?.toMillis?.() ?? 0;
-        const shouldRotate = currentAt > 0 && now - currentAt >= 20 * 60 * 60 * 1000;
-
-        await setDoc(
-          snapRef,
-          {
-            ...(shouldRotate && {
-              prev: data?.current ?? total,
-              prevAt: data?.currentAt ?? serverTimestamp(),
-            }),
-            current: total,
-            currentAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true },
-        );
       } catch {
         if (!cancelled) setTotalBalance(null);
       } finally {
@@ -195,7 +198,7 @@ export function Home() {
     return () => {
       cancelled = true;
     };
-  }, [walletAddress, walletConnected, user]);
+  }, [walletAddress, walletConnected, user, userProfile]);
 
   useEffect(() => {
     const onRefresh = () => {
@@ -514,11 +517,9 @@ export function Home() {
           <div className="mb-5 flex items-start justify-between gap-4">
             <div className="min-w-0 flex-1">
               <p className="text-2xl sm:text-3xl font-bold tracking-tight text-white truncate">
-                {balanceLoading
-                  ? "—"
-                  : totalBalance != null
-                    ? `$${totalBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                    : "—"}
+                {balanceLoading || totalBalance == null
+                  ? "$0.00"
+                  : `$${totalBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </p>
               <p
                 className={`text-sm mt-0.5 ${
@@ -531,7 +532,7 @@ export function Home() {
               >
                 {balance24h != null
                   ? `${balance24h >= 0 ? "+" : ""}$${balance24h.toFixed(2)} 24h`
-                  : "— 24h"}
+                  : "+$0.00 24h"}
               </p>
             </div>
             <button
@@ -547,22 +548,22 @@ export function Home() {
         {/* Two primary CTAs – in place of Weekly Top Trades */}
         <div className="grid grid-cols-2 gap-3 mb-5">
           <button
-            onClick={() => navigate("/scanner")}
+            onClick={() => navigate("/cope/wallet")}
             data-tap-haptic
             className="tap-press flex flex-col items-center justify-center gap-2 p-4 min-h-[72px] rounded-2xl bg-gradient-to-br from-accent-primary/25 to-accent-primary/10 border border-accent-primary/30 hover:border-accent-primary/50 transition-colors text-left w-full"
           >
-            <ScanLine className="w-6 h-6 text-accent-primary flex-shrink-0" />
-            <span className="font-semibold text-white text-sm">COPE Scanner</span>
-            <span className="text-xs text-white/60">Find top traders</span>
+            <Search className="w-6 h-6 text-accent-primary flex-shrink-0" />
+            <span className="font-semibold text-white text-sm">Scan a Wallet</span>
+            <span className="text-xs text-white/60">Follow & copy</span>
           </button>
           <button
-            onClick={() => navigate("/cope/wallet")}
+            onClick={() => navigate("/scanner")}
             data-tap-haptic
             className="tap-press flex flex-col items-center justify-center gap-2 p-4 min-h-[72px] rounded-2xl bg-white/5 border border-white/10 hover:border-white/20 hover:bg-white/[0.07] transition-colors text-left w-full"
           >
-            <Search className="w-6 h-6 text-accent-purple flex-shrink-0" />
-            <span className="font-semibold text-white text-sm">Scan a Wallet</span>
-            <span className="text-xs text-white/60">Follow & copy</span>
+            <ScanLine className="w-6 h-6 text-accent-purple flex-shrink-0" />
+            <span className="font-semibold text-white text-sm">COPE Scanner</span>
+            <span className="text-xs text-white/60">Find top traders</span>
           </button>
         </div>
 

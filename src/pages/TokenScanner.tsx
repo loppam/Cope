@@ -603,7 +603,7 @@ export function TokenScanner() {
   const searchParams = new URLSearchParams(location.search);
   const tabParam = searchParams.get("tab");
   const [activeTab, setActiveTab] = useState<ScannerTab>(
-    tabParam === "discover" || initialState === "discover" ? "discover" : "token",
+    tabParam === "token" || initialState === "token" ? "token" : "discover",
   );
   const [tokenAddress, setTokenAddress] = useState("");
   const [loading, setLoading] = useState(false);
@@ -737,22 +737,38 @@ export function TokenScanner() {
       <h1 className="mb-4 text-xl font-bold text-white">Token Scanner</h1>
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ScannerTab)} className="w-full">
-        <TabsList className="w-full grid grid-cols-2 mb-4 bg-white/[0.06] border border-white/15 p-1.5 rounded-2xl min-w-0 min-h-[48px] overflow-visible shadow-inner">
-          <TabsTrigger
-            value="token"
-            className="data-[state=active]:bg-[#12d585]/15 data-[state=active]:text-[#12d585] data-[state=active]:border-[#12d585]/40 data-[state=active]:shadow-sm rounded-xl border border-transparent py-2.5 px-3 min-w-0 max-w-full text-xs sm:text-sm overflow-hidden justify-center gap-1.5 sm:gap-2 min-h-[44px] font-medium transition-all duration-200"
+        {/* Segmented control: Discover first, then Token — sliding pill indicator */}
+        <div className="relative w-full grid grid-cols-2 mb-6 rounded-2xl bg-white/[0.06] border border-white/15 p-1.5 min-h-[52px] overflow-hidden">
+          <motion.div
+            className="absolute inset-y-[6px] rounded-xl bg-[#12d585]/20 border border-[#12d585]/50 shadow-[0_0_20px_-4px_rgba(18,213,133,0.3)]"
+            style={{ width: "calc(50% - 3px)" }}
+            initial={false}
+            animate={{ left: activeTab === "discover" ? "6px" : "calc(50% + 3px)" }}
+            transition={{ type: "spring", stiffness: 400, damping: 30 }}
+          />
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "discover"}
+            onClick={() => setActiveTab("discover")}
+            data-tap-haptic
+            className="tap-press relative z-10 flex items-center justify-center gap-2 py-3 px-4 min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
           >
-            <Target className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
-            <span className="truncate">Token</span>
-          </TabsTrigger>
-          <TabsTrigger
-            value="discover"
-            className="data-[state=active]:bg-[#12d585]/15 data-[state=active]:text-[#12d585] data-[state=active]:border-[#12d585]/40 data-[state=active]:shadow-sm rounded-xl border border-transparent py-2.5 px-3 min-w-0 max-w-full text-xs sm:text-sm overflow-hidden justify-center gap-1.5 sm:gap-2 min-h-[44px] font-medium text-white/70 transition-all duration-200"
+            <Users className={`w-4 h-4 flex-shrink-0 ${activeTab === "discover" ? "text-[#12d585]" : "text-white/50"}`} />
+            <span className={activeTab === "discover" ? "text-[#12d585]" : "text-white/60"}>Discover</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "token"}
+            onClick={() => setActiveTab("token")}
+            data-tap-haptic
+            className="tap-press relative z-10 flex items-center justify-center gap-2 py-3 px-4 min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
           >
-            <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
-            <span className="truncate">Discover</span>
-          </TabsTrigger>
-        </TabsList>
+            <Target className={`w-4 h-4 flex-shrink-0 ${activeTab === "token" ? "text-[#12d585]" : "text-white/50"}`} />
+            <span className={activeTab === "token" ? "text-[#12d585]" : "text-white/60"}>Token</span>
+          </button>
+        </div>
 
         <TabsContent value="token" className="mt-0">
       <div className="mb-6 rounded-xl border border-white/10 bg-white/5 p-2">

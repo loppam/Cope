@@ -39,11 +39,12 @@ async function rpcRequest<T>(method: string, params: unknown[]): Promise<T> {
 
 /**
  * Get SOL balance for a wallet address (client-side RPC).
+ * Solana getBalance returns { context: { slot }, value: <lamports> }, not a raw number.
  */
 export async function getSolBalance(walletAddress: string): Promise<number> {
   try {
-    const result = await rpcRequest<string | number>("getBalance", [walletAddress]);
-    const lamports = typeof result === "number" ? result : parseInt(String(result), 10);
+    const result = await rpcRequest<{ context?: unknown; value?: number }>("getBalance", [walletAddress]);
+    const lamports = typeof result?.value === "number" ? result.value : 0;
     return Number.isFinite(lamports) ? lamports / 1e9 : 0;
   } catch (error) {
     console.error("Error fetching SOL balance:", error);

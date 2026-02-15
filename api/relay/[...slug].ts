@@ -17,11 +17,12 @@ import {
 import {
   HDNodeWallet,
   JsonRpcProvider,
-  Contract,
   Wallet,
   type TransactionRequest,
 } from "ethers";
 import bs58 from "bs58";
+import { decryptWalletCredentials } from "../lib/decrypt";
+import { getEvmBalances, getEvmTokenPositions } from "../lib/evm-balance";
 
 // --- constants ---
 const RELAY_API_BASE = process.env.RELAY_API_BASE || "https://api.relay.link";
@@ -40,13 +41,7 @@ const DESTINATION_USDC: Record<string, string> = {
   bnb: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
   solana: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
 };
-const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
-const BNB_USDC = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d";
 const ETH_DERIVATION_PATH = "m/44'/60'/0'/0/0";
-const ERC20_ABI = [
-  "function balanceOf(address) view returns (uint256)",
-  "function decimals() view returns (uint8)",
-];
 const RELAY_CHAIN_IDS: Record<number, string> = {
   792703809: "solana",
   8453: "base",
@@ -156,63 +151,6 @@ function getAdminDb() {
   return getFirestore();
 }
 
-async function deriveKey(
-  password: string,
-  salt: Uint8Array,
-): Promise<CryptoKey> {
-  const encoder = new TextEncoder();
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(password),
-    { name: "PBKDF2" },
-    false,
-    ["deriveBits", "deriveKey"],
-  );
-  return crypto.subtle.deriveKey(
-    {
-      name: "PBKDF2",
-      salt: new Uint8Array(salt),
-      iterations: 100000,
-      hash: "SHA-256",
-    },
-    keyMaterial,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"],
-  );
-}
-
-async function decrypt(
-  encryptedData: string,
-  password: string,
-): Promise<string> {
-  const combined = new Uint8Array(Buffer.from(encryptedData, "base64"));
-  const salt = combined.slice(0, 16);
-  const iv = combined.slice(16, 28);
-  const encrypted = combined.slice(28);
-  const key = await deriveKey(password, salt);
-  const decrypted = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv },
-    key,
-    encrypted,
-  );
-  return new TextDecoder().decode(decrypted);
-}
-
-async function decryptWalletCredentials(
-  userId: string,
-  encryptedMnemonic: string | undefined,
-  encryptedSecretKey: string,
-  encryptionSecret: string,
-): Promise<{ mnemonic?: string; secretKey: Uint8Array }> {
-  const key = `${userId}:${encryptionSecret}`;
-  const secretKeyStr = await decrypt(encryptedSecretKey, key);
-  const secretKey = new Uint8Array(JSON.parse(secretKeyStr) as number[]);
-  let mnemonic: string | undefined;
-  if (encryptedMnemonic) mnemonic = await decrypt(encryptedMnemonic, key);
-  return { mnemonic, secretKey };
-}
-
 function getRpcUrl(): string {
   if (process.env.SOLANA_RPC_URL) return process.env.SOLANA_RPC_URL;
   const helius = process.env.HELIUS_API_KEY;
@@ -297,138 +235,6 @@ async function sendNativeFromEvmFunder(
     console.warn("[sendNativeFromEvmFunder]", e);
     return null;
   }
-}
-
-const NATIVE_ETH_PLACEHOLDER = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
-
-async function getEvmBalances(address: string): Promise<{
-  base: { usdc: number; native: number };
-  bnb: { usdc: number; native: number };
-}> {
-  const result = { base: { usdc: 0, native: 0 }, bnb: { usdc: 0, native: 0 } };
-  try {
-    const baseProvider = new JsonRpcProvider(
-      process.env.BASE_RPC_URL || "https://mainnet.base.org",
-    );
-    const [baseNative, baseUsdcRaw] = await Promise.all([
-      baseProvider.getBalance(address),
-      new Contract(BASE_USDC, ERC20_ABI, baseProvider).balanceOf(address),
-    ]);
-    result.base.native = Number(baseNative) / 1e18;
-    result.base.usdc = Number(baseUsdcRaw) / 1e6;
-  } catch (e) {
-    console.warn("Base balance fetch failed:", e);
-  }
-  try {
-    const bnbProvider = new JsonRpcProvider(
-      process.env.BNB_RPC_URL || "https://bsc-dataseed.binance.org",
-    );
-    const [bnbNative, bnbUsdcRaw] = await Promise.all([
-      bnbProvider.getBalance(address),
-      new Contract(BNB_USDC, ERC20_ABI, bnbProvider).balanceOf(address),
-    ]);
-    result.bnb.native = Number(bnbNative) / 1e18;
-    result.bnb.usdc = Number(bnbUsdcRaw) / 1e6;
-  } catch (e) {
-    console.warn("BNB balance fetch failed:", e);
-  }
-  return result;
-}
-
-/** Fetch all ERC-20 + native token balances from Moralis for Base and BNB. */
-async function getEvmTokenPositions(
-  address: string
-): Promise<
-  Array<{
-    mint: string;
-    symbol: string;
-    name: string;
-    amount: number;
-    value: number;
-    chain: "base" | "bnb";
-    image?: string;
-    decimals: number;
-  }>
-> {
-  const apiKey =
-    process.env.MORALIS_API_KEY;
-  if (!apiKey) return [];
-
-  const tokens: Array<{
-    mint: string;
-    symbol: string;
-    name: string;
-    amount: number;
-    value: number;
-    chain: "base" | "bnb";
-    image?: string;
-    decimals: number;
-  }> = [];
-
-  const chains: Array<{ chain: "base" | "bnb"; param: string }> = [
-    { chain: "base", param: "base" },
-    { chain: "bnb", param: "bsc" },
-  ];
-
-  await Promise.all(
-    chains.map(async ({ chain, param }) => {
-      try {
-        const url = `https://deep-index.moralis.io/api/v2.2/wallets/${address}/tokens?chain=${param}&limit=100&exclude_spam=true`;
-        const res = await fetch(url, {
-          headers: {
-            accept: "application/json",
-            "X-API-Key": apiKey,
-          },
-        });
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          result?: Array<{
-            token_address?: string;
-            name?: string;
-            symbol?: string;
-            logo?: string;
-            decimals?: number;
-            balance?: string;
-            balance_formatted?: string;
-            usd_value?: number;
-            native_token?: boolean;
-          }>;
-        };
-        const list = Array.isArray(data?.result) ? data.result : [];
-        for (const t of list) {
-          const bal = parseFloat(t.balance_formatted ?? t.balance ?? "0");
-          const value = t.usd_value ?? 0;
-          if (bal <= 0 && value <= 0) continue;
-
-          const addr = (t.token_address ?? "").toLowerCase();
-          const isNative =
-            t.native_token || !addr || addr === NATIVE_ETH_PLACEHOLDER;
-          const mint = isNative
-            ? chain === "base"
-              ? "base-eth"
-              : "bnb-bnb"
-            : addr;
-
-          tokens.push({
-            mint,
-            symbol: (
-              t.symbol ?? (chain === "base" ? "ETH" : "BNB")
-            ).toUpperCase(),
-            name: t.name ?? (chain === "base" ? "Ethereum (Base)" : "BNB"),
-            amount: bal,
-            value,
-            chain,
-            image: t.logo,
-            decimals: typeof t.decimals === "number" ? t.decimals : 18,
-          });
-        }
-      } catch (e) {
-        console.warn(`Moralis token fetch failed for ${chain}:`, e);
-      }
-    })
-  );
-
-  return tokens;
 }
 
 async function depositQuoteHandler(req: VercelRequest, res: VercelResponse) {

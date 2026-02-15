@@ -470,20 +470,15 @@ export function Trade() {
     await fetchTokenDetails(address, chain, token);
   };
 
-  const handleCopyShareLink = async () => {
+  const handleCopyAddress = async () => {
     if (!mint) return;
-    const params = new URLSearchParams({ mint });
-    if (effectiveChain === "base" || effectiveChain === "bnb") {
-      params.set("chain", effectiveChain);
-    }
-    const url = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
     try {
-      await navigator.clipboard.writeText(url);
-      toast.success("Link copied", {
-        description: "Share this link to open this token in Trade",
+      await navigator.clipboard.writeText(mint);
+      toast.success("Address copied", {
+        description: "Token address copied to clipboard",
       });
     } catch {
-      toast.error("Could not copy link");
+      toast.error("Could not copy address");
     }
   };
 
@@ -1014,13 +1009,13 @@ export function Trade() {
                         {mint && (
                           <button
                             type="button"
-                            onClick={handleCopyShareLink}
+                            onClick={handleCopyAddress}
                             data-tap-haptic
                             className="flex items-center justify-center gap-2 px-3 py-2 sm:px-4 rounded-lg text-sm font-medium bg-white/10 hover:bg-white/15 text-white transition-all touch-manipulation min-h-[44px] sm:min-h-0"
-                            title="Copy share link"
+                            title="Copy address"
                           >
                             <Copy className="w-4 h-4" />
-                            <span className="hidden sm:inline">Copy link</span>
+                            <span className="hidden sm:inline">Copy address</span>
                           </button>
                         )}
                         <button

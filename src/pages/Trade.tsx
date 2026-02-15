@@ -782,7 +782,8 @@ export function Trade() {
           requestId: data?.steps?.[0]?.requestId || "",
           transaction: "",
           slippage,
-        });
+          inputAmountRaw: currencyIn.amount || amountRaw,
+        } as SwapQuote);
       } else {
         const quote = await getJupiterSwapQuote(
           token.mint,
@@ -853,7 +854,15 @@ export function Trade() {
       } else {
         // Relay flow: refresh quote then execute-step loop
         let quoteToExecute = relayQuote;
-        const amountRaw = String(swapQuote.inputAmount || "");
+        const q = swapQuote as { inputAmountRaw?: string };
+        const amountRaw =
+          q.inputAmountRaw ??
+          (swapDirection === "sell" &&
+          token &&
+          swapQuote.inputAmountUi != null &&
+          swapQuote.inputAmountUi > 0
+            ? toRawAmountString(swapQuote.inputAmountUi, token.decimals)
+            : String(swapQuote.inputAmount ?? ""));
         const isEvmSell =
           swapDirection === "sell" &&
           (token?.chain === "base" || token?.chain === "bnb");

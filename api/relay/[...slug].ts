@@ -245,6 +245,39 @@ function getAppFees(): { recipient: string; fee: string }[] {
   return [{ recipient, fee: APP_FEE_BPS }];
 }
 
+/**
+ * Convert amount to plain integer string for Relay API (^[0-9]+$).
+ * Avoids scientific notation for large values.
+ */
+function toRelayAmountString(value: string | number): string {
+  if (typeof value === "string") {
+    const t = value.trim();
+    if (!t) throw new Error("Missing amount");
+    if (/e/i.test(t))
+      throw new Error("Amount must not use scientific notation");
+    if (!/^[0-9]+$/.test(t))
+      throw new Error("Amount must be integer string");
+    return t;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value < 0)
+      throw new Error("Invalid amount");
+    if (value >= Number.MAX_SAFE_INTEGER)
+      throw new Error("Amount too large; send as integer string");
+    return Math.floor(value).toString();
+  }
+  throw new Error("Invalid amount type");
+}
+
+/** USDC amount (UI) to raw units (6 decimals) as integer string. Safe for large values. */
+function toUsdcRawString(amountUsd: number): string {
+  if (!Number.isFinite(amountUsd) || amountUsd < 0)
+    throw new Error("Invalid amount");
+  const [whole = "0", frac = ""] = amountUsd.toFixed(6).split(".");
+  const fracPadded = frac.padEnd(6, "0").slice(0, 6);
+  return (BigInt(whole) * BigInt(1e6) + BigInt(fracPadded || "0")).toString();
+}
+
 const ALCHEMY_UPDATE_WEBHOOK_URL =
   "https://dashboard.alchemy.com/api/update-webhook-addresses";
 
@@ -449,7 +482,7 @@ async function depositQuoteHandler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: "Invalid recipientSolAddress" });
     const originChainId =
       CHAIN_IDS[network] ?? (network === "base" ? 8453 : 56);
-    const amountRaw = Math.floor(amountUsd * 1e6).toString();
+    const amountRaw = toUsdcRawString(amountUsd);
     const apiKey = process.env.RELAY_API_KEY;
     const quoteRes = await fetch(`${RELAY_API_BASE}/quote/v2`, {
       method: "POST",
@@ -544,7 +577,19 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
     };
     const inputMint = (body?.inputMint || "").trim();
     const outputMint = (body?.outputMint || "").trim();
-    const amount = body?.amount ?? "";
+    let amount: string;
+    try {
+      amount = toRelayAmountString(body?.amount ?? "");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Invalid amount";
+      console.warn("[swap-quote] invalid amount", {
+        userId,
+        sample: String(body?.amount).slice(0, 40),
+      });
+      return res.status(400).json({
+        error: msg,
+      });
+    }
     const slippageBps =
       typeof body?.slippageBps === "number" ? body.slippageBps : 100;
     const userWallet = (body?.userWallet || "").trim();
@@ -698,7 +743,12 @@ async function withdrawQuoteHandler(req: VercelRequest, res: VercelResponse) {
       destinationNetwork === "solana"
         ? SOLANA_USDC_MINT
         : DESTINATION_USDC[destinationNetwork] || DESTINATION_USDC.base;
-    const amountRaw = Math.floor(amount * 1e6).toString();
+    let amountRaw: string;
+    try {
+      amountRaw = toUsdcRawString(amount);
+    } catch {
+      return res.status(400).json({ error: "Invalid amount" });
+    }
     const quoteRes = await fetch(`${RELAY_API_BASE}/quote/v2`, {
       method: "POST",
       headers: {
@@ -2101,7 +2151,7 @@ async function bridgeFromEvmQuoteHandler(
     };
     const evmAddress = (body?.evmAddress ?? "").trim();
     const network = (body?.network ?? "").toLowerCase();
-    const amountRaw = body?.amountRaw ?? "";
+    const amountRawParam = body?.amountRaw ?? "";
     const recipientSolAddress = (body?.recipientSolAddress ?? "").trim();
     if (!evmAddress || evmAddress.length < 40)
       return res.status(400).json({ error: "Invalid evmAddress" });
@@ -2109,7 +2159,15 @@ async function bridgeFromEvmQuoteHandler(
       return res
         .status(400)
         .json({ error: "Invalid network; use base or bnb" });
-    if (!amountRaw || BigInt(amountRaw) <= 0n)
+    let amountRaw: string;
+    try {
+      amountRaw = toRelayAmountString(
+        typeof amountRawParam === "number" ? amountRawParam : String(amountRawParam ?? ""),
+      );
+    } catch {
+      return res.status(400).json({ error: "Invalid amountRaw (must be integer string)" });
+    }
+    if (BigInt(amountRaw) <= 0n)
       return res.status(400).json({ error: "Invalid amountRaw" });
     if (!recipientSolAddress || recipientSolAddress.length < 32)
       return res.status(400).json({ error: "Invalid recipientSolAddress" });

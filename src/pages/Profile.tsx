@@ -57,7 +57,7 @@ import { getWalletProfitability } from "@/lib/moralis";
 import { getIntentStatus } from "@/lib/relay";
 import { toast } from "sonner";
 import type { WatchedWallet } from "@/lib/auth";
-import { SOLANA_USDC_MINT } from "@/lib/constants";
+import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
 import { apiCache, UI_CACHE_TTL_MS } from "@/lib/cache";
 import { Input } from "@/components/Input";
 import { Loader2 } from "lucide-react";
@@ -73,6 +73,18 @@ interface TokenPosition {
   pnl?: number;
   pnlPercent?: number;
   chain?: "solana" | "base" | "bnb";
+}
+
+const SOL_RESERVE = 0.005;
+const BASE_ETH_RESERVE = 0.0005;
+const BNB_RESERVE = 0.001;
+
+function sellableAmount(pos: { mint: string; amount: number }): number {
+  if (pos.mint === SOL_MINT || pos.mint === "So11111111111111111111111111111111111111111")
+    return Math.max(0, pos.amount - SOL_RESERVE);
+  if (pos.mint === "base-eth") return Math.max(0, pos.amount - BASE_ETH_RESERVE);
+  if (pos.mint === "bnb-bnb") return Math.max(0, pos.amount - BNB_RESERVE);
+  return pos.amount;
 }
 
 export function Profile() {
@@ -281,7 +293,7 @@ export function Profile() {
               chain: "base" as const,
               image: undefined as string | undefined,
             };
-            if (val > 0) combined.push(pos);
+            if (val > 0 && sellableAmount(pos) > 0) combined.push(pos);
             else closed.push(pos);
           }
           if (evmData.bnb?.native > 0) {
@@ -299,7 +311,7 @@ export function Profile() {
               chain: "bnb" as const,
               image: undefined as string | undefined,
             };
-            if (val > 0) combined.push(pos);
+            if (val > 0 && sellableAmount(pos) > 0) combined.push(pos);
             else closed.push(pos);
           }
           const BASE_USDC_ADDR = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
@@ -330,7 +342,7 @@ export function Profile() {
           }
         }
 
-        // 5) SPL tokens from Birdeye portfolio (includes SOL; exclude USDC) — open when value > 0; else closed
+        // 5) SPL tokens from Birdeye portfolio (includes SOL; exclude USDC) — open when value > 0 and sellable > 0 for native; else closed
         for (const t of portfolio.positions) {
           const mint = t.mint;
           const symbol = (t.symbol || "").toUpperCase();
@@ -345,7 +357,8 @@ export function Profile() {
             pnl: t.pnl,
             pnlPercent: t.pnlPercent,
           };
-          if (t.amount > 0 && t.value > 0) combined.push(pos);
+          const hasSellable = sellableAmount(pos) > 0;
+          if (t.amount > 0 && t.value > 0 && hasSellable) combined.push(pos);
           else closed.push(pos);
         }
 

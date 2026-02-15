@@ -667,7 +667,14 @@ export function Trade() {
 
     setSwapping(true);
     try {
-      const amountRaw = toRawAmountString(amountNum, token.decimals);
+      // Always cap to sellableBalance for native tokens (SOL/ETH/BNB) so we keep gas reserve
+      const amountToSwap =
+        token.mint === SOL_MINT ||
+        token.mint === "base-eth" ||
+        token.mint === "bnb-bnb"
+          ? Math.min(amountNum, sellableBalance)
+          : amountNum;
+      const amountRaw = toRawAmountString(amountToSwap, token.decimals);
       const tokenId = await user.getIdToken();
       const base = getApiBase();
       const res = await fetch(`${base}/api/relay/swap-quote`, {

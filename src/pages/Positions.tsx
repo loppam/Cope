@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router";
 import { Card } from "@/components/Card";
 import {
@@ -350,6 +350,11 @@ export function Positions() {
     if (walletAddress) await fetchPositions(true);
   };
 
+  const displayedPositions = useMemo(
+    () => positions.filter((p) => sellableAmount(p) > 0),
+    [positions],
+  );
+
   return (
     <PullToRefresh onRefresh={handlePullRefresh}>
     <div className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8">
@@ -427,10 +432,10 @@ export function Positions() {
 
       {/* Positions List */}
       {/* Note: Token values from API are already in USD - displayed directly */}
-      {/* SOL is shown but without detailed P&L info (to avoid double-counting with summary) */}
+      {/* SOL/ETH/BNB hidden when sellableAmount <= 0 (nothing to sell, all reserved for gas) */}
       <div className="space-y-2 sm:space-y-3">
-        {positions.length > 0 ? (
-          positions.map((position) => {
+        {displayedPositions.length > 0 ? (
+          displayedPositions.map((position) => {
             const isSOL =
               position.mint === SOL_MINT ||
               position.mint === "So11111111111111111111111111111111111111111";

@@ -25,7 +25,7 @@ import { getUsdcBalance } from "@/lib/rpc";
 import { getWalletPortfolioWithPnL } from "@/lib/birdeye";
 import { fetchNativePrices } from "@/lib/coingecko";
 import { getWalletProfitability } from "@/lib/moralis";
-import { SOLANA_USDC_MINT } from "@/lib/constants";
+import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
 import { DocumentHead } from "@/components/DocumentHead";
 
 interface TokenPosition {
@@ -38,6 +38,18 @@ interface TokenPosition {
   pnl?: number;
   pnlPercent?: number;
   chain?: "solana" | "base" | "bnb";
+}
+
+const SOL_RESERVE = 0.005;
+const BASE_ETH_RESERVE = 0.0005;
+const BNB_RESERVE = 0.001;
+
+function sellableAmount(pos: { mint: string; amount: number }): number {
+  if (pos.mint === SOL_MINT || pos.mint === "So11111111111111111111111111111111111111111")
+    return Math.max(0, pos.amount - SOL_RESERVE);
+  if (pos.mint === "base-eth") return Math.max(0, pos.amount - BASE_ETH_RESERVE);
+  if (pos.mint === "bnb-bnb") return Math.max(0, pos.amount - BNB_RESERVE);
+  return pos.amount;
 }
 
 export function PublicProfile() {
@@ -179,31 +191,49 @@ export function PublicProfile() {
           const addedMints = new Set<string>();
           if (baseBal.native > 0) {
             addedMints.add("base-eth");
-            const evmPnl = evmPnlByMint.get("base-eth");
-            combined.push({
+            const pos = {
               mint: "base-eth",
-              symbol: "ETH",
-              name: "Ethereum (Base)",
               amount: baseBal.native,
               value: baseBal.native * nativePrices.eth,
-              pnl: evmPnl?.pnl,
-              pnlPercent: evmPnl?.pnlPercent,
-              chain: "base",
-            });
+              pnl: evmPnlByMint.get("base-eth")?.pnl,
+              pnlPercent: evmPnlByMint.get("base-eth")?.pnlPercent,
+              chain: "base" as const,
+            };
+            if (sellableAmount(pos) > 0) {
+              combined.push({
+                mint: pos.mint,
+                symbol: "ETH",
+                name: "Ethereum (Base)",
+                amount: pos.amount,
+                value: pos.value,
+                pnl: pos.pnl,
+                pnlPercent: pos.pnlPercent,
+                chain: pos.chain,
+              });
+            }
           }
           if (bnbBal.native > 0) {
             addedMints.add("bnb-bnb");
-            const evmPnl = evmPnlByMint.get("bnb-bnb");
-            combined.push({
+            const pos = {
               mint: "bnb-bnb",
-              symbol: "BNB",
-              name: "BNB",
               amount: bnbBal.native,
               value: bnbBal.native * nativePrices.bnb,
-              pnl: evmPnl?.pnl,
-              pnlPercent: evmPnl?.pnlPercent,
-              chain: "bnb",
-            });
+              pnl: evmPnlByMint.get("bnb-bnb")?.pnl,
+              pnlPercent: evmPnlByMint.get("bnb-bnb")?.pnlPercent,
+              chain: "bnb" as const,
+            };
+            if (sellableAmount(pos) > 0) {
+              combined.push({
+                mint: pos.mint,
+                symbol: "BNB",
+                name: "BNB",
+                amount: pos.amount,
+                value: pos.value,
+                pnl: pos.pnl,
+                pnlPercent: pos.pnlPercent,
+                chain: pos.chain,
+              });
+            }
           }
           const BASE_USDC_ADDR = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
           const BNB_USDC_ADDR = "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d";
@@ -232,10 +262,12 @@ export function PublicProfile() {
           }
         }
 
-        // 4) SPL tokens from Birdeye portfolio (exclude USDC)
+        // 4) SPL tokens from Birdeye portfolio (exclude USDC; hide SOL when sellable <= 0)
         for (const t of portfolio.positions) {
           if (t.mint === SOLANA_USDC_MINT) continue;
           if (t.amount <= 0 || t.value <= 0) continue;
+          const pos = { mint: t.mint, amount: t.amount };
+          if (sellableAmount(pos) <= 0) continue;
           combined.push({
             mint: t.mint,
             symbol: t.symbol || t.mint.slice(0, 8),

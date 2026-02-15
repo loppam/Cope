@@ -1314,6 +1314,8 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       logs: logs ?? null,
     });
 
+    // Jupiter program 0x1788 (6024) = InsufficientFunds (swap amount, fees, or rent)
+    const isJupiterInsufficientFunds = /0x1788|6024/i.test(errMsg);
     const isEncodingOverrun = /encoding overruns Uint8Array/i.test(errMsg);
     const isInvalidInstructionData = /InvalidInstructionData|0x3e7f/i.test(
       errMsg,
@@ -1402,8 +1404,16 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       (Array.isArray(logs) &&
         logs.some((l) => /insufficient lamports|need \d+/.test(String(l))));
 
+    // Also retry on Jupiter 0x1788 (InsufficientFunds) - may be SOL for fees
+    const shouldRetryWithFunder =
+      (isInsufficientSol || isJupiterInsufficientFunds) &&
+      getFunderKeypair() &&
+      userId &&
+      transaction &&
+      connection;
+
     // Backend retry loop: fund (×2), wait 3s, retry send until success or max attempts
-    if (isInsufficientSol && getFunderKeypair() && userId && transaction && connection) {
+    if (shouldRetryWithFunder && userId && transaction && connection) {
       const db = getAdminDb();
       const snap = await db.collection("users").doc(userId).get();
       const walletAddress = snap.data()?.walletAddress as string | undefined;
@@ -1466,9 +1476,9 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
           const retryLogs = (retryErr as Error & { logs?: string[] }).logs;
           const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
           const stillInsufficient =
-            /insufficient lamports|Transfer: insufficient/i.test(retryMsg) ||
+            /insufficient lamports|Transfer: insufficient|0x1788|6024/i.test(retryMsg) ||
             (Array.isArray(retryLogs) &&
-              retryLogs.some((l) => /insufficient lamports|need \d+/.test(String(l))));
+              retryLogs.some((l) => /insufficient lamports|need \d+|0x1788/.test(String(l))));
           if (!stillInsufficient) {
             console.warn("[execute-step] retry failed with non-SOL error", retryMsg);
             break;
@@ -1480,7 +1490,9 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
 
     const userMessage = isEncodingOverrun
       ? "Transaction encoding error. Try again with different slippage or amount."
-      : "Transaction failed. Please try again.";
+      : isJupiterInsufficientFunds
+        ? "Insufficient funds for swap and fees. Ensure you have enough of the input token and SOL for transaction fees."
+        : "Transaction failed. Please try again.";
     return res.status(500).json({
       error: userMessage,
       signature: "",

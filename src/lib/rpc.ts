@@ -1,17 +1,24 @@
 // Solana RPC utilities - all calls proxied through /api/rpc so API keys stay server-side
 import { getApiBaseAbsolute } from "./utils";
 
+const RPC_RETRY_MAX = 4;
+const RPC_RETRY_DELAYS_MS = [2000, 4000, 6000, 8000];
+
 async function rpcFetch<T>(action: string, address: string): Promise<T> {
   const base = getApiBaseAbsolute();
   const path = `/api/rpc?action=${encodeURIComponent(action)}&address=${encodeURIComponent(address)}`;
   const url = base ? `${base}${path}` : path;
-  const res = await fetch(url);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
+  for (let attempt = 0; attempt <= RPC_RETRY_MAX; attempt++) {
+    const res = await fetch(url);
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) return data as T;
     const msg = (data as { error?: string }).error ?? `RPC error: ${res.status}`;
-    throw new Error(msg);
+    const err = new Error(msg);
+    const isRetryable = res.status === 429 || res.status === 502;
+    if (!isRetryable || attempt === RPC_RETRY_MAX) throw err;
+    await new Promise((r) => setTimeout(r, RPC_RETRY_DELAYS_MS[attempt]));
   }
-  return data as T;
+  throw new Error("RPC request failed");
 }
 
 /**

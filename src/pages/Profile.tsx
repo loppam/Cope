@@ -192,10 +192,11 @@ export function Profile() {
     (async () => {
       try {
         // Phase 1: positions + balances (Solana Tracker throttle applies to getWalletPositions)
-        const [positionsRes, solBalance, solPrice, nativePrices, evmData] = await Promise.all([
+        const [positionsRes, solBalance, solPrice, solanaUsdc, nativePrices, evmData] = await Promise.all([
           getWalletPositions(walletAddress, true).catch(() => ({ total: 0, tokens: [], totalSol: 0 })),
           getSolBalance(walletAddress).catch(() => 0),
           getSolPrice().catch(() => 0),
+          getUsdcBalance(walletAddress).catch(() => 0),
           fetchNativePrices(),
           user
             ? user.getIdToken().then((token) =>
@@ -239,50 +240,58 @@ export function Profile() {
 
         const combined: TokenPosition[] = [];
         const SOLANA_LOGO = "https://assets.coingecko.com/coins/images/4128/small/solana.png";
-        if (solBalance > 0 && solPrice > 0) {
+
+        // 1) USDC first: Solana + Base + BNB combined (one row)
+        const baseUsdc = evmData?.base?.usdc ?? 0;
+        const bnbUsdc = evmData?.bnb?.usdc ?? 0;
+        const totalUsdc = (Number.isFinite(solanaUsdc) ? solanaUsdc : 0) + baseUsdc + bnbUsdc;
+        if (totalUsdc > 0) {
+          combined.push({
+            mint: SOLANA_USDC_MINT,
+            symbol: "USDC",
+            name: "USDC",
+            image: undefined,
+            amount: totalUsdc,
+            value: totalUsdc,
+          });
+        }
+        setUsdcBalance(totalUsdc);
+
+        // 2) SOL (show whenever balance > 0; value from price or 0)
+        if (solBalance > 0) {
+          const solValue = solPrice > 0 ? solBalance * solPrice : 0;
           combined.push({
             mint: SOL_MINT,
             symbol: "SOL",
             name: "Solana",
             image: SOLANA_LOGO,
             amount: solBalance,
-            value: solBalance * solPrice,
+            value: solValue,
           });
         }
+
+        // 4) Other EVM tokens (ETH, BNB, then rest) — only when amount > 0 and value > 0
         if (evmData?.evmAddress) {
           if (Array.isArray(evmData.tokens) && evmData.tokens.length > 0) {
             for (const t of evmData.tokens) {
               const amount = t.amount ?? 0;
-              if (amount > 0 && (t.value ?? 0) > 0) {
-                const evmPnl = evmPnlByMint.get(t.mint);
-                combined.push({
-                  mint: t.mint,
-                  symbol: t.symbol ?? "???",
-                  name: t.name ?? "Unknown Token",
-                  image: t.image,
-                  amount: t.amount ?? 0,
-                  value: t.value ?? 0,
-                  pnl: evmPnl?.pnl,
-                  pnlPercent: evmPnl?.pnlPercent,
-                  chain: t.chain ?? "base",
-                });
-              }
-            }
-          } else {
-            if (evmData.base?.usdc > 0) {
-              const evmPnl = evmPnlByMint.get("base-usdc");
+              const value = t.value ?? 0;
+              if (amount <= 0 || value <= 0) continue;
+              const evmPnl = evmPnlByMint.get(t.mint);
               combined.push({
-                mint: "base-usdc",
-                symbol: "USDC",
-                name: "USD Coin (Base)",
-                amount: evmData.base.usdc,
-                value: evmData.base.usdc,
+                mint: t.mint,
+                symbol: t.symbol ?? "???",
+                name: t.name ?? "Unknown Token",
+                image: t.image,
+                amount,
+                value,
                 pnl: evmPnl?.pnl,
                 pnlPercent: evmPnl?.pnlPercent,
-                chain: "base",
+                chain: t.chain ?? "base",
               });
             }
-            if (evmData.base?.native >= 0.0007) {
+          } else {
+            if (evmData.base?.native > 0) {
               const evmPnl = evmPnlByMint.get("base-eth");
               combined.push({
                 mint: "base-eth",
@@ -295,20 +304,7 @@ export function Profile() {
                 chain: "base",
               });
             }
-            if (evmData.bnb?.usdc > 0) {
-              const evmPnl = evmPnlByMint.get("bnb-usdc");
-              combined.push({
-                mint: "bnb-usdc",
-                symbol: "USDC",
-                name: "USD Coin (BNB)",
-                amount: evmData.bnb.usdc,
-                value: evmData.bnb.usdc,
-                pnl: evmPnl?.pnl,
-                pnlPercent: evmPnl?.pnlPercent,
-                chain: "bnb",
-              });
-            }
-            if (evmData.bnb?.native >= 0.0012) {
+            if (evmData.bnb?.native > 0) {
               const evmPnl = evmPnlByMint.get("bnb-bnb");
               combined.push({
                 mint: "bnb-bnb",
@@ -323,14 +319,17 @@ export function Profile() {
             }
           }
         }
+
+        // 5) SPL tokens (exclude SOL/USDC already added) — only when balance > 0 and value > 0
         const pnlByMint = pnlRes?.tokens ?? {};
         for (const t of positionsRes.tokens) {
           const mint = t.token.mint;
           const symbol = (t.token.symbol || "").toUpperCase();
           if (mint === SOL_MINT || mint === SOLANA_USDC_MINT) continue;
           if (symbol === "SOL") continue;
+          const balance = t.balance ?? 0;
           const value = t.value || 0;
-          if (value <= 0) continue;
+          if (balance <= 0 || value <= 0) continue;
           const p = pnlByMint[mint];
           const pnl = p?.total ?? 0;
           const totalInvested = p?.total_invested ?? 0;
@@ -343,12 +342,13 @@ export function Profile() {
             symbol: t.token.symbol || mint.slice(0, 8),
             name: t.token.name || "Unknown",
             image: t.token.image,
-            amount: t.balance ?? 0,
+            amount: balance,
             value,
             pnl,
             pnlPercent,
           });
         }
+
         setOpenPositions(combined);
         setClosedPositions([]);
         if (!cancelled) {
@@ -626,13 +626,9 @@ export function Profile() {
     },
   };
 
-  // Client-side filter: hide SOL if < 0.01, hide all USDC (cash is separate)
+  // Only show positions with amount > 0 and value >= 0 (no ghost/zero balances)
   const displayedOpenPositions = useMemo(() => {
-    return openPositions.filter((p) => {
-      if (p.mint === SOL_MINT) return p.amount >= 0.01;
-      if (p.symbol === "USDC" || p.mint === SOLANA_USDC_MINT || p.mint === "base-usdc" || p.mint === "bnb-usdc") return false;
-      return true;
-    });
+    return openPositions.filter((p) => p.amount > 0 && p.value >= 0);
   }, [openPositions]);
 
   const handlePullRefresh = async () => {
@@ -765,9 +761,9 @@ export function Profile() {
                     <p className="text-2xl sm:text-3xl font-bold">
                       {usdcBalanceLoading
                         ? "—"
-                        : `$${(usdcBalance + openPositions.reduce((s, p) => s + p.value, 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        : `$${openPositions.reduce((s, p) => s + p.value, 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                     </p>
-                    <p className="text-xs text-white/50 mt-0.5">Total wallet balance</p>
+                    <p className="text-xs text-white/50 mt-0.5">Total wallet balance (both wallets)</p>
                 </div>
                   <div className="mt-4 flex items-center justify-between">
                     <div className="flex items-center gap-2">

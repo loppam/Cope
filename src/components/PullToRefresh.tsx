@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
-const PULL_THRESHOLD = 60;
-const MAX_PULL = 80;
-const RESISTANCE = 0.4;
+const PULL_THRESHOLD = 100;
+const MAX_PULL = 140;
+const RESISTANCE = 0.35;
 
 interface PullToRefreshProps {
   onRefresh: () => void | Promise<void>;

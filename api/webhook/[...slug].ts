@@ -5,7 +5,6 @@ import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore, type DocumentReference, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import webpush from "web-push";
-import { getUserTokens, sendToTokens } from "../../lib/push-server";
 
 function pushTokenDocId(token: string): string {
   return createHash("sha256").update(token).digest("hex");

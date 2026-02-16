@@ -39,7 +39,6 @@ import {
   Copy,
   ArrowDownUp,
   Loader2,
-  Settings,
 } from "lucide-react";
 import { shortenAddress, getApiBase, toRawAmountString } from "@/lib/utils";
 import { getChainId } from "@/lib/relay";
@@ -67,8 +66,6 @@ export function Trade() {
   const [jupiterQuote, setJupiterQuote] = useState<SwapQuote | null>(null);
   const [showQuoteModal, setShowQuoteModal] = useState(false);
   const [swapDirection, setSwapDirection] = useState<"buy" | "sell">("buy");
-  const [slippage, setSlippage] = useState(2500); // 25% default in basis points
-  const [showSlippageSettings, setShowSlippageSettings] = useState(false);
   const [tradeChain, setTradeChain] = useState<TradeChain>("solana");
   const [crossChainToken, setCrossChainToken] = useState<{
     symbol: string;
@@ -86,7 +83,6 @@ export function Trade() {
   const [balanceRefreshKey, setBalanceRefreshKey] = useState(0);
 
   const quickAmounts = [10, 50, 100];
-  const slippagePresets = [50, 100, 200, 300, 2500]; // 0.5%, 1%, 2%, 3%, 25%
   const REFRESH_COOLDOWN_MS = 15000; // 15 seconds
   const SOL_RESERVE = 0.005; // Always leave at least this much SOL for gas
   const BASE_ETH_RESERVE = 0.0005; // Reserve for Base gas
@@ -616,7 +612,6 @@ export function Trade() {
             inputMint: SOLANA_USDC_MINT,
             outputMint,
             amount: amountRaw,
-            slippageBps: slippage,
             userWallet: userProfile.walletAddress,
             tradeType: "buy",
             outputChainId: getChainId(tradeChain),
@@ -655,7 +650,7 @@ export function Trade() {
           feeMint: SOLANA_USDC_MINT,
           requestId: data?.steps?.[0]?.requestId || "",
           transaction: "",
-          slippage,
+          slippage: 100,
         } as SwapQuote);
       } else {
         const quote = await getJupiterSwapQuote(
@@ -663,7 +658,7 @@ export function Trade() {
           outputMint,
           parseInt(amountRaw, 10),
           userProfile.walletAddress,
-          slippage,
+          100,
           6,
           token?.decimals ?? 6,
         );
@@ -741,7 +736,6 @@ export function Trade() {
             inputMint: token.mint,
             outputMint: SOLANA_USDC_MINT,
             amount: amountRaw,
-            slippageBps: slippage,
             userWallet: evmAddress,
             recipient: userProfile.walletAddress,
             tradeType: "sell",
@@ -781,7 +775,7 @@ export function Trade() {
           feeMint: token.mint,
           requestId: data?.steps?.[0]?.requestId || "",
           transaction: "",
-          slippage,
+          slippage: 100,
           inputAmountRaw: currencyIn.amount || amountRaw,
         } as SwapQuote);
       } else {
@@ -790,7 +784,7 @@ export function Trade() {
           SOLANA_USDC_MINT,
           parseInt(amountRaw, 10),
           userProfile.walletAddress,
-          slippage,
+          100,
           token.decimals,
           6,
         );
@@ -876,7 +870,6 @@ export function Trade() {
             inputMint: swapQuote.inputMint,
             outputMint: swapQuote.outputMint,
             amount: amountRaw,
-            slippageBps: swapQuote.slippage ?? slippage,
             userWallet: isEvmSell ? evmAddress : userProfile.walletAddress,
             tradeType: swapDirection === "buy" ? "buy" : "sell",
           };
@@ -1458,52 +1451,7 @@ export function Trade() {
                       </>
                     )}
                   </Button>
-                  <button
-                    onClick={() =>
-                      setShowSlippageSettings(!showSlippageSettings)
-                    }
-                    className="h-11 sm:h-12 px-3 sm:px-4 rounded-[10px] bg-white/5 hover:bg-white/10 transition-colors shrink-0"
-                    title="Slippage settings"
-                  >
-                    <Settings className="w-5 h-5" />
-                  </button>
                 </div>
-
-                {/* Slippage Settings */}
-                {showSlippageSettings && (
-                  <div className="mb-3 p-3 bg-white/5 rounded-[10px]">
-                    <div className="text-sm font-medium mb-2">
-                      Slippage Tolerance
-                    </div>
-                    <div className="flex gap-2 mb-2">
-                      {slippagePresets.map((preset) => (
-                        <button
-                          key={preset}
-                          onClick={() => setSlippage(preset)}
-                          className={`flex-1 h-8 rounded-[10px] text-sm transition-colors ${
-                            slippage === preset
-                              ? "bg-accent-primary text-white"
-                              : "bg-white/5 hover:bg-white/10"
-                          }`}
-                        >
-                          {preset / 100}%
-                        </button>
-                      ))}
-                    </div>
-                    <Input
-                      type="number"
-                      placeholder="Custom %"
-                      value={slippage / 100}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value);
-                        if (!isNaN(val) && val > 0) {
-                          setSlippage(Math.floor(val * 100));
-                        }
-                      }}
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                )}
 
                 {/* Sell Section (Solana only) */}
                 {token && (
@@ -1682,12 +1630,6 @@ export function Trade() {
                         >
                           {formatPriceImpact(swapQuote.priceImpact)}
                         </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-white/60">
-                          Slippage Tolerance
-                        </span>
-                        <span>{slippage / 100}%</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-white/60">Network Fee</span>

@@ -525,6 +525,7 @@ async function depositQuoteHandler(req: VercelRequest, res: VercelResponse) {
         useDepositAddress: true,
         refundTo: undefined,
         appFees: getAppFees(),
+        protocolVersion: "preferV2",
       }),
     });
     if (!quoteRes.ok) {
@@ -590,7 +591,6 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
       inputMint?: string;
       outputMint?: string;
       amount?: string;
-      slippageBps?: number;
       userWallet?: string;
       outputChainId?: number;
       outputChain?: string;
@@ -613,8 +613,6 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
         error: msg,
       });
     }
-    const slippageBps =
-      typeof body?.slippageBps === "number" ? body.slippageBps : 100;
     const userWallet = (body?.userWallet || "").trim();
     // Trade Terminal: BUY = SOL USDC (Solana) → any token; SELL = any token → SOL USDC (Solana).
     // So: BUY → origin Solana, destination = token chain; SELL → origin = token chain, destination Solana.
@@ -656,7 +654,11 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
     const originCurrency =
       inputMint === "base-eth" || inputMint === "bnb-bnb"
         ? NATIVE_ADDRESS
-        : inputMint;
+        : inputMint === "base-usdc"
+          ? ORIGIN_USDC.base
+          : inputMint === "bnb-usdc"
+            ? ORIGIN_USDC.bnb
+            : inputMint;
     console.log("[swap-quote] start", {
       userId,
       tradeDir,
@@ -665,7 +667,6 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
       inputMint: inputMint.slice(0, 8) + "…",
       outputMint: outputMint.slice(0, 8) + "…",
       amount,
-      slippageBps,
       userWallet: userWallet.slice(0, 8) + "…",
     });
     const apiKey = process.env.RELAY_API_KEY;
@@ -685,8 +686,11 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
         amount,
         tradeType: "EXACT_INPUT",
         recipient,
-        slippageTolerance: String(slippageBps),
         appFees: getAppFees(),
+        protocolVersion: "preferV2",
+        ...(originChainId === 8453 || originChainId === 56
+          ? { explicitDeposit: false }
+          : {}),
       }),
     });
     if (!quoteRes.ok) {
@@ -788,6 +792,7 @@ async function withdrawQuoteHandler(req: VercelRequest, res: VercelResponse) {
         tradeType: "EXACT_INPUT",
         recipient: destinationAddress,
         appFees: getAppFees(),
+        protocolVersion: "preferV2",
       }),
     });
     if (!quoteRes.ok) {
@@ -1262,7 +1267,7 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
               errMsg,
             );
             const userError = isExecutionReverted
-              ? "Swap failed. Price may have moved (try higher slippage), or check that you have sufficient balance and have approved the token if prompted."
+              ? "Swap failed. Price may have moved, or check that you have sufficient balance and have approved the token if prompted."
               : errMsg.slice(0, 200) || "Transaction failed. Please try again.";
             return res.status(500).json({
               error: userError,
@@ -1684,7 +1689,7 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
     }
 
     const userMessage = isEncodingOverrun
-      ? "Transaction encoding error. Try again with different slippage or amount."
+      ? "Transaction encoding error. Try again with a different amount."
       : isJupiterInsufficientFunds
         ? "Insufficient funds for swap and fees. Ensure you have enough of the input token and SOL for transaction fees."
         : "Transaction failed. Please try again.";
@@ -2229,9 +2234,10 @@ async function fetchBridgeFromEvmQuote(
       tradeType: "EXACT_INPUT",
       recipient: recipientSolAddress,
       appFees,
+      protocolVersion: "preferV2",
     };
     if (minimal) return base;
-    return { ...base, useDepositAddress: false, usePermit };
+    return { ...base, useDepositAddress: false, usePermit, explicitDeposit: false };
   };
   const tryQuote = async (relayBody: Record<string, unknown>) => {
     const quoteRes = await fetch(`${RELAY_API_BASE}/quote/v2`, {
@@ -2354,12 +2360,14 @@ async function bridgeFromEvmQuoteHandler(
         tradeType: "EXACT_INPUT",
         recipient: recipientSolAddress,
         appFees,
+        protocolVersion: "preferV2",
       };
       if (minimal) return base;
       return {
         ...base,
         useDepositAddress: false,
         usePermit,
+        explicitDeposit: false,
       };
     };
 
@@ -2469,34 +2477,16 @@ async function executeBridgeCustodialHandler(
     const recipientSolAddress = (body?.recipientSolAddress ?? "").trim();
     const quoteResponse = body?.quoteResponse;
 
-    // Prefer bridge params: derive EVM address first, fetch quote with derived address (fixes wallet mismatch)
+    // Prefer bridge params: use evmAddress + recipientSolAddress from user doc, fetch quote (no decrypt needed)
     let quote: { steps?: Array<{ id?: string; kind?: string; items?: Array<{ data?: unknown; check?: { endpoint?: string; method?: string } }> }> };
     if (network && amountRawParam && recipientSolAddress && (!quoteResponse || typeof quoteResponse !== "object")) {
-      const encryptionSecret = process.env.ENCRYPTION_SECRET;
-      if (!encryptionSecret) return res.status(503).json({ error: "ENCRYPTION_SECRET not configured" });
       const db = getAdminDb();
       const userSnap = await db.collection("users").doc(userId).get();
       const userData = userSnap.data();
-      const encryptedSecretKey = userData?.encryptedSecretKey;
-      const encryptedMnemonic = userData?.encryptedMnemonic;
-      if (!encryptedSecretKey || !encryptedMnemonic) {
-        return res.status(400).json({ error: "User wallet credentials not found (need mnemonic for bridge)" });
+      const evmAddress = (userData?.evmAddress as string | undefined)?.trim().toLowerCase();
+      if (!evmAddress || evmAddress.length < 40) {
+        return res.status(400).json({ error: "User evmAddress not found (required for bridge)" });
       }
-      const { mnemonic } = await decryptWalletCredentials(
-        userId,
-        encryptedMnemonic,
-        encryptedSecretKey,
-        encryptionSecret,
-      );
-      if (!mnemonic?.trim()) {
-        return res.status(400).json({ error: "EVM step requires mnemonic backup" });
-      }
-      const evmWalletForQuote = HDNodeWallet.fromPhrase(
-        mnemonic.trim(),
-        undefined,
-        ETH_DERIVATION_PATH,
-      );
-      const derivedEvmAddress = evmWalletForQuote.address.toLowerCase();
       let amountRaw: string;
       try {
         amountRaw = toRelayAmountString(
@@ -2511,12 +2501,12 @@ async function executeBridgeCustodialHandler(
       if (recipientSolAddress.length < 32) {
         return res.status(400).json({ error: "Invalid recipientSolAddress" });
       }
-      console.log("[execute-bridge-custodial] fetching quote with derived EVM address (wallet match)", {
-        derivedEvm: derivedEvmAddress.slice(0, 10) + "...",
+      console.log("[execute-bridge-custodial] fetching quote", {
+        evmAddress: evmAddress.slice(0, 10) + "...",
         network,
       });
       quote = (await fetchBridgeFromEvmQuote(
-        derivedEvmAddress,
+        evmAddress,
         network,
         amountRaw,
         recipientSolAddress,

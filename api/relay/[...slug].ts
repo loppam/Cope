@@ -2208,10 +2208,10 @@ async function bridgeFromEvmQuoteHandler(
     const apiKey = process.env.RELAY_API_KEY;
     const originChainId =
       CHAIN_IDS[network] ?? (network === "base" ? 8453 : 56);
-    const amountUsdc = parseInt(amountRaw, 10);
-    const topupAmount = amountUsdc > 5_000_000 ? "500000" : "200000"; // $0.50 for >=$5, $0.20 for <$5
     // BNB USDC (Binance-Peg) does not support permit; use permit only for Base
     const usePermit = network === "base";
+    // App handles recipient gas topup (SOL funder); do not ask Relay to top up
+    const appFees = getAppFees();
 
     const buildRelayBody = (minimal: boolean) => {
       const base = {
@@ -2223,15 +2223,13 @@ async function bridgeFromEvmQuoteHandler(
         amount: amountRaw,
         tradeType: "EXACT_INPUT",
         recipient: recipientSolAddress,
+        appFees,
       };
       if (minimal) return base;
       return {
         ...base,
         useDepositAddress: false,
         usePermit,
-        topupGas: true,
-        topupGasAmount: topupAmount,
-        appFees: getAppFees(),
       };
     };
 
@@ -2269,10 +2267,10 @@ async function bridgeFromEvmQuoteHandler(
       } catch {
         /* ignore */
       }
-      // Retry with minimal payload if no routes (optional params can block BNB→Solana)
-      if (quoteRes.status === 400 && errCode === "NO_SWAP_ROUTES_FOUND" && "topupGas" in relayBody) {
+      // Retry with minimal payload if no routes (useDepositAddress/usePermit can block BNB→Solana)
+      if (quoteRes.status === 400 && errCode === "NO_SWAP_ROUTES_FOUND" && "useDepositAddress" in relayBody) {
         relayBody = buildRelayBody(true);
-        console.log("[bridge-from-evm-quote] retrying with minimal payload (required fields + recipient only)");
+        console.log("[bridge-from-evm-quote] retrying with minimal payload (required + recipient + appFees)");
         quoteRes = (await tryQuote(relayBody)).res;
       }
     }
@@ -2299,10 +2297,8 @@ async function bridgeFromEvmQuoteHandler(
     const quote = await quoteRes.json();
     console.log("[bridge-from-evm-quote] success", { network, amountRaw });
     console.log("[bridge-from-evm-quote] Relay response received:", {
-      hasRoutes: !!(quote as { routes?: unknown[] })?.routes?.length,
-      routesCount: (quote as { routes?: unknown[] })?.routes?.length ?? 0,
-      responseKeys: Object.keys(quote as object),
-      responsePreview: JSON.stringify(quote).slice(0, 1000),
+      hasSteps: !!((quote as { steps?: unknown[] })?.steps?.length),
+      stepsCount: ((quote as { steps?: unknown[] })?.steps?.length) ?? 0,
     });
     return res.status(200).json(quote);
   } catch (e: unknown) {

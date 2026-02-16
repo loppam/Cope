@@ -187,35 +187,18 @@ async function main() {
 
     try {
       console.log(
-        `[bridge-evm-usdc] ${userId} ${network}: getting quote for $${amountUsdc.toFixed(2)}...`
+        `[bridge-evm-usdc] ${userId} ${network}: bridging $${amountUsdc.toFixed(2)} (quote+execute with derived address)...`
       );
-      const quoteRes = await fetch(`${apiBase}/api/relay/bridge-from-evm-quote`, {
+      // execute-bridge-custodial derives EVM address and fetches quote internally (fixes wallet mismatch)
+      const execRes = await fetch(`${apiBase}/api/relay/execute-bridge-custodial`, {
         method: "POST",
         headers: relayHeaders,
         body: JSON.stringify({
-          evmAddress,
+          userId,
           network,
           amountRaw,
           recipientSolAddress: walletAddress,
         }),
-      });
-
-      if (!quoteRes.ok) {
-        const errText = await quoteRes.text();
-        console.error(`[bridge-evm-usdc] ${userId} ${network} quote failed:`, errText);
-        err++;
-        continue;
-      }
-
-      const quote = await quoteRes.json();
-      console.log(
-        `[bridge-evm-usdc] ${userId} ${network}: executing bridge...`
-      );
-
-      const execRes = await fetch(`${apiBase}/api/relay/execute-bridge-custodial`, {
-        method: "POST",
-        headers: relayHeaders,
-        body: JSON.stringify({ userId, quoteResponse: quote }),
       });
 
       if (!execRes.ok) {

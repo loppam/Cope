@@ -3,6 +3,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
+import { getUserTokens, sendToTokens } from "../../lib/push-server";
 import {
   AddressLookupTableAccount,
   Connection,
@@ -2206,6 +2207,78 @@ function getEvmProvider(chainId: number): JsonRpcProvider {
   throw new Error(`Unsupported EVM chainId: ${chainId}`);
 }
 
+/** Internal: fetch bridge quote from Relay. Used by execute-bridge-custodial to ensure quote user matches signer. */
+async function fetchBridgeFromEvmQuote(
+  evmAddress: string,
+  network: "base" | "bnb",
+  amountRaw: string,
+  recipientSolAddress: string,
+): Promise<unknown> {
+  const apiKey = process.env.RELAY_API_KEY;
+  const originChainId = CHAIN_IDS[network] ?? (network === "base" ? 8453 : 56);
+  const usePermit = network === "base";
+  const appFees = getAppFees();
+  const buildRelayBody = (minimal: boolean) => {
+    const base = {
+      user: evmAddress,
+      originChainId,
+      destinationChainId: CHAIN_IDS.solana,
+      originCurrency: ORIGIN_USDC[network],
+      destinationCurrency: SOLANA_USDC_MINT,
+      amount: amountRaw,
+      tradeType: "EXACT_INPUT",
+      recipient: recipientSolAddress,
+      appFees,
+    };
+    if (minimal) return base;
+    return { ...base, useDepositAddress: false, usePermit };
+  };
+  const tryQuote = async (relayBody: Record<string, unknown>) => {
+    const quoteRes = await fetch(`${RELAY_API_BASE}/quote/v2`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey && { "x-api-key": apiKey }),
+      },
+      body: JSON.stringify(relayBody),
+    });
+    return { ok: quoteRes.ok, res: quoteRes };
+  };
+  let relayBody = buildRelayBody(false);
+  let quoteRes = (await tryQuote(relayBody)).res;
+  if (!quoteRes.ok) {
+    const errBody = await quoteRes.text();
+    let errCode: string | undefined;
+    try {
+      const j = JSON.parse(errBody);
+      errCode = j.errorCode;
+    } catch {
+      /* ignore */
+    }
+    if (
+      quoteRes.status === 400 &&
+      errCode === "NO_SWAP_ROUTES_FOUND" &&
+      "useDepositAddress" in relayBody
+    ) {
+      relayBody = buildRelayBody(true);
+      quoteRes = (await tryQuote(relayBody)).res;
+    }
+  }
+  if (!quoteRes.ok) {
+    const errBody = await quoteRes.text();
+    let message = `Relay quote failed: ${quoteRes.status}`;
+    try {
+      const j = JSON.parse(errBody);
+      if (j.message) message = j.message;
+      else if (j.error) message = j.error;
+    } catch {
+      if (errBody) message = errBody.slice(0, 200);
+    }
+    throw new Error(message);
+  }
+  return quoteRes.json();
+}
+
 async function bridgeFromEvmQuoteHandler(
   req: VercelRequest,
   res: VercelResponse,
@@ -2383,22 +2456,80 @@ async function executeBridgeCustodialHandler(
   }
   try {
     ensureFirebase();
-    const body = req.body as { userId?: string; quoteResponse?: unknown };
-    const userId = (body?.userId ?? "").trim();
-    const quoteResponse = body?.quoteResponse;
-    if (!userId || !quoteResponse || typeof quoteResponse !== "object") {
-      return res.status(400).json({ error: "Missing userId or quoteResponse" });
-    }
-    const quote = quoteResponse as {
-      steps?: Array<{
-        id?: string;
-        kind?: string;
-        items?: Array<{
-          data?: unknown;
-          check?: { endpoint?: string; method?: string };
-        }>;
-      }>;
+    const body = req.body as {
+      userId?: string;
+      quoteResponse?: unknown;
+      network?: string;
+      amountRaw?: string;
+      recipientSolAddress?: string;
     };
+    const userId = (body?.userId ?? "").trim();
+    const network = (body?.network ?? "").toLowerCase() as "base" | "bnb";
+    const amountRawParam = body?.amountRaw ?? "";
+    const recipientSolAddress = (body?.recipientSolAddress ?? "").trim();
+    const quoteResponse = body?.quoteResponse;
+
+    // Prefer bridge params: derive EVM address first, fetch quote with derived address (fixes wallet mismatch)
+    let quote: { steps?: Array<{ id?: string; kind?: string; items?: Array<{ data?: unknown; check?: { endpoint?: string; method?: string } }> }> };
+    if (network && amountRawParam && recipientSolAddress && (!quoteResponse || typeof quoteResponse !== "object")) {
+      const encryptionSecret = process.env.ENCRYPTION_SECRET;
+      if (!encryptionSecret) return res.status(503).json({ error: "ENCRYPTION_SECRET not configured" });
+      const db = getAdminDb();
+      const userSnap = await db.collection("users").doc(userId).get();
+      const userData = userSnap.data();
+      const encryptedSecretKey = userData?.encryptedSecretKey;
+      const encryptedMnemonic = userData?.encryptedMnemonic;
+      if (!encryptedSecretKey || !encryptedMnemonic) {
+        return res.status(400).json({ error: "User wallet credentials not found (need mnemonic for bridge)" });
+      }
+      const { mnemonic } = await decryptWalletCredentials(
+        userId,
+        encryptedMnemonic,
+        encryptedSecretKey,
+        encryptionSecret,
+      );
+      if (!mnemonic?.trim()) {
+        return res.status(400).json({ error: "EVM step requires mnemonic backup" });
+      }
+      const evmWalletForQuote = HDNodeWallet.fromPhrase(
+        mnemonic.trim(),
+        undefined,
+        ETH_DERIVATION_PATH,
+      );
+      const derivedEvmAddress = evmWalletForQuote.address.toLowerCase();
+      let amountRaw: string;
+      try {
+        amountRaw = toRelayAmountString(
+          typeof amountRawParam === "number" ? amountRawParam : String(amountRawParam ?? ""),
+        );
+      } catch {
+        return res.status(400).json({ error: "Invalid amountRaw" });
+      }
+      if (network !== "base" && network !== "bnb") {
+        return res.status(400).json({ error: "Invalid network; use base or bnb" });
+      }
+      if (recipientSolAddress.length < 32) {
+        return res.status(400).json({ error: "Invalid recipientSolAddress" });
+      }
+      console.log("[execute-bridge-custodial] fetching quote with derived EVM address (wallet match)", {
+        derivedEvm: derivedEvmAddress.slice(0, 10) + "...",
+        network,
+      });
+      quote = (await fetchBridgeFromEvmQuote(
+        derivedEvmAddress,
+        network,
+        amountRaw,
+        recipientSolAddress,
+      )) as typeof quote;
+    } else if (quoteResponse && typeof quoteResponse === "object") {
+      quote = quoteResponse as typeof quote;
+    } else {
+      return res.status(400).json({ error: "Missing userId and (quoteResponse OR network+amountRaw+recipientSolAddress)" });
+    }
+
+    if (!userId) {
+      return res.status(400).json({ error: "Missing userId" });
+    }
     const steps = quote?.steps;
     if (!Array.isArray(steps) || steps.length === 0) {
       return res.status(400).json({ error: "Invalid quote: no steps" });
@@ -2431,6 +2562,25 @@ async function executeBridgeCustodialHandler(
         undefined,
         ETH_DERIVATION_PATH,
       );
+    }
+    // When using legacy quoteResponse: verify signer matches quote's user (prevents revert)
+    if (evmWallet && quoteResponse && typeof quoteResponse === "object") {
+      const firstEvmStep = steps?.find(
+        (s) =>
+          (s?.items?.[0]?.data as Record<string, unknown> | undefined)?.chainId === 8453 ||
+          (s?.items?.[0]?.data as Record<string, unknown> | undefined)?.chainId === 56,
+      );
+      const stepFrom = (firstEvmStep?.items?.[0]?.data as Record<string, unknown> | undefined)?.from as string | undefined;
+      if (stepFrom && evmWallet.address.toLowerCase() !== stepFrom.toLowerCase()) {
+        console.warn("[execute-bridge-custodial] wallet mismatch", {
+          derived: evmWallet.address.slice(0, 10) + "...",
+          quoteFrom: stepFrom.slice(0, 10) + "...",
+        });
+        return res.status(400).json({
+          error:
+            "Wallet mismatch: quote was for a different address. Use network+amountRaw+recipientSolAddress instead of quoteResponse.",
+        });
+      }
     }
     const apiKey = process.env.RELAY_API_KEY;
     const relayHeaders: Record<string, string> = {
@@ -2809,8 +2959,6 @@ async function notifyWithdrawalCompleteHandler(
     const body = (req.body as { amount?: number; network?: string }) ?? {};
     const amount = body.amount ?? 0;
     const network = body.network ?? "Solana";
-    const { getUserTokens, sendToTokens } =
-      await import("../../lib/push-server");
     const tokens = await getUserTokens(userId);
     if (tokens.length > 0) {
       const amountStr = amount > 0 ? `$${amount.toFixed(2)} ` : "";

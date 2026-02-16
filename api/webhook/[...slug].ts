@@ -5,6 +5,7 @@ import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore, type DocumentReference, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import webpush from "web-push";
+import { getUserTokens, sendToTokens } from "../../lib/push-server";
 
 function pushTokenDocId(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -784,7 +785,10 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
         console.log("[evm-deposit] skipped: unsupported chain (activity)", { chain: chainStr || chain });
         return res.status(200).json({ received: true, skipped: "unsupported chain" });
       }
-      to = String(first.to ?? first.toAddress ?? "").trim().toLowerCase();
+      const toAddr = String(first.to ?? first.toAddress ?? "").trim().toLowerCase();
+      const fromAddr = String(first.from ?? first.fromAddress ?? "").trim().toLowerCase();
+      // When user sends TO bridge (useDepositAddress: false), from=custodial to=contract. When someone sends TO custodial, to=custodial.
+      to = toAddr || fromAddr;
       const rawContract = first.rawContract as { rawValue?: string; address?: string } | undefined;
       const rawVal = rawContract?.rawValue;
       if (rawVal && typeof rawVal === "string") {
@@ -822,9 +826,22 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ received: true, skipped: "zero amount" });
     }
 
-    const usersSnap = await db.collection("users").where("evmAddress", "==", to).limit(1).get();
+    // Look up by to (incoming to custodial) or from (user sends to bridge); Alchemy fires when watched address is in either role
+    let custodialAddress = to;
+    let usersSnap = await db.collection("users").where("evmAddress", "==", to).limit(1).get();
+    if (usersSnap.empty && activityArr?.[0]) {
+      const first = activityArr[0] as Record<string, unknown>;
+      const fromAddr = String(first.from ?? first.fromAddress ?? "").trim().toLowerCase();
+      if (fromAddr && fromAddr.length >= 40) {
+        usersSnap = await db.collection("users").where("evmAddress", "==", fromAddr).limit(1).get();
+        if (!usersSnap.empty) {
+          custodialAddress = fromAddr;
+          console.log("[evm-deposit] resolved user by from (outgoing to bridge)", { from: fromAddr.slice(0, 10) + "..." });
+        }
+      }
+    }
     if (usersSnap.empty) {
-      console.log("[evm-deposit] skipped: unknown address");
+      console.log("[evm-deposit] skipped: unknown address", { to: to?.slice(0, 10) + "...", from: activityArr?.[0] ? String((activityArr[0] as Record<string, unknown>).from ?? "").slice(0, 10) + "..." : "n/a" });
       return res.status(200).json({ received: true, skipped: "unknown address" });
     }
     const userDoc = usersSnap.docs[0];
@@ -851,27 +868,16 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
 
     (async () => {
       try {
-        const quoteRes = await fetch(`${apiBase}/api/relay/bridge-from-evm-quote`, {
+        // Use derived EVM address for quote (fixes wallet mismatch); execute-bridge-custodial fetches quote internally
+        const execRes = await fetch(`${apiBase}/api/relay/execute-bridge-custodial`, {
           method: "POST",
           headers: relayHeaders,
           body: JSON.stringify({
-            evmAddress: to,
+            userId,
             network,
             amountRaw: amount.toString(),
             recipientSolAddress: walletAddress,
           }),
-        });
-        if (!quoteRes.ok) {
-          const errText = await quoteRes.text();
-          console.error("evm-deposit: bridge-from-evm-quote failed", quoteRes.status, errText);
-          return;
-        }
-        const quote = await quoteRes.json();
-
-        const execRes = await fetch(`${apiBase}/api/relay/execute-bridge-custodial`, {
-          method: "POST",
-          headers: relayHeaders,
-          body: JSON.stringify({ userId, quoteResponse: quote }),
         });
         if (!execRes.ok) {
           const errText = await execRes.text();
@@ -882,7 +888,6 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
         // Base USDC = 6 decimals, BNB USDC (Binance-Peg) = 18 decimals
         const amountUsd = (Number(amount) / (network === "bnb" ? 1e18 : 1e6)).toFixed(2);
         try {
-          const { getUserTokens, sendToTokens } = await import("../../lib/push-server");
           const tokens = await getUserTokens(userId);
           if (tokens.length > 0) {
             await sendToTokens(tokens, {

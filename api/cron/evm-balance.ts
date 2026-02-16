@@ -44,7 +44,8 @@ async function getEvmBalances(address: string): Promise<{
       new Contract(BNB_USDC, ERC20_ABI, bnbProvider).balanceOf(address),
     ]);
     result.bnb.native = Number(bnbNative) / 1e18;
-    result.bnb.usdc = Number(bnbUsdcRaw) / 1e6;
+    // BNB USDC (Binance-Peg) has 18 decimals on-chain, unlike Base USDC (6)
+    result.bnb.usdc = Number(bnbUsdcRaw) / 1e18;
   } catch (e) {
     console.warn("BNB balance fetch failed:", e);
   }
@@ -62,7 +63,9 @@ type EvmTokenPosition = {
   decimals: number;
 };
 
-async function getEvmTokenPositions(address: string): Promise<EvmTokenPosition[]> {
+async function getEvmTokenPositions(
+  address: string,
+): Promise<EvmTokenPosition[]> {
   const apiKey = process.env.MORALIS_API_KEY;
   if (!apiKey) return [];
 
@@ -118,7 +121,8 @@ async function getEvmTokenPositions(address: string): Promise<EvmTokenPosition[]
           if (bal <= 0 && value <= 0) continue;
 
           const addr = (t.token_address ?? "").toLowerCase();
-          const isNative = t.native_token || !addr || addr === NATIVE_ETH_PLACEHOLDER;
+          const isNative =
+            t.native_token || !addr || addr === NATIVE_ETH_PLACEHOLDER;
           // Normalize USDC mint to base-usdc / bnb-usdc for consistent matching
           const mint = isNative
             ? chain === "base"
@@ -132,7 +136,9 @@ async function getEvmTokenPositions(address: string): Promise<EvmTokenPosition[]
 
           tokens.push({
             mint,
-            symbol: (t.symbol ?? (chain === "base" ? "ETH" : "BNB")).toUpperCase(),
+            symbol: (
+              t.symbol ?? (chain === "base" ? "ETH" : "BNB")
+            ).toUpperCase(),
             name: t.name ?? (chain === "base" ? "Ethereum (Base)" : "BNB"),
             amount: bal,
             value,
@@ -151,7 +157,10 @@ async function getEvmTokenPositions(address: string): Promise<EvmTokenPosition[]
 }
 
 // Inlined to avoid Vercel ERR_MODULE_NOT_FOUND for api/lib/decrypt
-async function deriveKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
+async function deriveKey(
+  password: string,
+  salt: Uint8Array,
+): Promise<CryptoKey> {
   const encoder = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
@@ -161,20 +170,32 @@ async function deriveKey(password: string, salt: Uint8Array): Promise<CryptoKey>
     ["deriveBits", "deriveKey"],
   );
   return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: new Uint8Array(salt), iterations: 100000, hash: "SHA-256" },
+    {
+      name: "PBKDF2",
+      salt: new Uint8Array(salt),
+      iterations: 100000,
+      hash: "SHA-256",
+    },
     keyMaterial,
     { name: "AES-GCM", length: 256 },
     false,
     ["encrypt", "decrypt"],
   );
 }
-async function decryptAes(encryptedData: string, password: string): Promise<string> {
+async function decryptAes(
+  encryptedData: string,
+  password: string,
+): Promise<string> {
   const combined = new Uint8Array(Buffer.from(encryptedData, "base64"));
   const salt = combined.slice(0, 16);
   const iv = combined.slice(16, 28);
   const encrypted = combined.slice(28);
   const key = await deriveKey(password, salt);
-  const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, encrypted);
+  const decrypted = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv },
+    key,
+    encrypted,
+  );
   return new TextDecoder().decode(decrypted);
 }
 async function decryptWalletCredentials(

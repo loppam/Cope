@@ -27,7 +27,8 @@ export interface BirdeyeCurrentNetWorthResponse {
 }
 
 function parseItemAmount(item: BirdeyeCurrentNetWorthItem): number {
-  if (typeof item?.amount === "number" && Number.isFinite(item.amount)) return item.amount;
+  if (typeof item?.amount === "number" && Number.isFinite(item.amount))
+    return item.amount;
   return 0;
 }
 
@@ -47,17 +48,19 @@ function parseItemValue(item: BirdeyeCurrentNetWorthItem): number {
  * Also used by Trade terminal for USDC and SOL token balances.
  */
 export async function getWalletSolAndUsdcBalances(
-  walletAddress: string
+  walletAddress: string,
 ): Promise<{ solBalance: number; usdcBalance: number }> {
   const base = getApiBase();
   const params = new URLSearchParams({ wallet: walletAddress, limit: "100" });
-  const res = await fetch(`${base}/api/birdeye/wallet-token-list?${params.toString()}`);
+  const res = await fetch(
+    `${base}/api/birdeye/wallet-token-list?${params.toString()}`,
+  );
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(
       (err as { error?: string }).error ||
         (err as { message?: string }).message ||
-        `Birdeye current-net-worth: ${res.status}`
+        `Birdeye current-net-worth: ${res.status}`,
     );
   }
   const data = (await res.json()) as BirdeyeCurrentNetWorthResponse;
@@ -67,7 +70,10 @@ export async function getWalletSolAndUsdcBalances(
   for (const item of items) {
     const addr = (item?.address ?? "").toString().trim();
     const amount = parseItemAmount(item);
-    if (addr === SOL_MINT || addr === "So11111111111111111111111111111111111111111") {
+    if (
+      addr === SOL_MINT ||
+      addr === "So11111111111111111111111111111111111111111"
+    ) {
       solBalance += amount;
     } else if (addr === SOLANA_USDC_MINT) {
       usdcBalance += amount;
@@ -133,19 +139,24 @@ interface BirdeyePnlTokenData {
  * Replaces deprecated token_list. Also used by Trade terminal for Solana token balances.
  */
 export async function getWalletPortfolioWithPnL(
-  walletAddress: string
+  walletAddress: string,
 ): Promise<WalletPortfolioWithPnL> {
   const base = getApiBase();
 
   // 1) Get portfolio from current-net-worth (replacement for deprecated token_list)
-  const listParams = new URLSearchParams({ wallet: walletAddress, limit: "100" });
-  const listRes = await fetch(`${base}/api/birdeye/wallet-token-list?${listParams.toString()}`);
+  const listParams = new URLSearchParams({
+    wallet: walletAddress,
+    limit: "100",
+  });
+  const listRes = await fetch(
+    `${base}/api/birdeye/wallet-token-list?${listParams.toString()}`,
+  );
   if (!listRes.ok) {
     const err = await listRes.json().catch(() => ({}));
     throw new Error(
       (err as { error?: string }).error ||
         (err as { message?: string }).message ||
-        `Birdeye current-net-worth: ${listRes.status}`
+        `Birdeye current-net-worth: ${listRes.status}`,
     );
   }
   const listData = (await listRes.json()) as BirdeyeCurrentNetWorthResponse;
@@ -160,14 +171,20 @@ export async function getWalletPortfolioWithPnL(
     const amount = parseItemAmount(item);
     const valueUsd = parseItemValue(item);
 
-    if (addr === SOL_MINT || addr === "So11111111111111111111111111111111111111111") {
+    if (
+      addr === SOL_MINT ||
+      addr === "So11111111111111111111111111111111111111111"
+    ) {
       solBalance += amount;
     } else if (addr === SOLANA_USDC_MINT) {
       usdcBalance += amount;
     }
     // All tokens (including SOL for PnL) - only include SPL tokens with balance in positions
     if (addr && addr !== SOLANA_USDC_MINT) {
-      if (addr === SOL_MINT || addr === "So11111111111111111111111111111111111111111") {
+      if (
+        addr === SOL_MINT ||
+        addr === "So11111111111111111111111111111111111111111"
+      ) {
         if (amount > 0) {
           positions.push({
             mint: SOL_MINT,
@@ -194,7 +211,16 @@ export async function getWalletPortfolioWithPnL(
   }
 
   // 2) Fetch PnL for token addresses (max 50 per request; batch if needed)
-  const pnlByMint = new Map<string, { pnl: number; pnlPercent?: number; realized?: number; unrealized?: number; costBasis?: number }>();
+  const pnlByMint = new Map<
+    string,
+    {
+      pnl: number;
+      pnlPercent?: number;
+      realized?: number;
+      unrealized?: number;
+      costBasis?: number;
+    }
+  >();
   const BATCH_SIZE = 50;
   for (let i = 0; i < tokenAddresses.length; i += BATCH_SIZE) {
     const batch = tokenAddresses.slice(i, i + BATCH_SIZE);
@@ -202,7 +228,9 @@ export async function getWalletPortfolioWithPnL(
       wallet: walletAddress,
       token_addresses: batch.join(","),
     });
-    const pnlRes = await fetch(`${base}/api/birdeye/wallet-pnl?${pnlParams.toString()}`);
+    const pnlRes = await fetch(
+      `${base}/api/birdeye/wallet-pnl?${pnlParams.toString()}`,
+    );
     if (!pnlRes.ok) {
       // Non-fatal: continue without PnL for this batch
       continue;
@@ -269,7 +297,7 @@ function delay(ms: number): Promise<void> {
  * Token transaction interfaces - for finding wallets that traded tokens
  */
 export interface TokenTransaction {
-  tx_type: 'buy' | 'sell' | 'swap' | 'add' | 'remove';
+  tx_type: "buy" | "sell" | "swap" | "add" | "remove";
   tx_hash: string;
   block_unix_time: number;
   block_number: number;
@@ -278,7 +306,7 @@ export interface TokenTransaction {
   owner: string;
   signers: string[];
   source: string;
-  side: 'buy' | 'sell';
+  side: "buy" | "sell";
   pool_id?: string;
   from?: {
     symbol: string;
@@ -308,10 +336,13 @@ export async function getTokenTransactions(
   tokenAddress: string,
   limit: number = 100,
   offset: number = 0,
-  txType: 'buy' | 'sell' | 'swap' | 'add' | 'remove' | 'all' = 'swap'
+  txType: "buy" | "sell" | "swap" | "add" | "remove" | "all" = "swap",
 ): Promise<TokenTransactionsResponse> {
   const clampedLimit = Math.max(1, Math.min(100, limit));
-  const clampedOffset = Math.max(0, Math.min(9999, Math.min(offset, 10000 - clampedLimit)));
+  const clampedOffset = Math.max(
+    0,
+    Math.min(9999, Math.min(offset, 10000 - clampedLimit)),
+  );
   const base = getApiBase();
   const params = new URLSearchParams({
     address: tokenAddress,
@@ -325,7 +356,10 @@ export async function getTokenTransactions(
   const res = await fetch(`${base}/api/birdeye/token-txs?${params.toString()}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error((err as { message?: string }).message || `Birdeye token-txs: ${res.status}`);
+    throw new Error(
+      (err as { message?: string }).message ||
+        `Birdeye token-txs: ${res.status}`,
+    );
   }
   return res.json();
 }
@@ -337,7 +371,7 @@ export async function getTokenTransactions(
 export async function getTokenTransactionsPaginated(
   tokenAddress: string,
   pages: number = 10,
-  txType: 'buy' | 'sell' | 'swap' | 'add' | 'remove' | 'all' = 'swap'
+  txType: "buy" | "sell" | "swap" | "add" | "remove" | "all" = "swap",
 ): Promise<TokenTransaction[]> {
   const allTransactions: TokenTransaction[] = [];
   const limit = 100; // API max limit per page
@@ -345,7 +379,12 @@ export async function getTokenTransactionsPaginated(
   for (let page = 0; page < pages; page++) {
     const offset = page * limit;
     try {
-      const result = await getTokenTransactions(tokenAddress, limit, offset, txType);
+      const result = await getTokenTransactions(
+        tokenAddress,
+        limit,
+        offset,
+        txType,
+      );
       if (result.success && result.data?.items) {
         allTransactions.push(...result.data.items);
 
@@ -360,7 +399,10 @@ export async function getTokenTransactionsPaginated(
         await delay(600);
       }
     } catch (error) {
-      console.error(`Error getting page ${page + 1} of transactions for token ${tokenAddress}:`, error);
+      console.error(
+        `Error getting page ${page + 1} of transactions for token ${tokenAddress}:`,
+        error,
+      );
       // Continue to next page even if one fails
       break;
     }
@@ -413,17 +455,22 @@ export interface WalletPnLSummaryResponse {
  */
 export async function getWalletPnLSummary(
   walletAddress: string,
-  duration: 'all' | '90d' | '30d' | '7d' | '24h' = 'all'
+  duration: "all" | "90d" | "30d" | "7d" | "24h" = "all",
 ): Promise<WalletPnLSummaryResponse> {
   const base = getApiBase();
   const params = new URLSearchParams({
     wallet: walletAddress,
     duration,
   });
-  const res = await fetch(`${base}/api/birdeye/pnl-summary?${params.toString()}`);
+  const res = await fetch(
+    `${base}/api/birdeye/pnl-summary?${params.toString()}`,
+  );
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error((err as { message?: string }).message || `Birdeye pnl-summary: ${res.status}`);
+    throw new Error(
+      (err as { message?: string }).message ||
+        `Birdeye pnl-summary: ${res.status}`,
+    );
   }
   return res.json();
 }
@@ -468,7 +515,7 @@ export interface ScannerWallet {
 export async function scanWalletsForTokens(
   tokenMints: string[],
   minMatches: number = 2,
-  minTrades: number = 2
+  minTrades: number = 2,
 ): Promise<ScannerWallet[]> {
   try {
     // Step 1: Get transactions for each token from Birdeye (up to 1000 transactions per token)
@@ -476,7 +523,11 @@ export async function scanWalletsForTokens(
     for (let i = 0; i < tokenMints.length; i++) {
       const mint = tokenMints[i];
       try {
-        const transactions = await getTokenTransactionsPaginated(mint, 10, 'swap');
+        const transactions = await getTokenTransactionsPaginated(
+          mint,
+          10,
+          "swap",
+        );
         allTransactionsByToken.push(transactions);
         if (i < tokenMints.length - 1) await delay(600);
       } catch (error) {
@@ -488,7 +539,10 @@ export async function scanWalletsForTokens(
     // Step 2: Track per (wallet, token) invested and removed; aggregate per wallet
     const walletTokenMap = new Map<string, Set<string>>();
     const walletTransactionCount = new Map<string, number>();
-    const walletTokenStats = new Map<string, Map<string, { invested: number; removed: number }>>();
+    const walletTokenStats = new Map<
+      string,
+      Map<string, { invested: number; removed: number }>
+    >();
 
     allTransactionsByToken.forEach((transactions, index) => {
       const tokenMint = tokenMints[index];
@@ -508,17 +562,20 @@ export async function scanWalletsForTokens(
           walletTokenMap.get(wallet)!.add(tokenMint);
           seenWallets.add(wallet);
         }
-        walletTransactionCount.set(wallet, walletTransactionCount.get(wallet)! + 1);
+        walletTransactionCount.set(
+          wallet,
+          walletTransactionCount.get(wallet)! + 1,
+        );
 
         let investedUsd = 0;
         let removedUsd = 0;
-        if (tx.side === 'buy' || tx.tx_type === 'buy') {
+        if (tx.side === "buy" || tx.tx_type === "buy") {
           if (tx.from && tx.from.price && tx.from.ui_change_amount) {
             investedUsd = tx.from.price * Math.abs(tx.from.ui_change_amount);
           } else {
             investedUsd = tx.volume_usd || 0;
           }
-        } else if (tx.side === 'sell' || tx.tx_type === 'sell') {
+        } else if (tx.side === "sell" || tx.tx_type === "sell") {
           if (tx.to && tx.to.price && tx.to.ui_change_amount) {
             removedUsd = tx.to.price * tx.to.ui_change_amount;
           } else {
@@ -556,13 +613,22 @@ export async function scanWalletsForTokens(
         const s = tokenMap.get(mint) ?? { invested: 0, removed: 0 };
         const totalInvested = s.invested;
         const totalPnl = s.removed - s.invested;
-        const roiPct = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : null;
+        const roiPct =
+          totalInvested > 0 ? (totalPnl / totalInvested) * 100 : null;
         return { mint, totalInvested, totalPnl, roiPct };
       });
       const totalInvested = tokenStats.reduce((a, t) => a + t.totalInvested, 0);
-      const totalRemoved = tokenStats.reduce((a, t) => a + (t.totalInvested + t.totalPnl), 0); // removed = invested + pnl
-      const roiValues = tokenStats.map((t) => t.roiPct).filter((r): r is number => r !== null);
-      const averageRoiPct = roiValues.length > 0 ? roiValues.reduce((a, b) => a + b, 0) / roiValues.length : null;
+      const totalRemoved = tokenStats.reduce(
+        (a, t) => a + (t.totalInvested + t.totalPnl),
+        0,
+      ); // removed = invested + pnl
+      const roiValues = tokenStats
+        .map((t) => t.roiPct)
+        .filter((r): r is number => r !== null);
+      const averageRoiPct =
+        roiValues.length > 0
+          ? roiValues.reduce((a, b) => a + b, 0) / roiValues.length
+          : null;
 
       return {
         address: wallet,
@@ -583,7 +649,7 @@ export async function scanWalletsForTokens(
       return pnlB - pnlA;
     });
   } catch (error) {
-    console.error('Error scanning wallets:', error);
+    console.error("Error scanning wallets:", error);
     throw error;
   }
 }
@@ -607,15 +673,15 @@ export interface WalletAnalytics {
 
 export async function getWalletAnalytics(
   walletAddress: string,
-  duration: 'all' | '90d' | '30d' | '7d' | '24h' = 'all'
+  duration: "all" | "90d" | "30d" | "7d" | "24h" = "all",
 ): Promise<WalletAnalytics> {
   try {
     // Use PnL summary endpoint for better performance
     const pnlSummary = await getWalletPnLSummary(walletAddress, duration);
-    
+
     if (pnlSummary.data?.summary) {
       const summary = pnlSummary.data.summary;
-      
+
       // Get token list for additional context (optional - can be removed if not needed)
       const tokens: string[] = []; // Placeholder - would need separate API call
 
@@ -634,9 +700,9 @@ export async function getWalletAnalytics(
       };
     }
 
-    throw new Error('Failed to get wallet analytics');
+    throw new Error("Failed to get wallet analytics");
   } catch (error) {
-    console.error('Error getting wallet analytics:', error);
+    console.error("Error getting wallet analytics:", error);
     throw error;
   }
 }

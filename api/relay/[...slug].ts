@@ -59,7 +59,8 @@ async function getEvmBalances(address: string): Promise<{
       new Contract(BNB_USDC, ERC20_ABI, bnbProvider).balanceOf(address),
     ]);
     result.bnb.native = Number(bnbNative) / 1e18;
-    result.bnb.usdc = Number(bnbUsdcRaw) / 1e6;
+    // BNB USDC (Binance-Peg) has 18 decimals on-chain, unlike Base USDC (6)
+    result.bnb.usdc = Number(bnbUsdcRaw) / 1e18;
   } catch (e) {
     console.warn("BNB balance fetch failed:", e);
   }
@@ -278,13 +279,11 @@ function toRelayAmountString(value: string | number): string {
     if (!t) throw new Error("Missing amount");
     if (/e/i.test(t))
       throw new Error("Amount must not use scientific notation");
-    if (!/^[0-9]+$/.test(t))
-      throw new Error("Amount must be integer string");
+    if (!/^[0-9]+$/.test(t)) throw new Error("Amount must be integer string");
     return t;
   }
   if (typeof value === "number") {
-    if (!Number.isFinite(value) || value < 0)
-      throw new Error("Invalid amount");
+    if (!Number.isFinite(value) || value < 0) throw new Error("Invalid amount");
     if (value >= Number.MAX_SAFE_INTEGER)
       throw new Error("Amount too large; send as integer string");
     return Math.floor(value).toString();
@@ -795,8 +794,7 @@ async function withdrawQuoteHandler(req: VercelRequest, res: VercelResponse) {
       let message = `Relay quote failed: ${quoteRes.status}`;
       try {
         const j = JSON.parse(errBody);
-        message =
-          j.message ?? j.error ?? j.errorCode ?? message;
+        message = j.message ?? j.error ?? j.errorCode ?? message;
         if (typeof j.errorData === "string") message += ` (${j.errorData})`;
         console.warn("[withdraw-quote] Relay error", {
           status: quoteRes.status,
@@ -1207,8 +1205,7 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
         to: d?.to as string,
         data: d?.data as string,
         value: typeof d?.value === "string" ? BigInt(d.value) : undefined,
-        gasLimit:
-          gasLimit ?? 500000n,
+        gasLimit: gasLimit ?? 500000n,
         maxFeePerGas:
           typeof d?.maxFeePerGas === "string"
             ? BigInt(d.maxFeePerGas)
@@ -2187,10 +2184,14 @@ async function bridgeFromEvmQuoteHandler(
     let amountRaw: string;
     try {
       amountRaw = toRelayAmountString(
-        typeof amountRawParam === "number" ? amountRawParam : String(amountRawParam ?? ""),
+        typeof amountRawParam === "number"
+          ? amountRawParam
+          : String(amountRawParam ?? ""),
       );
     } catch {
-      return res.status(400).json({ error: "Invalid amountRaw (must be integer string)" });
+      return res
+        .status(400)
+        .json({ error: "Invalid amountRaw (must be integer string)" });
     }
     if (BigInt(amountRaw) <= 0n)
       return res.status(400).json({ error: "Invalid amountRaw" });

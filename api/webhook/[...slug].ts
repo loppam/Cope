@@ -879,7 +879,8 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
           return;
         }
         console.log("evm-deposit: bridge completed", { userId, network, amount: amount.toString() });
-        const amountUsd = (Number(amount) / 1e6).toFixed(2);
+        // Base USDC = 6 decimals, BNB USDC (Binance-Peg) = 18 decimals
+        const amountUsd = (Number(amount) / (network === "bnb" ? 1e18 : 1e6)).toFixed(2);
         try {
           const { getUserTokens, sendToTokens } = await import("../../lib/push-server");
           const tokens = await getUserTokens(userId);

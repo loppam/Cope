@@ -5,7 +5,7 @@
  * Auth: Bearer CRON_SECRET (cron + curl).
  * Query: ?dryRun=1 to report what would be bridged without executing.
  *
- * Balance: Uses RPC (Contract.balanceOf / 1e6) - same as evm-deposit. Moralis is for UI only.
+ * Balance: Uses RPC. Base USDC = 6 decimals, BNB USDC (Binance-Peg) = 18 decimals.
  *
  * curl -H "Authorization: Bearer $CRON_SECRET" \
  *   "https://your-domain.vercel.app/api/cron/bridge-evm-usdc-fallback?dryRun=1"
@@ -54,7 +54,8 @@ async function getEvmBalances(address: string): Promise<{
       bnbProvider,
     ).balanceOf(address);
     result.bnb.usdcRaw = bnbUsdcRaw;
-    result.bnb.usdc = Number(bnbUsdcRaw) / 1e6;
+    // BNB USDC (Binance-Peg) has 18 decimals on-chain
+    result.bnb.usdc = Number(bnbUsdcRaw) / 1e18;
   } catch (e) {
     console.warn("[bridge-evm-usdc-fallback] BNB balance fetch failed:", e);
   }

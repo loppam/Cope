@@ -46,7 +46,7 @@ Documentation-derived audit of all third-party APIs used in the project: **API**
 | API | Usage | Replaceable? | Replacement |
 |-----|-------|--------------|-------------|
 | **GET /erc20/metadata**, **GET /erc20/{addr}/price**, **GET /erc20/metadata/symbols** | EVM token search/overview in `src/lib/moralis-token.ts`, `api/token-search.ts`. | No | Primary for Base/BNB. [Moralis v2.2](https://docs.moralis.com/web3-data-api/evm). |
-| **GET /wallets/{addr}/tokens** | Inlined in relay + cron — EVM wallet tokens (Base, BNB). | No | Primary. Uses `balance_formatted` or `balance/10^decimals` for amounts. **USDC for bridging** (evm-deposit, bridge-evm-usdc-fallback) uses RPC `Contract.balanceOf`/1e6, not Moralis. |
+| **GET /wallets/{addr}/tokens** | Inlined in relay + cron — EVM wallet tokens (Base, BNB). | No | Primary. Uses raw `balance/10^decimals` (prefer over `balance_formatted`). **USDC** for bridging/positions: RPC only. Base USDC = 6 decimals; BNB USDC = 18 decimals. |
 
 ---
 

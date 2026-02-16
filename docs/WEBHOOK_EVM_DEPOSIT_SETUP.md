@@ -21,9 +21,9 @@ curl -H "Authorization: Bearer $CRON_SECRET" \
   "https://YOUR_DOMAIN/api/cron/bridge-evm-usdc-fallback?dryRun=1"
 ```
 
-Balance is from RPC (`Contract.balanceOf` / 1e6), not Moralis. See `api/cron/bridge-evm-usdc-fallback.ts`.
+Balance is from RPC. **Base USDC** = 6 decimals; **BNB USDC** (Binance-Peg 0x8AC7…) = 18 decimals on-chain. See `api/cron/bridge-evm-usdc-fallback.ts`.
 
-**USDC in cash balance / positions:** Solana USDC + Base USDC + BNB USDC are **added together** (one combined cash figure). Base/BNB USDC always comes from RPC in positions; Moralis is used only for non-USDC EVM tokens.
+**USDC in cash balance / positions:** Solana USDC + Base USDC + BNB USDC are **added together** (one combined cash figure). Base/BNB USDC always comes from RPC; Moralis is used only for non-USDC EVM tokens.
 
 ---
 

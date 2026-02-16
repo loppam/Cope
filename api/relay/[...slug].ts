@@ -2210,6 +2210,8 @@ async function bridgeFromEvmQuoteHandler(
       CHAIN_IDS[network] ?? (network === "base" ? 8453 : 56);
     const amountUsdc = parseInt(amountRaw, 10);
     const topupAmount = amountUsdc > 5_000_000 ? "500000" : "200000"; // $0.50 for >=$5, $0.20 for <$5
+    // BNB USDC (Binance-Peg) does not support permit; use permit only for Base
+    const usePermit = network === "base";
     const relayBody = {
       user: evmAddress,
       originChainId,
@@ -2220,7 +2222,7 @@ async function bridgeFromEvmQuoteHandler(
       tradeType: "EXACT_INPUT",
       recipient: recipientSolAddress,
       useDepositAddress: false,
-      usePermit: true,
+      usePermit,
       topupGas: true,
       topupGasAmount: topupAmount,
       appFees: getAppFees(),
@@ -2229,6 +2231,11 @@ async function bridgeFromEvmQuoteHandler(
       ...relayBody,
       user: evmAddress.slice(0, 10) + "...",
       recipient: recipientSolAddress.slice(0, 8) + "...",
+    });
+    console.log("[bridge-from-evm-quote] full payload sent to Relay (before route lookup):", {
+      url: `${RELAY_API_BASE}/quote/v2`,
+      body: relayBody,
+      bodyJson: JSON.stringify(relayBody),
     });
 
     const quoteRes = await fetch(`${RELAY_API_BASE}/quote/v2`, {
@@ -2241,9 +2248,10 @@ async function bridgeFromEvmQuoteHandler(
     });
     if (!quoteRes.ok) {
       const errBody = await quoteRes.text();
-      console.log("[bridge-from-evm-quote] relay error", {
+      console.log("[bridge-from-evm-quote] relay error (no routes or other failure)", {
         status: quoteRes.status,
-        body: errBody.slice(0, 500),
+        bodyPreview: errBody.slice(0, 500),
+        bodyFull: errBody,
       });
       let message = `Relay quote failed: ${quoteRes.status}`;
       try {
@@ -2259,6 +2267,12 @@ async function bridgeFromEvmQuoteHandler(
     }
     const quote = await quoteRes.json();
     console.log("[bridge-from-evm-quote] success", { network, amountRaw });
+    console.log("[bridge-from-evm-quote] Relay response received:", {
+      hasRoutes: !!(quote as { routes?: unknown[] })?.routes?.length,
+      routesCount: (quote as { routes?: unknown[] })?.routes?.length ?? 0,
+      responseKeys: Object.keys(quote as object),
+      responsePreview: JSON.stringify(quote).slice(0, 1000),
+    });
     return res.status(200).json(quote);
   } catch (e: unknown) {
     console.error("bridge-from-evm-quote error:", e);

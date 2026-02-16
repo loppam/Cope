@@ -1272,6 +1272,7 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
 
           const amountWei =
             chainId === 8453 ? EVM_FUNDER_BASE_WEI : EVM_FUNDER_BNB_WEI;
+          const balanceBefore = await provider.getBalance(userAddress);
           const fundHash = await sendNativeFromEvmFunder(
             userAddress,
             amountWei,
@@ -1288,11 +1289,23 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
               status: "Failed",
             });
           }
+          const balanceAfter = await provider.getBalance(userAddress);
+          if (balanceAfter - balanceBefore < amountWei) {
+            console.warn(
+              "[execute-step] EVM fund tx confirmed but balance did not increase",
+              { balanceBefore: balanceBefore.toString(), balanceAfter: balanceAfter.toString() },
+            );
+            return res.status(500).json({
+              error: "Top-up did not arrive. Please try again.",
+              signature: "",
+              status: "Failed",
+            });
+          }
           console.log("[execute-step] EVM funded for retry", {
             userId,
             userAddress,
             fundHash,
-            amountWei: amountWei.toString(),
+            balanceIncrease: (balanceAfter - balanceBefore).toString(),
             attempt: attempt + 1,
           });
 
@@ -1571,7 +1584,20 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
           // use fixed ×2
         }
 
-        const fundSig = await sendSolFromFunder(walletAddress, lamportsToSend);
+        const balanceBefore = await connection.getBalance(
+          new PublicKey(walletAddress),
+        );
+        let fundSig: string | null = null;
+        try {
+          fundSig = await sendSolFromFunder(walletAddress, lamportsToSend);
+        } catch (fundErr) {
+          console.warn(
+            "[execute-step] funder tx failed on attempt",
+            attempt + 1,
+            fundErr,
+          );
+          break;
+        }
         if (!fundSig) {
           console.warn(
             "[execute-step] funder top-up failed on attempt",
@@ -1579,10 +1605,20 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
           );
           break;
         }
+        const balanceAfter = await connection.getBalance(
+          new PublicKey(walletAddress),
+        );
+        if (balanceAfter - balanceBefore < lamportsToSend) {
+          console.warn(
+            "[execute-step] SOL fund tx confirmed but balance did not increase",
+            { balanceBefore, balanceAfter, lamportsToSend },
+          );
+          break;
+        }
         console.log("[execute-step] funded wallet for retry", {
           userId,
           signature: fundSig,
-          lamports: lamportsToSend,
+          balanceIncrease: balanceAfter - balanceBefore,
           attempt: attempt + 1,
         });
 
@@ -2477,8 +2513,80 @@ async function executeBridgeCustodialHandler(
           };
           const provider = getEvmProvider(chainId);
           const connected = evmWallet.connect(provider);
-          const tx = await connected.sendTransaction(txRequest);
-          await tx.wait();
+          const userAddress = (d.from as string) || "";
+          const maxAttempts = 10;
+          let attempt = 0;
+          let lastErr: unknown = null;
+
+          while (attempt < maxAttempts) {
+            try {
+              const tx = await connected.sendTransaction(txRequest);
+              console.log("[execute-bridge-custodial] EVM tx sent", {
+                stepIndex,
+                chainId,
+                hash: tx.hash,
+                attempt: attempt + 1,
+              });
+              await tx.wait();
+              break;
+            } catch (err: unknown) {
+              lastErr = err;
+              const errMsg = err instanceof Error ? err.message : String(err);
+              const errCode = (err as { code?: string })?.code;
+              const isInsufficientFunds =
+                /insufficient funds|INSUFFICIENT_FUNDS/i.test(errMsg) ||
+                errCode === "INSUFFICIENT_FUNDS";
+
+              if (
+                !isInsufficientFunds ||
+                !getEvmFunderWallet(chainId) ||
+                !userAddress ||
+                userAddress.length < 20
+              ) {
+                console.warn("[execute-bridge-custodial] EVM send failed (no retry)", {
+                  errMsg: errMsg.slice(0, 120),
+                  hasFunder: !!getEvmFunderWallet(chainId),
+                });
+                throw err;
+              }
+
+              const amountWei =
+                chainId === 8453 ? EVM_FUNDER_BASE_WEI : EVM_FUNDER_BNB_WEI;
+              const balanceBefore = await provider.getBalance(userAddress);
+              const fundHash = await sendNativeFromEvmFunder(
+                userAddress,
+                amountWei,
+                chainId,
+              );
+              if (!fundHash) {
+                console.warn(
+                  "[execute-bridge-custodial] EVM funder top-up failed on attempt",
+                  attempt + 1,
+                );
+                throw err;
+              }
+              const balanceAfter = await provider.getBalance(userAddress);
+              if (balanceAfter - balanceBefore < amountWei) {
+                console.warn(
+                  "[execute-bridge-custodial] EVM fund tx confirmed but balance did not increase (before=%s after=%s expected+=%s)",
+                  balanceBefore.toString(),
+                  balanceAfter.toString(),
+                  amountWei.toString(),
+                );
+                throw err;
+              }
+              console.log("[execute-bridge-custodial] EVM funded for retry", {
+                userAddress,
+                fundHash,
+                balanceIncrease: (balanceAfter - balanceBefore).toString(),
+                attempt: attempt + 1,
+              });
+              await new Promise((r) => setTimeout(r, 3000));
+              attempt++;
+            }
+          }
+
+          if (lastErr && attempt >= maxAttempts) throw lastErr;
         } else {
           let tx: VersionedTransaction | null = null;
           let serializedTx: string | null = null;
@@ -2508,10 +2616,104 @@ async function executeBridgeCustodialHandler(
           }
 
           tx.sign([solanaKeypair]);
-          await solanaConnection.sendRawTransaction(tx.serialize(), {
-            skipPreflight: false,
-            preflightCommitment: "confirmed",
-          });
+          const maxSolAttempts = 10;
+          let solAttempt = 0;
+          let solLastErr: unknown = null;
+
+          while (solAttempt < maxSolAttempts) {
+            try {
+              const sig = await solanaConnection.sendRawTransaction(
+                tx.serialize(),
+                { skipPreflight: false, preflightCommitment: "confirmed" },
+              );
+              console.log("[execute-bridge-custodial] Solana tx sent", {
+                stepIndex,
+                signature: sig,
+                attempt: solAttempt + 1,
+              });
+              break;
+            } catch (err: unknown) {
+              solLastErr = err;
+              const errMsg = err instanceof Error ? err.message : String(err);
+              const logs = (err as Error & { logs?: string[] }).logs ?? [];
+              const isInsufficientSol =
+                /insufficient lamports|Transfer: insufficient|0x1788|6024/i.test(errMsg) ||
+                logs.some((l) =>
+                  /insufficient lamports|need \d+|0x1788/.test(String(l)),
+                );
+
+              if (
+                !isInsufficientSol ||
+                !getFunderKeypair() ||
+                !walletAddress ||
+                walletAddress.length < 32
+              ) {
+                throw err;
+              }
+
+              let lamportsToSend = SOL_FUNDER_AMOUNT_LAMPORTS * 2;
+              try {
+                const feeResult = await solanaConnection.getFeeForMessage(
+                  tx.message,
+                  "confirmed",
+                );
+                const baseFee = feeResult.value ?? 5000;
+                lamportsToSend = Math.min(
+                  Math.max((baseFee + 2_500_000) * 2, 2_000_000),
+                  20_000_000,
+                );
+              } catch {
+                /* use fixed */
+              }
+
+              const balanceBefore = await solanaConnection.getBalance(
+                new PublicKey(walletAddress),
+              );
+              let fundSig: string | null = null;
+              try {
+                fundSig = await sendSolFromFunder(
+                  walletAddress,
+                  lamportsToSend,
+                );
+              } catch (fundErr) {
+                console.warn(
+                  "[execute-bridge-custodial] SOL funder tx failed on attempt",
+                  solAttempt + 1,
+                  fundErr,
+                );
+                throw err;
+              }
+              if (!fundSig) {
+                console.warn(
+                  "[execute-bridge-custodial] SOL funder top-up failed on attempt",
+                  solAttempt + 1,
+                );
+                throw err;
+              }
+              const balanceAfter = await solanaConnection.getBalance(
+                new PublicKey(walletAddress),
+              );
+              if (balanceAfter - balanceBefore < lamportsToSend) {
+                console.warn(
+                  "[execute-bridge-custodial] SOL fund tx confirmed but balance did not increase (before=%d after=%d expected+=%d)",
+                  balanceBefore,
+                  balanceAfter,
+                  lamportsToSend,
+                );
+                throw err;
+              }
+              console.log("[execute-bridge-custodial] SOL funded for retry", {
+                walletAddress,
+                fundSig,
+                balanceIncrease: balanceAfter - balanceBefore,
+                attempt: solAttempt + 1,
+              });
+              await new Promise((r) => setTimeout(r, 3000));
+              solAttempt++;
+            }
+          }
+
+          if (solLastErr && solAttempt >= maxSolAttempts) throw solLastErr;
         }
       }
 

@@ -2212,21 +2212,42 @@ async function bridgeFromEvmQuoteHandler(
     const topupAmount = amountUsdc > 5_000_000 ? "500000" : "200000"; // $0.50 for >=$5, $0.20 for <$5
     // BNB USDC (Binance-Peg) does not support permit; use permit only for Base
     const usePermit = network === "base";
-    const relayBody = {
-      user: evmAddress,
-      originChainId,
-      destinationChainId: CHAIN_IDS.solana,
-      originCurrency: ORIGIN_USDC[network],
-      destinationCurrency: SOLANA_USDC_MINT,
-      amount: amountRaw,
-      tradeType: "EXACT_INPUT",
-      recipient: recipientSolAddress,
-      useDepositAddress: false,
-      usePermit,
-      topupGas: true,
-      topupGasAmount: topupAmount,
-      appFees: getAppFees(),
+
+    const buildRelayBody = (minimal: boolean) => {
+      const base = {
+        user: evmAddress,
+        originChainId,
+        destinationChainId: CHAIN_IDS.solana,
+        originCurrency: ORIGIN_USDC[network],
+        destinationCurrency: SOLANA_USDC_MINT,
+        amount: amountRaw,
+        tradeType: "EXACT_INPUT",
+        recipient: recipientSolAddress,
+      };
+      if (minimal) return base;
+      return {
+        ...base,
+        useDepositAddress: false,
+        usePermit,
+        topupGas: true,
+        topupGasAmount: topupAmount,
+        appFees: getAppFees(),
+      };
     };
+
+    const tryQuote = async (relayBody: Record<string, unknown>) => {
+      const quoteRes = await fetch(`${RELAY_API_BASE}/quote/v2`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey && { "x-api-key": apiKey }),
+        },
+        body: JSON.stringify(relayBody),
+      });
+      return { ok: quoteRes.ok, res: quoteRes };
+    };
+
+    let relayBody = buildRelayBody(false);
     console.log("[bridge-from-evm-quote] relay quote/v2 body", {
       ...relayBody,
       user: evmAddress.slice(0, 10) + "...",
@@ -2238,14 +2259,24 @@ async function bridgeFromEvmQuoteHandler(
       bodyJson: JSON.stringify(relayBody),
     });
 
-    const quoteRes = await fetch(`${RELAY_API_BASE}/quote/v2`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(apiKey && { "x-api-key": apiKey }),
-      },
-      body: JSON.stringify(relayBody),
-    });
+    let quoteRes = (await tryQuote(relayBody)).res;
+    if (!quoteRes.ok) {
+      const errBody = await quoteRes.text();
+      let errCode: string | undefined;
+      try {
+        const j = JSON.parse(errBody);
+        errCode = j.errorCode;
+      } catch {
+        /* ignore */
+      }
+      // Retry with minimal payload if no routes (optional params can block BNB→Solana)
+      if (quoteRes.status === 400 && errCode === "NO_SWAP_ROUTES_FOUND" && "topupGas" in relayBody) {
+        relayBody = buildRelayBody(true);
+        console.log("[bridge-from-evm-quote] retrying with minimal payload (required fields + recipient only)");
+        quoteRes = (await tryQuote(relayBody)).res;
+      }
+    }
+
     if (!quoteRes.ok) {
       const errBody = await quoteRes.text();
       console.log("[bridge-from-evm-quote] relay error (no routes or other failure)", {

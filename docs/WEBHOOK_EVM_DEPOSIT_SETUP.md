@@ -23,6 +23,8 @@ curl -H "Authorization: Bearer $CRON_SECRET" \
 
 Balance is from RPC (`Contract.balanceOf` / 1e6), not Moralis. See `api/cron/bridge-evm-usdc-fallback.ts`.
 
+**USDC in cash balance / positions:** Solana USDC + Base USDC + BNB USDC are **added together** (one combined cash figure). Base/BNB USDC always comes from RPC in positions; Moralis is used only for non-USDC EVM tokens.
+
 ---
 
 ## 2. API keys and env vars

@@ -95,13 +95,9 @@ async function getEvmTokenPositions(address: string): Promise<EvmTokenPosition[]
         };
         const list = Array.isArray(data?.result) ? data.result : [];
         for (const t of list) {
-          // Prefer balance_formatted (human-readable); fallback to raw balance / 10^decimals
-          // Moralis balance is raw units; balance_formatted may be empty in some responses
-          const formatted = t.balance_formatted?.trim();
+          // Prefer raw balance / 10^decimals (authoritative); Moralis balance_formatted can be wrong (returns raw)
           let bal = 0;
-          if (formatted !== "" && formatted != null) {
-            bal = parseFloat(formatted);
-          } else if (
+          if (
             t.balance != null &&
             t.balance !== "" &&
             typeof t.decimals === "number" &&
@@ -111,6 +107,11 @@ async function getEvmTokenPositions(address: string): Promise<EvmTokenPosition[]
               bal = Number(BigInt(t.balance)) / Math.pow(10, t.decimals);
             } catch {
               bal = 0;
+            }
+          } else {
+            const formatted = t.balance_formatted?.trim();
+            if (formatted !== "" && formatted != null) {
+              bal = parseFloat(formatted);
             }
           }
           const value = t.usd_value ?? 0;

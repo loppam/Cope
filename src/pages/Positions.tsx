@@ -175,8 +175,41 @@ export function Positions() {
           });
           const data = await res.json();
           if (res.ok && data.evmAddress) {
+            // USDC: always use RPC (base.usdc, bnb.usdc), not Moralis tokens
+            if (data.base?.usdc > 0) {
+              positionsData.push({
+                mint: "base-usdc",
+                symbol: "USDC",
+                name: "USD Coin (Base)",
+                amount: data.base.usdc,
+                value: data.base.usdc,
+                pnl: 0,
+                pnlPercent: 0,
+                realized: 0,
+                unrealized: 0,
+                costBasis: 0,
+                chain: "base",
+              });
+            }
+            if (data.bnb?.usdc > 0) {
+              positionsData.push({
+                mint: "bnb-usdc",
+                symbol: "USDC",
+                name: "USD Coin (BNB)",
+                amount: data.bnb.usdc,
+                value: data.bnb.usdc,
+                pnl: 0,
+                pnlPercent: 0,
+                realized: 0,
+                unrealized: 0,
+                costBasis: 0,
+                chain: "bnb",
+              });
+            }
             if (Array.isArray(data.tokens) && data.tokens.length > 0) {
+              const skipMints = new Set(["base-usdc", "bnb-usdc"]);
               for (const t of data.tokens) {
+                if (skipMints.has(t.mint ?? "")) continue;
                 if (t.value > 0) {
                   positionsData.push({
                     mint: t.mint,
@@ -194,23 +227,9 @@ export function Positions() {
                   });
                 }
               }
-            } else {
-              // Fallback to legacy base/bnb structure when Moralis tokens not available
-              if (data.base?.usdc > 0) {
-                positionsData.push({
-                  mint: "base-usdc",
-                  symbol: "USDC",
-                  name: "USD Coin (Base)",
-                  amount: data.base.usdc,
-                  value: data.base.usdc,
-                  pnl: 0,
-                  pnlPercent: 0,
-                  realized: 0,
-                  unrealized: 0,
-                  costBasis: 0,
-                  chain: "base",
-                });
-              }
+            }
+            // Native ETH/BNB when no Moralis tokens (USDC already added above from RPC)
+            if (!Array.isArray(data.tokens) || data.tokens.length === 0) {
               if (data.base?.native > 0) {
                 positionsData.push({
                   mint: "base-eth",
@@ -224,21 +243,6 @@ export function Positions() {
                   unrealized: 0,
                   costBasis: 0,
                   chain: "base",
-                });
-              }
-              if (data.bnb?.usdc > 0) {
-                positionsData.push({
-                  mint: "bnb-usdc",
-                  symbol: "USDC",
-                  name: "USD Coin (BNB)",
-                  amount: data.bnb.usdc,
-                  value: data.bnb.usdc,
-                  pnl: 0,
-                  pnlPercent: 0,
-                  realized: 0,
-                  unrealized: 0,
-                  costBasis: 0,
-                  chain: "bnb",
                 });
               }
               if (data.bnb?.native > 0) {

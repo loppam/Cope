@@ -32,7 +32,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { WalletNotification } from "@/lib/notifications";
-import { shortenAddress, formatCurrency, getApiBase } from "@/lib/utils";
+import { shortenAddress, formatCurrency, formatTokenAmountCompact, getApiBase } from "@/lib/utils";
 import { getWalletPortfolioWithPnL } from "@/lib/birdeye";
 import { fetchNativePrices } from "@/lib/coingecko";
 import { apiCache, UI_CACHE_TTL_MS } from "@/lib/cache";
@@ -371,18 +371,9 @@ export function Home() {
     return date.toLocaleDateString();
   };
 
-  const formatTokenAmount = (value: number | undefined | null) => {
-    if (value == null || Number.isNaN(value)) return null;
-    const abs = Math.abs(value);
-    if (abs >= 1000000) return `${(value / 1000000).toFixed(2)}M`;
-    if (abs >= 1000) return `${(value / 1000).toFixed(2)}K`;
-    const maximumFractionDigits = abs >= 1 ? 4 : 6;
-    return value.toLocaleString("en-US", { maximumFractionDigits });
-  };
-
   const getAmountLabel = (notification: WalletNotification) => {
     if (notification.amount != null && notification.amountSymbol) {
-      const formatted = formatTokenAmount(notification.amount);
+      const formatted = formatTokenAmountCompact(notification.amount);
       return formatted ? `${formatted} ${notification.amountSymbol}` : null;
     }
     if (notification.amountUsd != null) {

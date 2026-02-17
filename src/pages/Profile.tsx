@@ -104,6 +104,10 @@ export function Profile() {
     watchlist,
   } = useAuth();
   const [isRemovingWallet, setIsRemovingWallet] = useState(false);
+  const [showRemoveWalletModal, setShowRemoveWalletModal] = useState(false);
+  const [removeWalletBalance, setRemoveWalletBalance] = useState<number | null>(
+    null,
+  );
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [usdcBalance, setUsdcBalance] = useState<number>(0);
@@ -1543,24 +1547,78 @@ export function Profile() {
                 {walletAddress && (
                   <button
                     onClick={async () => {
-                      if (
-                        !confirm(
-                          "Are you sure you want to remove your wallet? You will need to set it up again.",
-                        )
-                      ) {
-                        return;
-                      }
+                      setSettingsOpen(false);
                       setIsRemovingWallet(true);
                       try {
-                        await removeWallet();
-                        setSettingsOpen(false);
-                        navigate("/auth/wallet-setup");
+                        const base = getApiBase();
+                        const [portfolio, nativePrices, evmData] =
+                          await Promise.all([
+                            getWalletPortfolioWithPnL(walletAddress).catch(
+                              () => ({
+                                solBalance: 0,
+                                usdcBalance: 0,
+                                positions: [],
+                                totalUsd: 0,
+                              }),
+                            ),
+                            fetchNativePrices(),
+                            user
+                              ? user
+                                  .getIdToken()
+                                  .then((token) =>
+                                    fetch(
+                                      `${base}/api/relay/evm-balances`,
+                                      {
+                                        headers: {
+                                          Authorization: `Bearer ${token}`,
+                                        },
+                                      },
+                                    )
+                                      .then((r) => r.json())
+                                      .catch(() => null),
+                                  )
+                              : Promise.resolve(null),
+                          ]);
+                        const solanaVal =
+                          portfolio.usdcBalance +
+                          (portfolio.positions ?? []).reduce(
+                            (s: number, p: { value?: number }) =>
+                              s + (p.value ?? 0),
+                            0,
+                          );
+                        let evmVal = 0;
+                        if (evmData) {
+                          const b = evmData.base ?? { usdc: 0, native: 0 };
+                          const n = evmData.bnb ?? { usdc: 0, native: 0 };
+                          const prices = nativePrices || { eth: 3000, bnb: 600 };
+                          evmVal =
+                            (b.usdc ?? 0) +
+                            (b.native ?? 0) * prices.eth +
+                            (n.usdc ?? 0) +
+                            (n.native ?? 0) * prices.bnb;
+                          if (
+                            Array.isArray(evmData.tokens) &&
+                            evmData.tokens.length > 0
+                          ) {
+                            evmVal = evmData.tokens.reduce(
+                              (s: number, t: { value?: number }) =>
+                                s + (t?.value ?? 0),
+                              evmVal,
+                            );
+                          }
+                        }
+                        const total = solanaVal + evmVal;
+                        setRemoveWalletBalance(total);
+                        setShowRemoveWalletModal(true);
                       } catch (error) {
-                        console.error("Remove wallet error:", error);
+                        console.error("Error fetching balance for remove:", error);
+                        setRemoveWalletBalance(0);
+                        setShowRemoveWalletModal(true);
                       } finally {
                         setIsRemovingWallet(false);
                       }
                     }}
+                    disabled={isRemovingWallet}
                     data-tap-haptic
                     className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-[#FF4757]/10 active:bg-[#FF4757]/15 transition-colors text-left group min-h-[48px] mt-2"
                   >
@@ -1569,7 +1627,7 @@ export function Profile() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm text-[#FF4757]">
-                        {isRemovingWallet ? "Removing..." : "Remove Wallet"}
+                        {isRemovingWallet ? "Checking..." : "Remove Wallet"}
                       </p>
                       <p className="text-xs text-white/60">
                         Disconnect and delete wallet from account
@@ -1602,6 +1660,66 @@ export function Profile() {
               </div>
             </SheetContent>
           </Sheet>
+
+          {/* Remove wallet confirmation modal - warns if user has funds */}
+          <AlertDialog
+            open={showRemoveWalletModal}
+            onOpenChange={(open) => {
+              setShowRemoveWalletModal(open);
+              if (!open) setRemoveWalletBalance(null);
+            }}
+          >
+            <AlertDialogContent className="bg-[#0f0f0f] border-white/10 text-white">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Remove wallet?</AlertDialogTitle>
+                <AlertDialogDescription className="text-white/70">
+                  {removeWalletBalance != null && removeWalletBalance > 0 ? (
+                    <>
+                      You have about $
+                      {removeWalletBalance.toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}{" "}
+                      in your wallet. Removing it will disconnect the wallet from
+                      your account. We will archive your wallet details for
+                      support recovery. Are you sure you want to continue?
+                    </>
+                  ) : (
+                    <>
+                      Are you sure you want to remove your wallet? You will need
+                      to set it up again. We will archive your wallet details
+                      for support recovery.
+                    </>
+                  )}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="bg-white/10 border-white/10 text-white hover:bg-white/15">
+                  Cancel
+                </AlertDialogCancel>
+                <button
+                  onClick={async () => {
+                    setIsRemovingWallet(true);
+                    try {
+                      await removeWallet();
+                      setShowRemoveWalletModal(false);
+                      setRemoveWalletBalance(null);
+                      navigate("/auth/wallet-setup");
+                    } catch (error) {
+                      console.error("Remove wallet error:", error);
+                    } finally {
+                      setIsRemovingWallet(false);
+                    }
+                  }}
+                  disabled={isRemovingWallet}
+                  data-tap-haptic
+                  className="bg-[#FF4757] hover:bg-[#FF4757]/90 text-white px-4 py-2 rounded-lg font-medium disabled:opacity-50"
+                >
+                  {isRemovingWallet ? "Removing…" : "Yes, remove wallet"}
+                </button>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
 
           {/* Delete account confirmation modal - double verification */}
           <AlertDialog

@@ -312,10 +312,11 @@ interface HeliusTokenTransfer {
 function formatTokenAmount(value: number): string {
   if (!Number.isFinite(value)) return "0";
   const abs = Math.abs(value);
+  if (abs >= 1_000_000_000_000) return `${(value / 1_000_000_000_000).toFixed(2)}T`;
+  if (abs >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`;
   if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
   if (abs >= 1_000) return `${(value / 1_000).toFixed(2)}K`;
-  const maximumFractionDigits = abs >= 1 ? 4 : 6;
-  return value.toLocaleString("en-US", { maximumFractionDigits });
+  return value.toFixed(2);
 }
 
 function getNativeBalanceChangeLamports(tx: HeliusWebhookPayload, actorWallet: string): number | null {

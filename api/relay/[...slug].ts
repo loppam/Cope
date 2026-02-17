@@ -481,6 +481,16 @@ async function sendNativeFromEvmFunder(
 const REVERT_ERROR_SELECTOR = "0x08c379a0";
 const PANIC_ERROR_SELECTOR = "0x4e487b71";
 const FAILED_INNER_CALL_SELECTOR = id("FailedInnerCall()").slice(0, 10).toLowerCase();
+const ERC20_INSUFFICIENT_BALANCE_SELECTOR = id(
+  "ERC20InsufficientBalance(address,uint256,uint256)",
+)
+  .slice(0, 10)
+  .toLowerCase();
+const ERC20_INSUFFICIENT_ALLOWANCE_SELECTOR = id(
+  "ERC20InsufficientAllowance(address,uint256,uint256)",
+)
+  .slice(0, 10)
+  .toLowerCase();
 const SOLIDITY_PANIC_CODES: Record<string, string> = {
   "0x01": "Assertion violated",
   "0x11": "Arithmetic overflow/underflow",
@@ -526,10 +536,52 @@ function extractRevertData(err: unknown): string | null {
   return null;
 }
 
-function decodeRevertData(data: string): { selector: string; decoded?: string } {
+function decodeRevertData(data: string): {
+  selector: string;
+  decoded?: string;
+  details?: Record<string, string>;
+} {
   const selector = data.slice(0, 10).toLowerCase();
   if (selector === FAILED_INNER_CALL_SELECTOR) {
     return { selector, decoded: "FailedInnerCall()" };
+  }
+  if (selector === ERC20_INSUFFICIENT_BALANCE_SELECTOR) {
+    try {
+      const [account, balance, needed] = AbiCoder.defaultAbiCoder().decode(
+        ["address", "uint256", "uint256"],
+        `0x${data.slice(10)}`,
+      );
+      return {
+        selector,
+        decoded: "ERC20InsufficientBalance(address,uint256,uint256)",
+        details: {
+          account: String(account),
+          balance: (balance as bigint).toString(),
+          needed: (needed as bigint).toString(),
+        },
+      };
+    } catch {
+      return { selector };
+    }
+  }
+  if (selector === ERC20_INSUFFICIENT_ALLOWANCE_SELECTOR) {
+    try {
+      const [spender, allowance, needed] = AbiCoder.defaultAbiCoder().decode(
+        ["address", "uint256", "uint256"],
+        `0x${data.slice(10)}`,
+      );
+      return {
+        selector,
+        decoded: "ERC20InsufficientAllowance(address,uint256,uint256)",
+        details: {
+          spender: String(spender),
+          allowance: (allowance as bigint).toString(),
+          needed: (needed as bigint).toString(),
+        },
+      };
+    } catch {
+      return { selector };
+    }
   }
   if (selector === REVERT_ERROR_SELECTOR) {
     try {
@@ -562,6 +614,7 @@ type EvmRevertDetails = {
   data: string;
   selector: string;
   decoded?: string;
+  details?: Record<string, string>;
   source: "error" | "call";
 };
 
@@ -1225,6 +1278,33 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       });
       return res.status(400).json({ error: "Invalid step index or steps" });
     }
+    const stepsSummary = steps.map((s, idx) => {
+      const stepObj = s as {
+        kind?: unknown;
+        items?: Array<{ data?: unknown; check?: { endpoint?: string } }>;
+      };
+      const first = stepObj.items?.[0];
+      const dataObj = first?.data as
+        | { chainId?: unknown; data?: unknown }
+        | undefined;
+      return {
+        stepIndex: idx,
+        kind: typeof stepObj.kind === "string" ? stepObj.kind : "unknown",
+        hasData: Boolean(first?.data),
+        hasCheck: Boolean(first?.check?.endpoint),
+        chainId:
+          typeof dataObj?.chainId === "number" ? dataObj.chainId : null,
+        dataPrefix:
+          typeof dataObj?.data === "string"
+            ? dataObj.data.slice(0, 10)
+            : null,
+      };
+    });
+    console.log("[execute-step] steps overview", {
+      userId,
+      stepsCount: steps.length,
+      stepsSummary,
+    });
     const step = steps[stepIndex] as
       | {
           kind?: unknown;
@@ -1452,7 +1532,11 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
             console.warn("[execute-step] EVM revert details", {
               selector: revertDetails.selector,
               decoded: revertDetails.decoded ?? null,
+              details: revertDetails.details ?? null,
+              dataLength: revertDetails.data.length,
               dataPreview: revertDetails.data.slice(0, 66),
+              dataFull:
+                revertDetails.data.length <= 512 ? revertDetails.data : null,
               source: revertDetails.source,
             });
           }

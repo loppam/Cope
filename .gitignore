@@ -53,6 +53,19 @@ dev-sw.js
 !src/sw.js
 firestore.rules
 
+# Gradle
+.gradle
+
 # TWA / Solana dApp Store (keystore and password must not be committed)
 twa-build/android.keystore
 twa-build/.keystore-pass
+
+# TWA build artifacts
+twa-build/*.aab
+twa-build/*.apk
+twa-build/*.apk.idsig
+twa-build/manifest-checksum.txt
+twa-build/
+
+# pnpm
+.pnpm-store

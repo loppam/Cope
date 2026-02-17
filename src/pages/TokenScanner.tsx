@@ -737,10 +737,10 @@ export function TokenScanner() {
       <h1 className="mb-4 text-xl font-bold text-white">Token Scanner</h1>
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ScannerTab)} className="w-full">
-        {/* Segmented control: Discover first, then Token — sliding pill indicator */}
-        <div className="relative w-full grid grid-cols-2 mb-6 rounded-2xl bg-white/[0.06] border border-white/15 p-1.5 min-h-[52px] overflow-hidden">
+        {/* Segmented control: Discover first, then Token */}
+        <div className="relative w-full grid grid-cols-2 mb-6 rounded-2xl bg-white/[0.04] border border-white/10 p-1.5 min-h-[56px] overflow-hidden shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
           <motion.div
-            className="absolute inset-y-[6px] rounded-xl bg-[#12d585]/20 border border-[#12d585]/50 shadow-[0_0_20px_-4px_rgba(18,213,133,0.3)]"
+            className="absolute inset-y-[6px] rounded-xl bg-gradient-to-b from-[#12d585]/30 to-[#12d585]/15 border border-[#12d585]/40 shadow-[0_0_24px_-2px_rgba(18,213,133,0.35),inset_0_1px_0_rgba(255,255,255,0.1)]"
             style={{ width: "calc(50% - 3px)" }}
             initial={false}
             animate={{ left: activeTab === "discover" ? "6px" : "calc(50% + 3px)" }}
@@ -752,10 +752,10 @@ export function TokenScanner() {
             aria-selected={activeTab === "discover"}
             onClick={() => setActiveTab("discover")}
             data-tap-haptic
-            className="tap-press relative z-10 flex items-center justify-center gap-2 py-3 px-4 min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
+            className={`tap-press relative z-10 flex items-center justify-center gap-2.5 py-3.5 px-4 min-h-[44px] rounded-xl text-sm font-semibold transition-all duration-200 ${activeTab === "discover" ? "" : "text-white/60 hover:text-white/75"}`}
           >
-            <Users className={`w-4 h-4 flex-shrink-0 ${activeTab === "discover" ? "text-[#12d585]" : "text-white/50"}`} />
-            <span className={activeTab === "discover" ? "text-[#12d585]" : "text-white/60"}>Discover</span>
+            <Users className={`w-4 h-4 flex-shrink-0 transition-colors ${activeTab === "discover" ? "text-[#12d585] drop-shadow-[0_0_8px_rgba(18,213,133,0.5)]" : "text-white/50"}`} />
+            <span className={activeTab === "discover" ? "text-[#12d585] font-bold tracking-tight" : "text-white/60"}>Discover</span>
           </button>
           <button
             type="button"
@@ -763,12 +763,16 @@ export function TokenScanner() {
             aria-selected={activeTab === "token"}
             onClick={() => setActiveTab("token")}
             data-tap-haptic
-            className="tap-press relative z-10 flex items-center justify-center gap-2 py-3 px-4 min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
+            className={`tap-press relative z-10 flex items-center justify-center gap-2.5 py-3.5 px-4 min-h-[44px] rounded-xl text-sm font-semibold transition-all duration-200 ${activeTab === "token" ? "" : "text-white/60 hover:text-white/75"}`}
           >
-            <Target className={`w-4 h-4 flex-shrink-0 ${activeTab === "token" ? "text-[#12d585]" : "text-white/50"}`} />
-            <span className={activeTab === "token" ? "text-[#12d585]" : "text-white/60"}>Token</span>
+            <Target className={`w-4 h-4 flex-shrink-0 transition-colors ${activeTab === "token" ? "text-[#12d585] drop-shadow-[0_0_8px_rgba(18,213,133,0.5)]" : "text-white/50"}`} />
+            <span className={activeTab === "token" ? "text-[#12d585] font-bold tracking-tight" : "text-white/60"}>Token</span>
           </button>
         </div>
+
+        <TabsContent value="discover" className="mt-0">
+          <DiscoverTabContent />
+        </TabsContent>
 
         <TabsContent value="token" className="mt-0">
       <div className="mb-6 rounded-xl border border-white/10 bg-white/5 p-2">
@@ -1111,10 +1115,6 @@ export function TokenScanner() {
           Enter a token address (Solana, Base, or BNB) and tap Scan.
         </div>
       )}
-        </TabsContent>
-
-        <TabsContent value="discover" className="mt-0">
-          <DiscoverTabContent />
         </TabsContent>
       </Tabs>
     </div>

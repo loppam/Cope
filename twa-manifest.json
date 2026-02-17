@@ -1,7 +1,7 @@
 {
   "packageId": "com.trycope.twa",
   "host": "trycope.com",
-  "name": "COPE - Catch Onchain Plays Early",
+  "name": "COPE - Social Trading App",
   "launcherName": "COPE",
   "display": "standalone",
   "themeColor": "#12D585",
@@ -15,33 +15,15 @@
   "startUrl": "/",
   "iconUrl": "https://trycope.com/icons/icon-512x512.png",
   "maskableIconUrl": "https://trycope.com/icons/icon-512x512.png",
+  "monochromeIconUrl": "https://trycope.com/icons/icon-72x72.png",
   "splashScreenFadeOutDuration": 300,
   "signingKey": {
-    "path": "/Users/macbook2020m1/Desktop/cope/android.keystore",
+    "path": "/Users/macbook2020m1/Desktop/cope/twa-build/android.keystore",
     "alias": "android"
   },
   "appVersionName": "1",
   "appVersionCode": 1,
-  "shortcuts": [
-    {
-      "name": "Home",
-      "shortName": "Home",
-      "url": "https://trycope.com/app/home",
-      "chosenIconUrl": "https://trycope.com/icons/icon-192x192.png"
-    },
-    {
-      "name": "Trade",
-      "shortName": "Trade",
-      "url": "https://trycope.com/app/trade",
-      "chosenIconUrl": "https://trycope.com/icons/icon-192x192.png"
-    },
-    {
-      "name": "Scanner",
-      "shortName": "Scanner",
-      "url": "https://trycope.com/scanner",
-      "chosenIconUrl": "https://trycope.com/icons/icon-192x192.png"
-    }
-  ],
+  "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://trycope.com/manifest.json",
   "fallbackType": "customtabs",

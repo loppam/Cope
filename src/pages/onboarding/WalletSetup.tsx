@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
@@ -11,8 +11,15 @@ import { toast } from "sonner";
 
 export function WalletSetup() {
   const navigate = useNavigate();
-  const { user, updateWallet } = useAuth();
+  const { user, userProfile, updateWallet } = useAuth();
   const [isGenerating, setIsGenerating] = useState(false);
+
+  // Belt-and-suspenders: if user has a wallet, redirect away (prevents overwrite)
+  useEffect(() => {
+    if (userProfile?.walletAddress) {
+      navigate("/app/home", { replace: true });
+    }
+  }, [userProfile?.walletAddress, navigate]);
 
   return (
     <div

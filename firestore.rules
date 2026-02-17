@@ -44,6 +44,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Deleted wallets: server-only. Archived when user removes wallet; support recovery via Admin SDK.
+    match /deletedWallets/{docId} {
+      allow read, write: if false;
+    }
+
     // Balance snapshots: client read/write own only (for 24h change). Cron updates via Admin SDK.
     match /balanceSnapshots/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;

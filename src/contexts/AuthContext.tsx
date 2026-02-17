@@ -17,7 +17,6 @@ import {
   updateUserBalance,
   updateUserProfile,
   WatchedWallet,
-  removeUserWallet,
   getFirebaseCallbackUrl,
 } from "@/lib/auth";
 import { getApiBase } from "@/lib/utils";
@@ -465,14 +464,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const handleRemoveWallet = async () => {
     if (!user) throw new Error("User not authenticated");
     try {
-      // Remove custodial EVM address from Alchemy deposit webhooks before clearing wallet
       const token = await user.getIdToken();
       const base = getApiBase();
-      await fetch(`${base}/api/relay/evm-address-remove`, {
+      const res = await fetch(`${base}/api/account/remove-wallet`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
       });
-      await removeUserWallet(user.uid);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { error?: string }).error || res.statusText);
+      }
       await refreshProfile();
       toast.success("Wallet removed successfully");
     } catch (error: any) {

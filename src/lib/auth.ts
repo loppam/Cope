@@ -59,10 +59,14 @@ async function saveUserProfile(user: User, credential: any): Promise<void> {
   const existingDoc = await getDoc(userRef);
   const existingData = existingDoc.exists() ? existingDoc.data() : null;
 
-  // Only set wallet fields if user doesn't exist or doesn't have a wallet
-  // This prevents overwriting existing wallet data on login
-  const hasExistingWallet =
-    existingData?.walletAddress && existingData?.encryptedSecretKey;
+  // Only set wallet fields if user doesn't exist or doesn't have a wallet.
+  // Use walletAddress only - never require encryptedSecretKey for preservation.
+  // If a user has a wallet address, we must never overwrite it (prevents "lose wallet on refresh" bug).
+  const hasExistingWallet = !!(
+    existingData?.walletAddress &&
+    typeof existingData.walletAddress === "string" &&
+    existingData.walletAddress.trim() !== ""
+  );
 
   const twitterData: any = {
     uid: user.uid,

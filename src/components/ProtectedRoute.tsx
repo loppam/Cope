@@ -48,6 +48,13 @@ export function ProtectedRoute({
   const isWalletSetupPage =
     location.pathname.startsWith("/auth/wallet-setup") ||
     location.pathname.startsWith("/wallet/fund");
+  const hasWallet = !!userProfile?.walletAddress;
+
+  // Wallet-setup ("Generate wallet") is ONLY for users without a wallet.
+  // Users with a wallet must not access it - prevents accidentally overwriting.
+  if (location.pathname.startsWith("/auth/wallet-setup") && hasWallet) {
+    return <Navigate to="/app/home" replace />;
+  }
 
   // If this is a wallet setup page, allow access without wallet
   if (isWalletSetupPage || allowWithoutWallet) {
@@ -59,7 +66,6 @@ export function ProtectedRoute({
   // Only redirect to wallet setup if:
   // 1. They don't have a walletAddress AND isNew is explicitly true, OR
   // 2. They don't have a walletAddress AND isNew is undefined (new user without wallet)
-  const hasWallet = !!userProfile?.walletAddress;
   const isNewUser = userProfile?.isNew === true;
   const needsWalletSetup =
     !hasWallet && (isNewUser || userProfile?.isNew === undefined);

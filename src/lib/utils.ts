@@ -26,20 +26,47 @@ export function shortenAddress(address: string, chars = 4): string {
   return `${address.slice(0, chars)}...${address.slice(-chars)}`;
 }
 
-// Format numbers
+// Format numbers with K, M, B, T suffixes (decimals default 2)
 export function formatNumber(num: number, decimals = 2): string {
-  if (num >= 1000000) {
-    return `${(num / 1000000).toFixed(decimals)}M`;
+  const sign = num < 0 ? "-" : "";
+  const value = Math.abs(num);
+  if (value >= 1_000_000_000_000) {
+    return `${sign}${(value / 1_000_000_000_000).toFixed(decimals)}T`;
   }
-  if (num >= 1000) {
-    return `${(num / 1000).toFixed(decimals)}K`;
+  if (value >= 1_000_000_000) {
+    return `${sign}${(value / 1_000_000_000).toFixed(decimals)}B`;
   }
-  return num.toFixed(decimals);
+  if (value >= 1_000_000) {
+    return `${sign}${(value / 1_000_000).toFixed(decimals)}M`;
+  }
+  if (value >= 1_000) {
+    return `${sign}${(value / 1_000).toFixed(decimals)}K`;
+  }
+  return `${sign}${value.toFixed(decimals)}`;
 }
 
-// Format currency
+// Format currency ($ prefix, K/M/B/T for large values)
 export function formatCurrency(num: number, decimals = 2): string {
-  return `$${formatNumber(num, decimals)}`;
+  return `$${formatNumber(Math.abs(num), decimals)}`;
+}
+
+// Format token/amount for notifications (no $ prefix, handles K/M/B/T, 2 decimals)
+export function formatTokenAmountCompact(value: number | undefined | null): string | null {
+  if (value == null || Number.isNaN(value)) return null;
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000_000_000) {
+    return `${(value / 1_000_000_000_000).toFixed(2)}T`;
+  }
+  if (abs >= 1_000_000_000) {
+    return `${(value / 1_000_000_000).toFixed(2)}B`;
+  }
+  if (abs >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(2)}M`;
+  }
+  if (abs >= 1_000) {
+    return `${(value / 1_000).toFixed(2)}K`;
+  }
+  return value.toFixed(2);
 }
 
 // Format percentage

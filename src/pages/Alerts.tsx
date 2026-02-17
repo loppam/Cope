@@ -3,7 +3,7 @@ import { Card } from "@/components/Card";
 import { Button } from "@/components/Button";
 import { Bell, ExternalLink, Check, Trash2, Copy } from "lucide-react";
 import { useNavigate } from "react-router";
-import { shortenAddress } from "@/lib/utils";
+import { shortenAddress, formatCurrency, formatTokenAmountCompact } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   markNotificationAsRead,
@@ -183,29 +183,9 @@ export function Alerts() {
     }
   };
 
-  const formatCurrency = (value: number | undefined | null) => {
-    const numValue = value ?? 0;
-    if (numValue >= 1000000) {
-      return `$${(numValue / 1000000).toFixed(2)}M`;
-    }
-    if (numValue >= 1000) {
-      return `$${(numValue / 1000).toFixed(2)}K`;
-    }
-    return `$${numValue.toFixed(2)}`;
-  };
-
-  const formatTokenAmount = (value: number | undefined | null) => {
-    if (value == null || Number.isNaN(value)) return null;
-    const abs = Math.abs(value);
-    if (abs >= 1000000) return `${(value / 1000000).toFixed(2)}M`;
-    if (abs >= 1000) return `${(value / 1000).toFixed(2)}K`;
-    const maximumFractionDigits = abs >= 1 ? 4 : 6;
-    return value.toLocaleString("en-US", { maximumFractionDigits });
-  };
-
   const getAmountLabel = (notification: WalletNotification) => {
     if (notification.amount != null && notification.amountSymbol) {
-      const formatted = formatTokenAmount(notification.amount);
+      const formatted = formatTokenAmountCompact(notification.amount);
       return formatted ? `${formatted} ${notification.amountSymbol}` : null;
     }
     if (notification.amountUsd != null) {

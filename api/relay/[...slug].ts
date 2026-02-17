@@ -20,10 +20,12 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import {
+  AbiCoder,
   Contract,
   HDNodeWallet,
   JsonRpcProvider,
   Wallet,
+  id,
   type TransactionRequest,
 } from "ethers";
 import bs58 from "bs58";
@@ -473,6 +475,115 @@ async function sendNativeFromEvmFunder(
   } catch (e) {
     console.warn("[sendNativeFromEvmFunder]", e);
     return null;
+  }
+}
+
+const REVERT_ERROR_SELECTOR = "0x08c379a0";
+const PANIC_ERROR_SELECTOR = "0x4e487b71";
+const FAILED_INNER_CALL_SELECTOR = id("FailedInnerCall()").slice(0, 10).toLowerCase();
+const SOLIDITY_PANIC_CODES: Record<string, string> = {
+  "0x01": "Assertion violated",
+  "0x11": "Arithmetic overflow/underflow",
+  "0x12": "Division by zero",
+  "0x21": "Enum conversion out of bounds",
+  "0x22": "Invalid storage byte array access",
+  "0x31": "Pop on empty array",
+  "0x32": "Array index out of bounds",
+  "0x41": "Memory allocation overflow",
+  "0x51": "Zero-initialized variable",
+};
+
+function normalizeRevertData(value: unknown): string | null {
+  if (typeof value === "string" && value.startsWith("0x")) return value;
+  if (value && typeof value === "object") {
+    const maybe = value as { data?: unknown };
+    if (typeof maybe.data === "string" && maybe.data.startsWith("0x"))
+      return maybe.data;
+  }
+  return null;
+}
+
+function extractRevertData(err: unknown): string | null {
+  const errAny = err as {
+    data?: unknown;
+    info?: { error?: { data?: unknown; error?: { data?: unknown } } };
+    error?: { data?: unknown };
+    receipt?: { revertReason?: unknown };
+  };
+  const candidates = [
+    errAny?.data,
+    errAny?.info?.error?.data,
+    errAny?.error?.data,
+    errAny?.info?.error?.error?.data,
+    errAny?.receipt?.revertReason,
+    (errAny?.receipt as { revertReason?: { data?: unknown } } | undefined)
+      ?.revertReason?.data,
+  ];
+  for (const c of candidates) {
+    const data = normalizeRevertData(c);
+    if (data) return data;
+  }
+  return null;
+}
+
+function decodeRevertData(data: string): { selector: string; decoded?: string } {
+  const selector = data.slice(0, 10).toLowerCase();
+  if (selector === FAILED_INNER_CALL_SELECTOR) {
+    return { selector, decoded: "FailedInnerCall()" };
+  }
+  if (selector === REVERT_ERROR_SELECTOR) {
+    try {
+      const [reason] = AbiCoder.defaultAbiCoder().decode(
+        ["string"],
+        `0x${data.slice(10)}`,
+      );
+      return { selector, decoded: String(reason) };
+    } catch {
+      return { selector };
+    }
+  }
+  if (selector === PANIC_ERROR_SELECTOR) {
+    try {
+      const [code] = AbiCoder.defaultAbiCoder().decode(
+        ["uint256"],
+        `0x${data.slice(10)}`,
+      );
+      const hex = `0x${BigInt(code).toString(16).padStart(2, "0")}`;
+      const reason = SOLIDITY_PANIC_CODES[hex] ?? "Panic";
+      return { selector, decoded: `${reason} (${hex})` };
+    } catch {
+      return { selector };
+    }
+  }
+  return { selector };
+}
+
+type EvmRevertDetails = {
+  data: string;
+  selector: string;
+  decoded?: string;
+  source: "error" | "call";
+};
+
+async function getEvmRevertDetails(
+  err: unknown,
+  provider: JsonRpcProvider,
+  txRequest: TransactionRequest,
+): Promise<EvmRevertDetails | null> {
+  const fromError = extractRevertData(err);
+  if (fromError) {
+    return { data: fromError, ...decodeRevertData(fromError), source: "error" };
+  }
+  try {
+    const { chainId: _chainId, ...callRequest } = txRequest as TransactionRequest & {
+      chainId?: number;
+    };
+    await provider.call(callRequest);
+    return null;
+  } catch (callErr) {
+    const fromCall = extractRevertData(callErr);
+    if (!fromCall) return null;
+    return { data: fromCall, ...decodeRevertData(fromCall), source: "call" };
   }
 }
 
@@ -1217,6 +1328,25 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
         undefined,
         ETH_DERIVATION_PATH,
       );
+      const signerAddress = evmWallet.address;
+      const expectedFrom = typeof d?.from === "string" ? d.from : "";
+      if (
+        expectedFrom &&
+        signerAddress &&
+        expectedFrom.toLowerCase() !== signerAddress.toLowerCase()
+      ) {
+        console.warn("[execute-step] EVM quote address mismatch", {
+          userId,
+          stepIndex,
+          expectedFrom: expectedFrom.slice(0, 10) + "...",
+          signerAddress: signerAddress.slice(0, 10) + "...",
+        });
+        return res.status(400).json({
+          error:
+            "Quote address mismatch. Please refresh the quote and try again.",
+        });
+      }
+      const fromAddress = expectedFrom || signerAddress;
       const gasLimit =
         typeof d?.gas === "string"
           ? BigInt(d.gas)
@@ -1224,7 +1354,7 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
             ? BigInt(d.gas)
             : undefined;
       const txRequest: TransactionRequest = {
-        from: d?.from as string,
+        from: fromAddress,
         to: d?.to as string,
         data: d?.data as string,
         value: typeof d?.value === "string" ? BigInt(d.value) : undefined,
@@ -1241,7 +1371,7 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       };
       const provider = getEvmProvider(chainId);
       const connected = evmWallet.connect(provider);
-      const userAddress = (d?.from as string) || "";
+      const userAddress = fromAddress || "";
 
       // Retry loop: on INSUFFICIENT_FUNDS, fund from EVM funder, wait, retry (like Solana)
       const maxAttempts = 10;
@@ -1269,6 +1399,17 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
           const isInsufficientFunds =
             /insufficient funds|INSUFFICIENT_FUNDS/i.test(errMsg) ||
             errCode === "INSUFFICIENT_FUNDS";
+          const revertDetails = !isInsufficientFunds
+            ? await getEvmRevertDetails(err, provider, txRequest)
+            : null;
+          if (revertDetails) {
+            console.warn("[execute-step] EVM revert details", {
+              selector: revertDetails.selector,
+              decoded: revertDetails.decoded ?? null,
+              dataPreview: revertDetails.data.slice(0, 66),
+              source: revertDetails.source,
+            });
+          }
 
           if (
             !isInsufficientFunds ||
@@ -1283,8 +1424,15 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
             const isExecutionReverted = /execution reverted|reverted/i.test(
               errMsg,
             );
+            const revertHint =
+              revertDetails?.decoded ??
+              (revertDetails?.selector
+                ? `Reverted (selector ${revertDetails.selector})`
+                : null);
             const userError = isExecutionReverted
-              ? "Swap failed. Price may have moved, or check that you have sufficient balance and have approved the token if prompted."
+              ? revertHint
+                ? `Swap failed: ${revertHint}`
+                : "Swap failed. Price may have moved, or check that you have sufficient balance and have approved the token if prompted."
               : errMsg.slice(0, 200) || "Transaction failed. Please try again.";
             return res.status(500).json({
               error: userError,
@@ -2691,6 +2839,27 @@ async function executeBridgeCustodialHandler(
           if (!evmWallet) {
             return res.status(400).json({ error: "EVM step but no mnemonic" });
           }
+          const signerAddress = evmWallet.address;
+          const expectedFrom = typeof d.from === "string" ? d.from : "";
+          if (
+            expectedFrom &&
+            signerAddress &&
+            expectedFrom.toLowerCase() !== signerAddress.toLowerCase()
+          ) {
+            console.warn(
+              "[execute-bridge-custodial] EVM quote address mismatch",
+              {
+                stepIndex,
+                expectedFrom: expectedFrom.slice(0, 10) + "...",
+                signerAddress: signerAddress.slice(0, 10) + "...",
+              },
+            );
+            return res.status(400).json({
+              error:
+                "Quote address mismatch. Please refresh the quote and try again.",
+            });
+          }
+          const fromAddress = expectedFrom || signerAddress;
           const evmGas =
             typeof d.gas === "string"
               ? BigInt(d.gas)
@@ -2698,7 +2867,7 @@ async function executeBridgeCustodialHandler(
                 ? BigInt(d.gas)
                 : undefined;
           const txRequest: TransactionRequest = {
-            from: d.from as string,
+            from: fromAddress,
             to: d.to as string,
             data: d.data as string,
             value: typeof d.value === "string" ? BigInt(d.value) : undefined,
@@ -2715,7 +2884,7 @@ async function executeBridgeCustodialHandler(
           };
           const provider = getEvmProvider(chainId);
           const connected = evmWallet.connect(provider);
-          const userAddress = (d.from as string) || "";
+          const userAddress = fromAddress || "";
           const maxAttempts = 10;
           let attempt = 0;
           let lastErr: unknown = null;
@@ -2738,6 +2907,17 @@ async function executeBridgeCustodialHandler(
               const isInsufficientFunds =
                 /insufficient funds|INSUFFICIENT_FUNDS/i.test(errMsg) ||
                 errCode === "INSUFFICIENT_FUNDS";
+              const revertDetails = !isInsufficientFunds
+                ? await getEvmRevertDetails(err, provider, txRequest)
+                : null;
+              if (revertDetails) {
+                console.warn("[execute-bridge-custodial] EVM revert details", {
+                  selector: revertDetails.selector,
+                  decoded: revertDetails.decoded ?? null,
+                  dataPreview: revertDetails.data.slice(0, 66),
+                  source: revertDetails.source,
+                });
+              }
 
               if (
                 !isInsufficientFunds ||
@@ -2749,6 +2929,14 @@ async function executeBridgeCustodialHandler(
                   errMsg: errMsg.slice(0, 120),
                   hasFunder: !!getEvmFunderWallet(chainId),
                 });
+                if (revertDetails?.decoded) {
+                  throw new Error(`EVM tx reverted: ${revertDetails.decoded}`);
+                }
+                if (revertDetails?.selector) {
+                  throw new Error(
+                    `EVM tx reverted (selector ${revertDetails.selector})`,
+                  );
+                }
                 throw err;
               }
 

@@ -837,7 +837,7 @@ export function Profile() {
                             : `$${openPositions.reduce((s, p) => s + p.value, 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         </p>
                         <p className="text-xs text-white/50 mt-0.5">
-                          Total wallet balance (both wallets)
+                          Total wallet balance
                         </p>
                       </div>
                       <div className="mt-4 flex items-center justify-between">

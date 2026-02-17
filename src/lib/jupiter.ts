@@ -55,8 +55,8 @@ async function jupiterRequest<T>(
             Object.fromEntries(
               Object.entries(params)
                 .filter(([, v]) => v !== undefined && v !== null)
-                .map(([k, v]) => [k, String(v)])
-            ) as Record<string, string>
+                .map(([k, v]) => [k, String(v)]),
+            ) as Record<string, string>,
           ).toString()
         : "";
     urlStr = pathPrefix + search;

@@ -1225,6 +1225,52 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
       });
       return res.status(400).json({ error: "Invalid step index or steps" });
     }
+    const step = steps[stepIndex] as
+      | {
+          kind?: unknown;
+          items?: Array<{ data?: unknown; check?: { endpoint?: string; method?: string } }>;
+        }
+      | undefined;
+    const stepKind = typeof step?.kind === "string" ? step.kind : "unknown";
+    const itemsCount = Array.isArray(step?.items) ? step?.items.length : 0;
+    const hasCheck = Boolean(step?.items?.[0]?.check?.endpoint);
+    const hasData = Boolean(step?.items?.[0]?.data);
+    const stepData = step?.items?.[0]?.data;
+    const dataPreview =
+      stepData && typeof stepData === "object"
+        ? {
+            chainId:
+              typeof (stepData as { chainId?: unknown }).chainId === "number"
+                ? (stepData as { chainId?: number }).chainId
+                : null,
+            from:
+              typeof (stepData as { from?: unknown }).from === "string"
+                ? (stepData as { from?: string }).from?.slice(0, 12) + "..."
+                : null,
+            to:
+              typeof (stepData as { to?: unknown }).to === "string"
+                ? (stepData as { to?: string }).to?.slice(0, 12) + "..."
+                : null,
+            value:
+              typeof (stepData as { value?: unknown }).value === "string"
+                ? (stepData as { value?: string }).value
+                : null,
+            dataPrefix:
+              typeof (stepData as { data?: unknown }).data === "string"
+                ? (stepData as { data?: string }).data?.slice(0, 10)
+                : null,
+          }
+        : null;
+    console.log("[execute-step] step summary", {
+      userId,
+      stepIndex,
+      stepKind,
+      stepsCount: steps.length,
+      itemsCount,
+      hasCheck,
+      hasData,
+      dataPreview,
+    });
     const firstItem = steps[stepIndex]?.items?.[0];
     const data = firstItem?.data;
     if (!data) {

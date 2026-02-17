@@ -872,6 +872,20 @@ export function Trade() {
       )
         ? (quoteToExecute as { steps: unknown[] }).steps
         : [];
+      console.log(
+        "[trade] relay step summary",
+        steps.map((step) => {
+          const s = step as {
+            kind?: unknown;
+            items?: Array<{ data?: unknown; check?: unknown }>;
+          };
+          return {
+            kind: typeof s.kind === "string" ? s.kind : "unknown",
+            hasData: Boolean(s.items?.[0]?.data),
+            hasCheck: Boolean(s.items?.[0]?.check),
+          };
+        }),
+      );
 
       for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
         const res = await fetch(`${base}/api/relay/execute-step`, {

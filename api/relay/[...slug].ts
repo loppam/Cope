@@ -675,6 +675,10 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
     });
     const apiKey = process.env.RELAY_API_KEY;
     const recipient = body?.recipient?.trim() || userWallet;
+    const isDestEvmNonNative =
+      (destinationChainId === 8453 || destinationChainId === 56) &&
+      outputMint !== "base-eth" &&
+      outputMint !== "bnb-bnb";
     const quoteRes = await fetch(`${RELAY_API_BASE}/quote/v2`, {
       method: "POST",
       headers: {
@@ -694,6 +698,9 @@ async function swapQuoteHandler(req: VercelRequest, res: VercelResponse) {
         protocolVersion: "preferV2",
         ...(originChainId === 8453 || originChainId === 56
           ? { explicitDeposit: false }
+          : {}),
+        ...(isDestEvmNonNative
+          ? { topupGas: true, topupGasAmount: "500000" }
           : {}),
       }),
     });
@@ -780,6 +787,9 @@ async function withdrawQuoteHandler(req: VercelRequest, res: VercelResponse) {
     } catch {
       return res.status(400).json({ error: "Invalid amount" });
     }
+    const isDestEvmNonNative =
+      (destinationChainId === 8453 || destinationChainId === 56) &&
+      destinationCurrency !== "0x0000000000000000000000000000000000000000";
     const quoteRes = await fetch(`${RELAY_API_BASE}/quote/v2`, {
       method: "POST",
       headers: {
@@ -797,6 +807,9 @@ async function withdrawQuoteHandler(req: VercelRequest, res: VercelResponse) {
         recipient: destinationAddress,
         appFees: getAppFees(),
         protocolVersion: "preferV2",
+        ...(isDestEvmNonNative
+          ? { topupGas: true, topupGasAmount: "500000" }
+          : {}),
       }),
     });
     if (!quoteRes.ok) {
@@ -1414,7 +1427,31 @@ async function executeStepHandler(req: VercelRequest, res: VercelResponse) {
           : null,
     });
 
-    transaction.sign([wallet]);
+    // If funder is first signer (fee payer), sign with funder; otherwise user signs. Funder used for our self-coded retry fallback when user has insufficient SOL.
+    const signerMsg = transaction.message;
+    const header = "header" in signerMsg ? signerMsg.header : null;
+    const numRequired =
+      header && typeof (header as { numRequiredSignatures?: number }).numRequiredSignatures === "number"
+        ? (header as { numRequiredSignatures: number }).numRequiredSignatures
+        : 1;
+    const accountKeys = "staticAccountKeys" in signerMsg ? signerMsg.staticAccountKeys : [];
+    const signerPubkeys = accountKeys.slice(0, numRequired);
+    const funderKp = getFunderKeypair();
+    const signerKeypairs: Keypair[] = [];
+    for (const pk of signerPubkeys) {
+      if (funderKp && pk.equals(funderKp.publicKey)) {
+        signerKeypairs.push(funderKp);
+      } else if (pk.equals(wallet.publicKey)) {
+        signerKeypairs.push(wallet);
+      } else {
+        console.warn("[execute-step] unknown signer, skipping", pk.toBase58());
+      }
+    }
+    if (signerKeypairs.length === numRequired) {
+      transaction.sign(signerKeypairs);
+    } else {
+      transaction.sign([wallet]);
+    }
 
     const { rawLen, b64Len } = measureTransaction(transaction);
     const msg = transaction.message;

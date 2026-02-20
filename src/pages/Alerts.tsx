@@ -155,7 +155,7 @@ export function Alerts() {
       );
       setUnreadCount((prev) => Math.max(0, prev - 1));
     } catch (error) {
-      toast.error("Failed to mark notification as read");
+      toast.error("Couldn't mark as read. Please try again.");
     }
   };
 
@@ -167,7 +167,7 @@ export function Alerts() {
       setUnreadCount(0);
       toast.success("All notifications marked as read");
     } catch (error) {
-      toast.error("Failed to mark all as read");
+      toast.error("Couldn't mark all as read. Please try again.");
     }
   };
 
@@ -179,7 +179,7 @@ export function Alerts() {
         setUnreadCount((prev) => Math.max(0, prev - 1));
       }
     } catch (error) {
-      toast.error("Failed to delete notification");
+      toast.error("Couldn't delete. Please try again.");
     }
   };
 

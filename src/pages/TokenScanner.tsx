@@ -41,6 +41,7 @@ import {
   type UserSearchResult,
 } from "@/lib/auth";
 import { useAuth } from "@/contexts/AuthContext";
+import { toUserMessage } from "@/lib/user-errors";
 import { DocumentHead } from "@/components/DocumentHead";
 import { formatCurrency } from "@/lib/utils";
 import { TokenSearch } from "@/components/TokenSearch";
@@ -639,7 +640,7 @@ export function TokenScanner() {
       const json = await res.json();
 
       if (!res.ok) {
-        throw new Error(json.message || json.error || "Analysis failed");
+        throw new Error(json.message || json.error || "Couldn't analyze this token. Please try again.");
       }
 
       const { metadata, metrics, analysis: a, chainType: ct } = json;
@@ -666,7 +667,7 @@ export function TokenScanner() {
 
       setAnalysis(a);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Analysis failed");
+      setError(toUserMessage(err, "Couldn't analyze this token. Please try again."));
     } finally {
       setLoading(false);
     }

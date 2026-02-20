@@ -220,7 +220,7 @@ export function Watchlist() {
       return;
     }
     if (!walletAddress?.trim()) {
-      toast.error("Cannot update: wallet address missing");
+      toast.error("Wallet address is missing");
       return;
     }
     const trimmed = editingValue.trim();
@@ -239,7 +239,7 @@ export function Watchlist() {
     } catch {
       setEditingKey(previousEditingKey);
       setEditingValue(previousEditingValue);
-      toast.error("Failed to update name");
+      toast.error("Couldn't update name. Please try again.");
     } finally {
       setSavingNickname(false);
     }

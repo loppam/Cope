@@ -142,7 +142,7 @@ export function CopeWallet() {
       } else {
         // User not found or private
         if (detectedType === "xhandle") {
-          toast.error("User not found or their wallet is private");
+          toast.error("User not found or wallet is private");
         } else {
           // Wallet not found - not on COPE
           navigate("/cope/wallet/new", {
@@ -152,7 +152,7 @@ export function CopeWallet() {
       }
     } catch (error: any) {
       console.error("Error searching:", error);
-      toast.error("Failed to search. Please try again.");
+      toast.error("Search failed. Please try again.");
     } finally {
       setSearching(false);
     }

@@ -396,7 +396,7 @@ export function Home() {
   const handleCopyTrade = (e: React.MouseEvent, notification: WalletNotification) => {
     e.stopPropagation();
     if (!notification.tokenAddress) {
-      toast.error("No token address available for this trade");
+      toast.error("No token address for this trade");
       return;
     }
     navigate("/app/trade", {

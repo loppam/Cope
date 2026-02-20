@@ -295,7 +295,7 @@ export function Positions() {
       );
     } catch (error: any) {
       console.error("Error fetching positions:", error);
-      toast.error("Failed to load positions");
+      toast.error("Couldn't load positions. Please try again.");
     } finally {
       setLoading(false);
       setRefreshing(false);

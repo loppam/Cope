@@ -7,6 +7,7 @@ import { generateWallet } from "@/lib/wallet";
 import { useAuth } from "@/contexts/AuthContext";
 import { encrypt, generateEncryptionKey } from "@/lib/encryption";
 import { getApiBase } from "@/lib/utils";
+import { toUserMessage } from "@/lib/user-errors";
 import { toast } from "sonner";
 
 export function WalletSetup() {
@@ -62,9 +63,7 @@ export function WalletSetup() {
                   typeof wallet.publicKey !== "string" ||
                   wallet.publicKey.trim() === ""
                 ) {
-                  throw new Error(
-                    "Failed to generate wallet: invalid public key",
-                  );
+                  throw new Error("Something went wrong. Please try again.");
                 }
 
                 if (
@@ -72,15 +71,11 @@ export function WalletSetup() {
                   !Array.isArray(wallet.secretKey) ||
                   wallet.secretKey.length === 0
                 ) {
-                  throw new Error(
-                    "Failed to generate wallet: invalid secret key",
-                  );
+                  throw new Error("Something went wrong. Please try again.");
                 }
 
                 if (!wallet.mnemonic || typeof wallet.mnemonic !== "string") {
-                  throw new Error(
-                    "Failed to generate wallet: invalid mnemonic",
-                  );
+                  throw new Error("Something went wrong. Please try again.");
                 }
 
                 // Generate encryption key for this user
@@ -113,21 +108,15 @@ export function WalletSetup() {
                   !updatedProfile?.walletAddress ||
                   updatedProfile.walletAddress !== wallet.publicKey
                 ) {
-                  throw new Error(
-                    "Wallet generation verification failed: wallet address not set correctly",
-                  );
+                  throw new Error("Something went wrong. Please try again.");
                 }
 
                 if (updatedProfile.walletConnected !== true) {
-                  throw new Error(
-                    "Wallet generation verification failed: walletConnected not set to true",
-                  );
+                  throw new Error("Something went wrong. Please try again.");
                 }
 
                 if (updatedProfile.isNew !== false) {
-                  throw new Error(
-                    "Wallet generation verification failed: isNew not set to false",
-                  );
+                  throw new Error("Something went wrong. Please try again.");
                 }
 
                 // Derive and persist EVM address (same mnemonic); register with deposit webhooks.
@@ -157,7 +146,7 @@ export function WalletSetup() {
                 });
               } catch (error: any) {
                 console.error("Error generating wallet:", error);
-                toast.error(error.message || "Failed to generate wallet");
+                toast.error(toUserMessage(error, "Couldn't create wallet. Please try again."));
               } finally {
                 setIsGenerating(false);
               }

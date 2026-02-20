@@ -47,6 +47,7 @@ import {
   formatCurrency,
 } from "@/lib/utils";
 import { getChainId } from "@/lib/relay";
+import { toUserMessage } from "@/lib/user-errors";
 import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
 import { toast } from "sonner";
 import { DocumentHead } from "@/components/DocumentHead";
@@ -555,15 +556,11 @@ export function Trade() {
       token?.chain === "bnb";
     const isCrossChain = outputIsEvm;
     if (!amount || !userProfile?.walletAddress || !user) {
-      toast.error("Missing required information", {
-        description: "Please connect your wallet and enter an amount",
-      });
+      toast.error("Connect your wallet and enter an amount");
       return;
     }
     if (!token) {
-      toast.error("Select a token", {
-        description: "Search or paste a token address",
-      });
+      toast.error("Select a token to trade");
       return;
     }
     if (
@@ -571,30 +568,22 @@ export function Trade() {
       !crossChainToken &&
       !(token && (token.chain === "base" || token.chain === "bnb"))
     ) {
-      toast.error("Select a token", {
-        description: `Choose a token on ${tradeChain === "base" ? "Base" : "BNB"}`,
-      });
+      toast.error(`Select a token on ${tradeChain === "base" ? "Base" : "BNB"}`);
       return;
     }
     if (isCrossChain && !evmAddress) {
-      toast.error("Loading wallet", {
-        description: "Wait for cross-chain address",
-      });
+      toast.error("Wallet still loading. Please wait a moment.");
       return;
     }
 
     const amountNum = parseFloat(amount);
     if (isNaN(amountNum) || amountNum <= 0) {
-      toast.error("Invalid amount", {
-        description: "Please enter a valid amount",
-      });
+      toast.error("Enter a valid amount");
       return;
     }
 
     if (usdcBalance !== null && amountNum > usdcBalance) {
-      toast.error("Not enough USDC", {
-        description: "Insufficient USDC balance for this buy amount",
-      });
+      toast.error("Not enough USDC for this amount");
       return;
     }
 
@@ -663,9 +652,8 @@ export function Trade() {
       setShowQuoteModal(true);
     } catch (error: unknown) {
       console.error("Error getting swap quote:", error);
-      toast.error("Failed to get quote", {
-        description:
-          error instanceof Error ? error.message : "Please try again",
+      toast.error("Couldn't get quote", {
+        description: toUserMessage(error, "Please try again."),
       });
     } finally {
       setSwapping(false);
@@ -674,29 +662,23 @@ export function Trade() {
 
   const handleSell = async () => {
     if (!sellAmount || !token || !userProfile?.walletAddress || !user) {
-      toast.error("Missing required information", {
-        description: "Please enter an amount to sell",
-      });
+      toast.error("Enter an amount to sell");
       return;
     }
 
     const isEvmSell = token.chain === "base" || token.chain === "bnb";
     if (isEvmSell && !evmAddress) {
-      toast.error("EVM wallet not ready", {
-        description: "Please wait a moment and try again",
-      });
+      toast.error("Wallet still loading. Please wait and try again.");
       return;
     }
 
     const amountNum = parseFloat(sellAmount);
     if (isNaN(amountNum) || amountNum <= 0) {
-      toast.error("Invalid amount", {
-        description: "Please enter a valid amount",
-      });
+      toast.error("Enter a valid amount");
       return;
     }
     if (amountNum > sellableBalance) {
-      toast.error("Insufficient balance", {
+      toast.error("Not enough balance", {
         description:
           token.mint === SOL_MINT
             ? `Max sellable is ${sellableBalance.toFixed(4)} ${token.symbol} (${SOL_RESERVE} reserved for gas)`
@@ -776,9 +758,8 @@ export function Trade() {
       setShowQuoteModal(true);
     } catch (error: unknown) {
       console.error("Error getting sell quote:", error);
-      toast.error("Failed to get quote", {
-        description:
-          error instanceof Error ? error.message : "Please try again",
+      toast.error("Couldn't get quote", {
+        description: toUserMessage(error, "Please try again."),
       });
     } finally {
       setSwapping(false);
@@ -1003,8 +984,7 @@ export function Trade() {
     } catch (error: unknown) {
       console.error("Error executing swap:", error);
       toast.error("Swap failed", {
-        description:
-          error instanceof Error ? error.message : "Please try again",
+        description: toUserMessage(error, "Please try again with a new quote."),
       });
     } finally {
       setSwapping(false);

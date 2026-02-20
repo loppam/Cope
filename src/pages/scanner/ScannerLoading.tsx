@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router';
 import { Card } from '@/components/Card';
 import { CheckCircle2, Loader2 } from 'lucide-react';
 import { scanWalletsForTokens, ScannerWallet } from '@/lib/birdeye';
+import { toUserMessage } from '@/lib/user-errors';
 import { toast } from 'sonner';
 
 interface LocationState {
@@ -65,8 +66,9 @@ export function ScannerLoading() {
         }, 500);
       } catch (err: any) {
         console.error('Error scanning wallets:', err);
-        setError(err.message || 'Failed to scan wallets');
-        toast.error(err.message || 'Failed to scan wallets. Please check your Birdeye API key.');
+        const friendly = toUserMessage(err, 'Couldn\'t scan wallets. Please try again.');
+        setError(friendly);
+        toast.error(friendly);
         
         // Navigate back to input after error
         setTimeout(() => {

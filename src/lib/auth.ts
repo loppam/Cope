@@ -118,7 +118,7 @@ export async function signInWithTwitter(): Promise<User | void> {
       errorMessage.includes("prevented")
     ) {
       throw new Error(
-        "Twitter blocked the login attempt. Add the callback URL to Twitter Developer Portal. You may need to wait 24 hours before trying again.",
+        "Sign-in was blocked. Try again in 24 hours.",
       );
     }
 
@@ -129,19 +129,13 @@ export async function signInWithTwitter(): Promise<User | void> {
     ) {
       throw new Error("Sign-in was cancelled");
     } else if (error.code === "auth/account-exists-with-different-credential") {
-      throw new Error(
-        "An account already exists with a different sign-in method",
-      );
+      throw new Error("This account is already linked to another sign-in method.");
     } else if (error.code === "auth/invalid-credential") {
-      throw new Error(
-        "Twitter OAuth is not configured. Please check Firebase Console → Authentication → Sign-in method → Twitter",
-      );
+      throw new Error("Sign-in isn't set up yet. Please try again later.");
     } else if (error.code === "auth/operation-not-allowed") {
-      throw new Error(
-        "Twitter sign-in is not enabled. Enable it in Firebase Console",
-      );
+      throw new Error("Sign-in isn't available. Please try again later.");
     } else {
-      throw new Error(error.message || "Failed to sign in with Twitter");
+      throw new Error(error.message || "Sign-in failed. Please try again.");
     }
   }
 }
@@ -249,7 +243,7 @@ export async function handleRedirectResult(): Promise<User | null> {
       errorMessage.includes("prevented")
     ) {
       throw new Error(
-        "Twitter blocked the login attempt. Add the callback URL to Twitter Developer Portal. You may need to wait 24 hours before trying again.",
+        "Sign-in was blocked. Try again in 24 hours.",
       );
     }
 
@@ -345,9 +339,7 @@ export async function updateUserWallet(
       typeof walletAddress !== "string" ||
       walletAddress.trim() === ""
     ) {
-      throw new Error(
-        "Wallet address is required and must be a non-empty string",
-      );
+      throw new Error("Wallet address is required.");
     }
 
     const userRef = doc(db, "users", uid);
@@ -374,24 +366,20 @@ export async function updateUserWallet(
     // Verify the update succeeded by reading back the document
     const updatedDoc = await getDoc(userRef);
     if (!updatedDoc.exists()) {
-      throw new Error("Failed to verify wallet update: document not found");
+      throw new Error("Something went wrong. Please try again.");
     }
 
     const updatedData = updatedDoc.data();
     if (updatedData.walletAddress !== walletAddress.trim()) {
-      throw new Error(
-        `Wallet update verification failed: walletAddress mismatch`,
-      );
+      throw new Error("Something went wrong. Please try again.");
     }
 
     if (updatedData.walletConnected !== true) {
-      throw new Error(
-        "Wallet update verification failed: walletConnected is not true",
-      );
+      throw new Error("Something went wrong. Please try again.");
     }
 
     if (updatedData.isNew !== false) {
-      throw new Error("Wallet update verification failed: isNew is not false");
+      throw new Error("Something went wrong. Please try again.");
     }
 
     return true;

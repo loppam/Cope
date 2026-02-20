@@ -55,6 +55,7 @@ import { getFollowersCount } from "@/lib/profile";
 import { fetchNativePrices } from "@/lib/coingecko";
 import { getWalletProfitability } from "@/lib/moralis";
 import { getIntentStatus } from "@/lib/relay";
+import { toUserMessage } from "@/lib/user-errors";
 import { toast } from "sonner";
 import type { WatchedWallet } from "@/lib/auth";
 import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
@@ -512,7 +513,7 @@ export function Profile() {
       const firstStep = data?.steps?.[0];
       if (firstStep?.requestId) setWithdrawRequestId(firstStep.requestId);
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to get quote");
+      toast.error(toUserMessage(e, "Couldn't get quote. Please try again."));
     } finally {
       setWithdrawQuoteLoading(false);
     }
@@ -588,7 +589,7 @@ export function Profile() {
         }
       }
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Withdraw failed");
+      toast.error(toUserMessage(e, "Withdraw failed. Please try again."));
     } finally {
       setWithdrawExecuting(false);
     }
@@ -611,7 +612,7 @@ export function Profile() {
     } catch (error) {
       setIsPublic(previousValue);
       console.error("Error toggling public wallet:", error);
-      toast.error("Failed to update wallet visibility");
+      toast.error("Couldn't update visibility. Please try again.");
     } finally {
       setIsTogglingPublic(false);
     }
@@ -626,7 +627,7 @@ export function Profile() {
       if (!pushEnabled) {
         // Check if notifications are supported
         if (typeof Notification === "undefined") {
-          toast.error("Push notifications are not supported on this device");
+          toast.error("Notifications aren't supported on this device");
           setIsTogglingPush(false);
           return;
         }
@@ -677,7 +678,7 @@ export function Profile() {
       ) {
         toast.info("Push notifications are not supported on this browser");
       } else {
-        toast.error("Failed to update push notification settings");
+        toast.error("Couldn't update notifications. Please try again.");
       }
     } finally {
       setIsTogglingPush(false);

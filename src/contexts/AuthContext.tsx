@@ -17,8 +17,8 @@ import {
   updateUserBalance,
   updateUserProfile,
   WatchedWallet,
-  getFirebaseCallbackUrl,
 } from "@/lib/auth";
+import { toUserMessage } from "@/lib/user-errors";
 import { getApiBase } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -124,7 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           !error.message.includes("no redirect") &&
           error.code !== "auth/no-auth-event"
         ) {
-          toast.error(error.message || "Failed to complete sign-in");
+          toast.error(toUserMessage(error, "Sign-in failed. Please try again."));
         }
       }
 
@@ -193,29 +193,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error("Sign-in error:", error);
       const errorMessage = error.message || "Failed to sign in with Twitter";
 
-      // Show more helpful error message
-      if (
-        errorMessage.includes("invalid-credential") ||
-        errorMessage.includes("not configured")
-      ) {
-        toast.error(
-          "Twitter OAuth not configured. Check Firebase Console → Authentication → Twitter",
-          {
-            duration: 5000,
-          },
-        );
-      } else if (
-        errorMessage.includes("blocked") ||
-        errorMessage.includes("suspicious") ||
-        errorMessage.includes("prevented")
-      ) {
-        const callbackUrl = getFirebaseCallbackUrl();
-        toast.error(
-          `Twitter blocked the login. Add this callback URL to Twitter Developer Portal: ${callbackUrl}`,
-          { duration: 10000 },
-        );
-      } else if (!errorMessage.includes("cancelled")) {
-        toast.error(errorMessage);
+      if (errorMessage.includes("cancelled")) {
+        // Don't show toast for user-initiated cancel
+      } else {
+        const friendly = toUserMessage(error, "Sign-in failed. Please try again.");
+        toast.error(friendly, { duration: 5000 });
       }
       throw error;
     } finally {
@@ -230,7 +212,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       toast.success("Signed out successfully");
     } catch (error: any) {
       console.error("Sign-out error:", error);
-      toast.error(error.message || "Failed to sign out");
+      toast.error(toUserMessage(error, "Sign out failed. Please try again."));
       throw error;
     } finally {
       setLoading(false);
@@ -251,11 +233,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       typeof walletAddress !== "string" ||
       walletAddress.trim() === ""
     ) {
-      throw new Error("Wallet address is required and must be a valid string");
+      throw new Error("Wallet address is required");
     }
 
     if (!encryptedSecretKey || typeof encryptedSecretKey !== "string") {
-      throw new Error("Encrypted secret key is required");
+      throw new Error("Wallet data is required");
     }
 
     try {
@@ -273,31 +255,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Verify the update was successful
       const profile = await getUserProfile(user.uid);
       if (!profile) {
-        throw new Error("Failed to verify wallet update: profile not found");
+        throw new Error("Something went wrong. Please try again.");
       }
 
       if (profile.walletAddress !== walletAddress.trim()) {
-        throw new Error(
-          `Wallet update verification failed: expected ${walletAddress.trim()}, got ${profile.walletAddress}`,
-        );
+        throw new Error("Something went wrong. Please try again.");
       }
 
       if (profile.walletConnected !== true) {
-        throw new Error(
-          "Wallet update verification failed: walletConnected is not true",
-        );
+        throw new Error("Something went wrong. Please try again.");
       }
 
       if (profile.isNew !== false) {
         throw new Error(
-          "Wallet update verification failed: isNew is not false",
+          "Something went wrong. Please try again.",
         );
       }
 
       toast.success("Wallet updated successfully");
     } catch (error: any) {
       console.error("Update wallet error:", error);
-      toast.error(error.message || "Failed to update wallet");
+      toast.error(toUserMessage(error, "Couldn't update wallet. Please try again."));
       throw error;
     }
   };
@@ -310,7 +288,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await refreshProfile();
     } catch (error: any) {
       console.error("Update balance error:", error);
-      toast.error(error.message || "Failed to update balance");
+      toast.error(toUserMessage(error, "Couldn't update balance. Please try again."));
       throw error;
     }
   };
@@ -324,7 +302,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       toast.success("Profile updated successfully");
     } catch (error: any) {
       console.error("Update profile error:", error);
-      toast.error(error.message || "Failed to update profile");
+      toast.error(toUserMessage(error, "Couldn't update profile. Please try again."));
       throw error;
     }
   };
@@ -411,7 +389,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setWatchlist(previousWatchlist);
       }
       console.error("Add to watchlist error:", error);
-      toast.error(error.message || "Failed to add wallet to watchlist");
+      toast.error(toUserMessage(error, "Couldn't add wallet. Please try again."));
       throw error;
     }
   };
@@ -456,7 +434,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setWatchlist(previousWatchlist);
       }
       console.error("Remove from watchlist error:", error);
-      toast.error(error.message || "Failed to remove wallet from watchlist");
+      toast.error(toUserMessage(error, "Couldn't remove wallet. Please try again."));
       throw error;
     }
   };
@@ -481,7 +459,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       toast.success("Wallet removed successfully");
     } catch (error: any) {
       console.error("Remove wallet error:", error);
-      toast.error(error.message || "Failed to remove wallet");
+      toast.error(toUserMessage(error, "Couldn't remove wallet. Please try again."));
       throw error;
     }
   };
@@ -509,7 +487,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       toast.success("Account deleted");
     } catch (error: any) {
       console.error("Delete account error:", error);
-      toast.error(error.message || "Failed to delete account");
+      toast.error(toUserMessage(error, "Couldn't delete account. Please try again."));
       throw error;
     }
   };

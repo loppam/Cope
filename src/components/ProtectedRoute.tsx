@@ -44,6 +44,12 @@ export function ProtectedRoute({
     return <Navigate to="/auth/x-connect" replace />;
   }
 
+  // Profile is null = fetch failed (Firestore/network). Never assume "needs wallet setup"
+  // or we could send existing users to wallet-setup and lose their wallet.
+  if (!userProfile) {
+    return <Navigate to="/auth/x-connect" replace />;
+  }
+
   // Check if we're on a wallet setup page - allow access to these pages
   const isWalletSetupPage =
     location.pathname.startsWith("/auth/wallet-setup") ||

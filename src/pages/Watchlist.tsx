@@ -366,12 +366,12 @@ export function Watchlist() {
                   >
                     {following.map((entry) => {
                       const profile = followingProfiles[entry.uid];
-                      const xHandle = profile?.xHandle || entry.nickname || "—";
+                      const xHandle = profile?.xHandle || entry.nickname || "–";
                       const displayAddress =
                         profile?.walletAddress || entry.address;
                       const xUsername = xHandle.replace(/^@/, "");
                       const xUrl =
-                        xUsername && xUsername !== "—"
+                        xUsername && xUsername !== "–"
                           ? `https://x.com/${xUsername}`
                           : null;
 
@@ -633,7 +633,7 @@ export function Watchlist() {
                             ) : (
                               <div className="flex items-center gap-2 min-w-0">
                                 <span className="font-medium text-white block truncate">
-                                  {wallet.nickname || "—"}
+                                  {wallet.nickname || "–"}
                                 </span>
                                 <button
                                   type="button"
@@ -717,11 +717,11 @@ export function Watchlist() {
                   >
                     {followersList.map(({ uid }) => {
                       const profile = followersProfiles[uid];
-                      const xHandle = profile?.xHandle || "—";
+                      const xHandle = profile?.xHandle || "–";
                       const displayAddress = profile?.walletAddress;
                       const xUsername = xHandle.replace(/^@/, "");
                       const xUrl =
-                        xUsername && xUsername !== "—"
+                        xUsername && xUsername !== "–"
                           ? `https://x.com/${xUsername}`
                           : null;
 

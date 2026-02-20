@@ -211,10 +211,8 @@ async function syncHandler(req: VercelRequest, res: VercelResponse) {
 }
 
 const WRAPPED_SOL_MINT = "So11111111111111111111111111111111111111112";
-const priceCache = new Map<string, { price: number; timestamp: number }>();
 const tokenSymbolCache = new Map<string, { symbol: string; timestamp: number }>();
 const CACHE_DURATION = 5 * 60 * 1000;
-const JUPITER_API_BASE = "https://api.jup.ag";
 
 async function fetchWithRetry(url: string, options: RequestInit, retries = 1): Promise<Response> {
   let lastRes: Response | null = null;
@@ -229,52 +227,6 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 1): P
     return res;
   }
   return lastRes!;
-}
-
-async function getJupiterPrices(mints: string[]): Promise<Record<string, number>> {
-  if (mints.length === 0) return {};
-  const apiKey = process.env.JUPITER_API_KEY;
-  if (!apiKey) return {};
-  const url = `${JUPITER_API_BASE}/price/v3?ids=${encodeURIComponent([...new Set(mints)].join(","))}`;
-  try {
-    const response = await fetchWithRetry(url, { headers: { "x-api-key": apiKey, "Content-Type": "application/json" } });
-    if (!response.ok) return {};
-    const data = (await response.json()) as Record<string, { usdPrice?: number }>;
-    const out: Record<string, number> = {};
-    for (const mint of mints) {
-      const entry = data[mint];
-      out[mint] = entry && typeof entry.usdPrice === "number" ? entry.usdPrice : 0;
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-async function getSolPrice(): Promise<number> {
-  const cached = priceCache.get("SOL");
-  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) return cached.price;
-  try {
-    const priceRef = db.collection("prices").doc("SOL");
-    const priceSnap = await priceRef.get();
-    if (priceSnap.exists) {
-      const data = priceSnap.data();
-      const updatedAt = data?.updatedAt as number | undefined;
-      const price = data?.price as number | undefined;
-      if (typeof price === "number" && typeof updatedAt === "number" && Date.now() - updatedAt < CACHE_DURATION) {
-        priceCache.set("SOL", { price, timestamp: updatedAt });
-        return price;
-      }
-    }
-    const prices = await getJupiterPrices([WRAPPED_SOL_MINT]);
-    const price = prices[WRAPPED_SOL_MINT] ?? 150;
-    const now = Date.now();
-    await priceRef.set({ price, updatedAt: now }, { merge: true });
-    priceCache.set("SOL", { price, timestamp: now });
-    return price;
-  } catch {
-    return 150;
-  }
 }
 
 async function getTokenSymbol(mint: string): Promise<string> {
@@ -698,7 +650,7 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
   const alchemySigningKeyConfigured = !!process.env.ALCHEMY_EVM_DEPOSIT_SIGNING_KEY;
 
   console.log("[evm-deposit] request received", {
-    hasXWebhookSecret: !!req.headers["x-webhook-secret"],
+    hasXWebhookSecret,
     hasAuthorization,
     hasXAlchemySignature,
     webhookSecretConfigured,
@@ -718,7 +670,7 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
     }
     if (!authOk) {
       console.log("[evm-deposit] 401 Unauthorized", {
-        hasXWebhookSecret: !!req.headers["x-webhook-secret"],
+        hasXWebhookSecret,
         hasAuthorization,
         hasXAlchemySignature,
         webhookSecretConfigured: true,
@@ -739,10 +691,12 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
     let network: "base" | "bnb";
 
     // Alchemy Address Activity: { event: { network, activity: [...] } }; also support flat body.activity
-    const activityArr = Array.isArray(body.event?.activity)
-      ? (body.event.activity as Record<string, unknown>[])
-      : Array.isArray(body.activity)
-        ? (body.activity as Record<string, unknown>[])
+    const bodyEvent = body.event as { activity?: unknown } | undefined;
+    const bodyActivity = body.activity;
+    const activityArr = Array.isArray(bodyEvent?.activity)
+      ? (bodyEvent.activity as Record<string, unknown>[])
+      : Array.isArray(bodyActivity)
+        ? (bodyActivity as Record<string, unknown>[])
         : null;
 
     if (body.to != null && body.value != null) {
@@ -827,7 +781,6 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Look up by to (incoming to custodial) or from (user sends to bridge); Alchemy fires when watched address is in either role
-    let custodialAddress = to;
     let usersSnap = await db.collection("users").where("evmAddress", "==", to).limit(1).get();
     if (usersSnap.empty && activityArr?.[0]) {
       const first = activityArr[0] as Record<string, unknown>;
@@ -835,7 +788,6 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
       if (fromAddr && fromAddr.length >= 40) {
         usersSnap = await db.collection("users").where("evmAddress", "==", fromAddr).limit(1).get();
         if (!usersSnap.empty) {
-          custodialAddress = fromAddr;
           console.log("[evm-deposit] resolved user by from (outgoing to bridge)", { from: fromAddr.slice(0, 10) + "..." });
         }
       }

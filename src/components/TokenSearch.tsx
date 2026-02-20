@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Search, X, Loader2 } from 'lucide-react';
 import { TokenSearchResult } from '@/lib/solanatracker';
 import { searchTokensUnified } from '@/lib/birdeye-token';
-import { shortenAddress } from '@/lib/utils';
+import { shortenAddress, formatCurrency, formatSmallNumber } from '@/lib/utils';
 
 interface TokenSearchProps {
   onSelect: (token: TokenSearchResult) => void;
@@ -70,16 +70,9 @@ export function TokenSearch({ onSelect, placeholder = "Search token by name or s
     setShowResults(false); // Close dropdown
   };
 
-  const formatCurrency = (value: number | undefined) => {
-    if (!value) return '$0';
-    if (value >= 1000000) return `$${(value / 1000000).toFixed(2)}M`;
-    if (value >= 1000) return `$${(value / 1000).toFixed(2)}K`;
-    return `$${value.toFixed(2)}`;
-  };
-
   const formatPrice = (price: number | undefined) => {
     if (!price || price === 0) return '$0';
-    if (price < 0.000001) return `$${price.toExponential(2)}`;
+    if (price < 0.000001) return `$${formatSmallNumber(price)}`;
     return `$${price.toFixed(8)}`;
   };
 

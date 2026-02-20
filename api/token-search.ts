@@ -172,12 +172,10 @@ async function moralisSearchEvmAddress(
     chainId: number,
   ): UnifiedToken => {
     const m = Array.isArray(meta) ? meta[0] : null;
-    const name =
-      (m as Record<string, unknown>)?.name ?? price?.tokenName ?? "Unknown";
-    const symbol =
-      (m as Record<string, unknown>)?.symbol ??
-      price?.tokenSymbol ??
-      "???";
+    const nameRaw = (m as Record<string, unknown>)?.name ?? price?.tokenName ?? "Unknown";
+    const symbolRaw = (m as Record<string, unknown>)?.symbol ?? price?.tokenSymbol ?? "???";
+    const name = typeof nameRaw === "string" ? nameRaw : "Unknown";
+    const symbol = typeof symbolRaw === "string" ? symbolRaw : "???";
     const liquidity =
       price?.pairTotalLiquidityUsd != null
         ? parseFloat(String(price.pairTotalLiquidityUsd))
@@ -187,7 +185,10 @@ async function moralisSearchEvmAddress(
       mint: addr,
       name,
       symbol,
-      logoURI: (m as Record<string, unknown>)?.logo ?? price?.tokenLogo,
+      logoURI: (() => {
+        const v = (m as Record<string, unknown>)?.logo ?? price?.tokenLogo;
+        return v != null ? String(v) : undefined;
+      })(),
       decimals: parseInt(
         String(
           (m as Record<string, unknown>)?.decimals ?? price?.tokenDecimals ?? 18,
@@ -259,9 +260,12 @@ async function moralisSearchSymbol(
           toTokenResult({
             address: (item.address ?? "").toString().toLowerCase(),
             mint: (item.address ?? "").toString().toLowerCase(),
-            name: item.name ?? "Unknown",
-            symbol: item.symbol ?? symbol,
-            logoURI: item.logo ?? item.thumbnail,
+            name: String(item.name ?? "Unknown"),
+            symbol: String(item.symbol ?? symbol),
+            logoURI: (() => {
+              const v = item.logo ?? item.thumbnail;
+              return v != null ? String(v) : undefined;
+            })(),
             decimals: parseInt(String(item.decimals ?? 18), 10),
             mc:
               item.market_cap != null

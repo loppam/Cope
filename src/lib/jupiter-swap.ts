@@ -2,7 +2,7 @@
 import { Keypair, VersionedTransaction } from "@solana/web3.js";
 import { getEncryptedWalletCredentials } from "./auth";
 import { decryptWalletCredentials, generateEncryptionKey } from "./encryption";
-import { getApiBase } from "./utils";
+import { formatSmallNumber, getApiBase } from "./utils";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 
@@ -242,18 +242,22 @@ export async function executeSwap(
 }
 
 /**
- * Format token amount for display
+ * Format token amount for display (K, M, B, T suffixes)
  */
 export function formatTokenAmount(amount: number, decimals: number): string {
   const value = amount / Math.pow(10, decimals);
+  const abs = Math.abs(value);
+  const sign = value < 0 ? "-" : "";
 
-  if (value === 0) return "0";
-  if (value < 0.000001) return value.toExponential(2);
-  if (value < 0.01) return value.toFixed(6);
-  if (value < 1) return value.toFixed(4);
-  if (value < 1000) return value.toFixed(2);
-  if (value < 1000000) return `${(value / 1000).toFixed(2)}K`;
-  return `${(value / 1000000).toFixed(2)}M`;
+  if (abs === 0) return "0";
+  if (abs < 0.000001) return sign + formatSmallNumber(abs);
+  if (abs < 0.01) return sign + abs.toFixed(6);
+  if (abs < 1) return sign + abs.toFixed(4);
+  if (abs < 1_000) return sign + abs.toFixed(2);
+  if (abs < 1_000_000) return `${sign}${(abs / 1_000).toFixed(2)}K`;
+  if (abs < 1_000_000_000) return `${sign}${(abs / 1_000_000).toFixed(2)}M`;
+  if (abs < 1_000_000_000_000) return `${sign}${(abs / 1_000_000_000).toFixed(2)}B`;
+  return `${sign}${(abs / 1_000_000_000_000).toFixed(2)}T`;
 }
 
 /**

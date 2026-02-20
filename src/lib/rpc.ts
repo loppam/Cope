@@ -1,8 +1,15 @@
 // Solana balance utilities - uses Birdeye wallet token list for SOL and USDC (no Solana Tracker RPC)
 import { getWalletSolAndUsdcBalances } from "./birdeye";
 
-const SOLANA_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+
+interface TokenAmountInfo {
+  mint?: string;
+  amount?: string;
+  decimals?: number;
+  uiAmount?: number;
+  uiAmountString?: string;
+}
 
 const RPC_RETRY_MAX = 4;
 const RPC_RETRY_DELAYS_MS = [2000, 4000, 6000, 8000];
@@ -83,8 +90,8 @@ export async function getTokenAccounts(walletAddress: string): Promise<TokenAcco
     );
     const value = result?.value ?? [];
     return value.map((item) => {
-      const parsedInfo = (item.account?.data as { parsed?: { info?: { tokenAmount?: { mint: string; amount: string; decimals: number; uiAmount?: number; uiAmountString?: string } } } })?.parsed?.info;
-      const tokenAmount = parsedInfo?.tokenAmount ?? {};
+      const parsedInfo = (item.account?.data as { parsed?: { info?: { tokenAmount?: TokenAmountInfo } } })?.parsed?.info;
+      const tokenAmount: TokenAmountInfo = parsedInfo?.tokenAmount ?? {};
       let uiAmount = tokenAmount.uiAmount ?? 0;
       if (uiAmount === 0 && tokenAmount.uiAmountString != null) {
         const n = parseFloat(tokenAmount.uiAmountString);

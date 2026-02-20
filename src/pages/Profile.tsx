@@ -807,7 +807,7 @@ export function Profile() {
                         className="flex flex-col items-center min-w-0 flex-1 sm:flex-initial hover:opacity-80 transition-opacity py-1 active:scale-95"
                       >
                         <span className="text-lg sm:text-2xl font-bold">
-                          {followersCount ?? "—"}
+                          {followersCount ?? "–"}
                         </span>
                         <span className="text-[10px] sm:text-xs text-white/60">
                           Followers

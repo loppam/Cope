@@ -28,6 +28,7 @@ export function shortenAddress(address: string, chars = 4): string {
 
 // Format numbers with K, M, B, T suffixes (decimals default 2)
 export function formatNumber(num: number, decimals = 2): string {
+  if (!Number.isFinite(num)) return "0.00";
   const sign = num < 0 ? "-" : "";
   const value = Math.abs(num);
   if (value >= 1_000_000_000_000) {
@@ -45,9 +46,14 @@ export function formatNumber(num: number, decimals = 2): string {
   return `${sign}${value.toFixed(decimals)}`;
 }
 
-// Format currency ($ prefix, K/M/B/T for large values)
-export function formatCurrency(num: number, decimals = 2): string {
-  return `$${formatNumber(Math.abs(num), decimals)}`;
+// Format currency ($ prefix, K/M/B/T for large values). Handles null/undefined.
+export function formatCurrency(
+  num: number | undefined | null,
+  decimals = 2,
+): string {
+  if (num == null || !Number.isFinite(num)) return "$0.00";
+  const sign = num < 0 ? "-" : "";
+  return `${sign}$${formatNumber(Math.abs(num), decimals)}`;
 }
 
 // Format token/amount for notifications (no $ prefix, handles K/M/B/T, 2 decimals)
@@ -72,6 +78,19 @@ export function formatTokenAmountCompact(value: number | undefined | null): stri
 // Format percentage
 export function formatPercentage(num: number, decimals = 2): string {
   return `${num > 0 ? '+' : ''}${num.toFixed(decimals)}%`;
+}
+
+/**
+ * Format very small numbers without scientific notation (DexScreener-style).
+ * e.g. 4.16e-6 → "0.00000416" instead of "4.16e-6"
+ */
+export function formatSmallNumber(num: number, maxDecimals = 12): string {
+  if (!Number.isFinite(num)) return "0";
+  const abs = Math.abs(num);
+  const sign = num < 0 ? "-" : "";
+  if (abs >= 0.0001) return sign + abs.toString();
+  const fixed = num.toFixed(maxDecimals);
+  return fixed.replace(/\.?0+$/, "") || "0";
 }
 
 /**

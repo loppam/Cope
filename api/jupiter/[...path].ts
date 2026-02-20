@@ -11,7 +11,7 @@ export default async function handler(
   req: VercelRequest,
   res: VercelResponse
 ): Promise<void> {
-  const path = (req.query.path as string[]) | [];
+  const path = (req.query.path as string[] | undefined) ?? [];
   const suffix = Array.isArray(path) ? path.join("/") : String(path || "");
   if (!suffix) {
     res.status(400).json({ error: "Missing path" });

@@ -9,6 +9,14 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 const SOLANA_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
+interface TokenAmountInfo {
+  mint?: string;
+  amount?: string;
+  decimals?: number;
+  uiAmount?: number;
+  uiAmountString?: string;
+}
+
 function getRpcSource(): string {
   if (process.env.SOLANA_RPC_URL) return "SOLANA_RPC_URL";
   if (process.env.HELIUS_API_KEY) return "helius";
@@ -90,7 +98,7 @@ export default async function handler(
       let total = 0;
       const value = result?.value ?? [];
       for (const { account } of value) {
-        const parsed = (account?.data as { parsed?: { info?: { tokenAmount?: { uiAmount?: number; uiAmountString?: string; amount?: string; decimals?: number } } } })?.parsed?.info?.tokenAmount;
+        const parsed: TokenAmountInfo | undefined = (account?.data as { parsed?: { info?: { tokenAmount?: TokenAmountInfo } } })?.parsed?.info?.tokenAmount;
         if (!parsed) continue;
         let uiAmount = parsed.uiAmount ?? 0;
         if (uiAmount === 0 && parsed.uiAmountString != null) {
@@ -114,8 +122,8 @@ export default async function handler(
       );
       const value = result?.value ?? [];
       const accounts = value.map((item) => {
-        const parsedInfo = (item.account?.data as { parsed?: { info?: { tokenAmount?: { mint: string; amount: string; decimals: number; uiAmount?: number; uiAmountString?: string } } } })?.parsed?.info;
-        const tokenAmount = parsedInfo?.tokenAmount ?? {};
+        const parsedInfo = (item.account?.data as { parsed?: { info?: { tokenAmount?: TokenAmountInfo } } })?.parsed?.info;
+        const tokenAmount: TokenAmountInfo = parsedInfo?.tokenAmount ?? {};
         let uiAmount = tokenAmount.uiAmount ?? 0;
         if (uiAmount === 0 && tokenAmount.uiAmountString != null) {
           const n = parseFloat(tokenAmount.uiAmountString);

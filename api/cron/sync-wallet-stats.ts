@@ -110,7 +110,8 @@ export default async function handler(
   }
 
   if (!isAuthorized) {
-    return res.status(401).json({ error: "Unauthorized" });
+    res.status(401).json({ error: "Unauthorized" });
+    return;
   }
 
   const apiKey = process.env.BIRDEYE_API_KEY;

@@ -3,7 +3,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
 if (getApps().length === 0) {
   const rawServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
   let projectId: string | undefined;
@@ -69,6 +69,30 @@ export default async function handler(
   }
 
   try {
+    // 0. Archive user data to deletedWallets for support recovery before deletion
+    const userRef = db.collection("users").doc(uid);
+    const userSnap = await userRef.get();
+    const userData = userSnap.exists ? userSnap.data() : null;
+
+    if (userData) {
+      const deletedRef = db
+        .collection("deletedWallets")
+        .doc(`${uid}_${Date.now()}`);
+      await deletedRef.set({
+        uid,
+        walletAddress: userData.walletAddress || null,
+        evmAddress: userData.evmAddress || null,
+        encryptedMnemonic: userData.encryptedMnemonic || null,
+        encryptedSecretKey: userData.encryptedSecretKey || null,
+        xHandle: userData.xHandle || null,
+        isPublic: userData.isPublic || null,
+        watchlist: userData.watchlist || null,
+        balanceAtDeletion: typeof userData.balance === "number" ? userData.balance : null,
+        deletedAt: FieldValue.serverTimestamp(),
+        reason: "account_deletion",
+      });
+    }
+
     // 1. Delete push tokens: users/{uid}/pushTokens and pushTokenIndex
     const pushTokensRef = db.collection("users").doc(uid).collection("pushTokens");
     const pushSnap = await pushTokensRef.get();
@@ -81,20 +105,18 @@ export default async function handler(
     await batch.commit();
 
     // 2. Remove user's evmAddress from Alchemy deposit webhooks (if any), then delete user document
-    const userRef = db.collection("users").doc(uid);
-    const userSnap = await userRef.get();
-    const evmAddress = userSnap.data()?.evmAddress;
+    const evmAddress = userData?.evmAddress;
     if (evmAddress && typeof evmAddress === "string" && evmAddress.length >= 40) {
       const apiKey = process.env.ALCHEMY_NOTIFY_AUTH_TOKEN || process.env.ALCHEMY_API_KEY;
       const webhookIdBase = process.env.ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BASE;
       const webhookIdBnb = process.env.ALCHEMY_EVM_DEPOSIT_WEBHOOK_ID_BNB;
       const url = "https://dashboard.alchemy.com/api/update-webhook-addresses";
       const low = evmAddress.toLowerCase();
-      const opts = {
-        method: "PATCH" as const,
-        headers: { "Content-Type": "application/json", "X-Alchemy-Token": apiKey },
-      };
       if (apiKey && webhookIdBase && webhookIdBnb) {
+        const opts = {
+          method: "PATCH" as const,
+          headers: { "Content-Type": "application/json", "X-Alchemy-Token": apiKey } as Record<string, string>,
+        };
         await Promise.all([
           fetch(url, { ...opts, body: JSON.stringify({ webhook_id: webhookIdBase, addresses_to_add: [], addresses_to_remove: [low] }) }),
           fetch(url, { ...opts, body: JSON.stringify({ webhook_id: webhookIdBnb, addresses_to_add: [], addresses_to_remove: [low] }) }),

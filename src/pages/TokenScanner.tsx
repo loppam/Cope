@@ -42,13 +42,7 @@ import {
 } from "@/lib/auth";
 import { useAuth } from "@/contexts/AuthContext";
 import { DocumentHead } from "@/components/DocumentHead";
-
-function formatMarketCap(value: number): string {
-  if (!value || isNaN(value)) return "$0";
-  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
-  if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
-  return `$${value.toFixed(0)}`;
-}
+import { formatCurrency } from "@/lib/utils";
 
 const ANALYSIS_STEPS_SOLANA = [
   { key: "bundles", icon: Target, label: "Bundle Detection" },
@@ -187,7 +181,7 @@ function AnalysisRow({
           {!isAnalyzing && (
             <>
               <p className="mt-1 text-xs leading-relaxed text-white/60">
-                {data?.reason || data?.value || "—"}
+                {data?.reason || data?.value || "–"}
               </p>
               {data?.value && (
                 <div
@@ -430,7 +424,7 @@ function DiscoverTabContent() {
                   )}
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-white truncate">
-                      {user.displayName || user.xHandle || "—"}
+                      {user.displayName || user.xHandle || "–"}
                     </div>
                     <div className="text-xs text-white/50 font-mono truncate">
                       {user.xHandle}
@@ -722,7 +716,7 @@ export function TokenScanner() {
 
   const getAnalysisItem = (key: string): AnalysisItem => {
     const item = analysis?.[key as keyof AnalysisResult] as AnalysisItem | undefined;
-    return item ?? { value: "—", status: "info", reason: "Analysis pending" };
+    return item ?? { value: "–", status: "info", reason: "Analysis pending" };
   };
 
   const isRevealing = analysis && !loading && currentStep > 0;
@@ -857,7 +851,7 @@ export function TokenScanner() {
                   Market Cap
                 </div>
                 <div className="text-lg font-bold text-[#12d585]">
-                  {formatMarketCap(tokenData.marketCap)}
+                  {formatCurrency(tokenData.marketCap)}
                 </div>
                 <div
                   className={`text-xs ${tokenData.priceChange24h >= 0 ? "text-emerald-400" : "text-red-400"}`}
@@ -871,10 +865,10 @@ export function TokenScanner() {
                   24h Vol
                 </div>
                 <div className="text-sm font-semibold text-white/90">
-                  {formatMarketCap(tokenData.volume24h)}
+                  {formatCurrency(tokenData.volume24h)}
                 </div>
                 <div className="text-xs text-white/50">
-                  Liq: {formatMarketCap(tokenData.liquidityUSD)}
+                  Liq: {formatCurrency(tokenData.liquidityUSD)}
                 </div>
               </div>
             </div>
@@ -1038,10 +1032,10 @@ export function TokenScanner() {
                       {badge}
                     </div>
                     <div className="text-lg font-bold text-white">
-                      {formatMarketCap(p.mcap)}
+                      {formatCurrency(p.mcap)}
                     </div>
                     <div className="text-xs text-white/50 line-through">
-                      {formatMarketCap(currentMcap)}
+                      {formatCurrency(currentMcap)}
                     </div>
                     <div className={`mt-2 text-sm font-semibold ${color}`}>
                       {p.multiplier}

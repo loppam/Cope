@@ -35,9 +35,13 @@ interface BirdeyeTrendingItem {
   name?: string;
   price?: number;
   marketcap?: number;
+  mc?: number;
   price24hChangePercent?: number;
+  v24hChangePercent?: number;
   volume24hChangePercent?: number;
+  v24hVolumeChangePercent?: number;
   volume24hUSD?: number;
+  v24hUSD?: number;
   liquidity?: number;
   rank?: number;
   logoURI?: string;
@@ -51,32 +55,53 @@ interface BirdeyeTrendingResponse {
   };
 }
 
+function formatSmallPrice(num: number, maxDecimals = 12): string {
+  if (!Number.isFinite(num)) return "0";
+  const abs = Math.abs(num);
+  const sign = num < 0 ? "-" : "";
+  if (abs >= 0.0001) return sign + abs.toString();
+  const fixed = num.toFixed(maxDecimals);
+  return fixed.replace(/\.?0+$/, "") || "0";
+}
+
 function toTrendingToken(item: BirdeyeTrendingItem, chainId: string): TrendingToken {
   const price = item.price;
   const priceUsd =
     price != null && Number.isFinite(price)
-      ? (price < 0.0001 ? price.toExponential(4) : price.toString())
+      ? (price < 0.0001 ? formatSmallPrice(price) : price.toString())
       : "0";
   const marketCap =
-    item.marketcap != null && Number.isFinite(item.marketcap) ? item.marketcap : 0;
+    item.marketcap != null && Number.isFinite(item.marketcap)
+      ? item.marketcap
+      : item.mc != null && Number.isFinite(item.mc)
+        ? item.mc
+        : 0;
   const priceChange24 =
     item.price24hChangePercent != null && Number.isFinite(item.price24hChangePercent)
       ? item.price24hChangePercent
-      : null;
+      : item.v24hChangePercent != null && Number.isFinite(item.v24hChangePercent)
+        ? item.v24hChangePercent
+        : null;
   const volumeChange24 =
     item.volume24hChangePercent != null && Number.isFinite(item.volume24hChangePercent)
       ? item.volume24hChangePercent
-      : null;
+      : item.v24hVolumeChangePercent != null && Number.isFinite(item.v24hVolumeChangePercent)
+        ? item.v24hVolumeChangePercent
+        : null;
   const liquidity = item.liquidity != null && Number.isFinite(item.liquidity) ? item.liquidity : 0;
   const volume24hUsd =
-    item.volume24hUSD != null && Number.isFinite(item.volume24hUSD) ? item.volume24hUSD : 0;
+    item.volume24hUSD != null && Number.isFinite(item.volume24hUSD)
+      ? item.volume24hUSD
+      : item.v24hUSD != null && Number.isFinite(item.v24hUSD)
+        ? item.v24hUSD
+        : 0;
   const rank =
     item.rank != null && Number.isFinite(item.rank) ? item.rank : null;
   return {
     chainId,
     tokenAddress: item.address ?? "",
-    symbol: item.symbol ?? "—",
-    name: item.name ?? item.symbol ?? "—",
+    symbol: item.symbol ?? "–",
+    name: item.name ?? item.symbol ?? "–",
     priceUsd,
     marketCap,
     priceChange24,

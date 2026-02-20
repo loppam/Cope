@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { ArrowLeft, Filter, ExternalLink, Star, ChevronDown, ChevronUp } from 'lucide-react';
-import { shortenAddress } from '@/lib/utils';
+import { shortenAddress, formatCurrency } from '@/lib/utils';
 import { ScannerWallet, ScannerTokenStat } from '@/lib/birdeye';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
@@ -67,17 +67,6 @@ export function ScannerResults() {
         return newSet;
       });
     }
-  };
-
-  const formatCurrency = (value: number | undefined | null) => {
-    const numValue = value ?? 0;
-    if (numValue >= 1000000) {
-      return `$${(numValue / 1000000).toFixed(2)}M`;
-    }
-    if (numValue >= 1000) {
-      return `$${(numValue / 1000).toFixed(2)}K`;
-    }
-    return `$${numValue.toFixed(2)}`;
   };
 
   const getGmgnLink = (address: string) => {
@@ -176,7 +165,7 @@ export function ScannerResults() {
                         <div>
                           <p className="text-xs text-white/50 mb-0.5">Avg ROI (%)</p>
                           <p className={`text-sm font-semibold ${roiColor}`}>
-                            {avgRoiPct === null ? '—' : `${avgRoiPct >= 0 ? '+' : ''}${avgRoiPct.toFixed(1)}%`}
+                            {avgRoiPct === null ? '–' : `${avgRoiPct >= 0 ? '+' : ''}${avgRoiPct.toFixed(1)}%`}
                           </p>
                         </div>
                       </div>
@@ -205,7 +194,7 @@ export function ScannerResults() {
                               {formatCurrency(stat.totalPnl)}
                             </span>
                             <span className={`text-right ${stat.roiPct === null ? 'text-white/50' : stat.roiPct >= 0 ? 'text-[#12d585]' : 'text-[#FF4757]'}`}>
-                              {stat.roiPct === null ? '—' : `${stat.roiPct >= 0 ? '+' : ''}${stat.roiPct.toFixed(1)}%`}
+                              {stat.roiPct === null ? '–' : `${stat.roiPct >= 0 ? '+' : ''}${stat.roiPct.toFixed(1)}%`}
                             </span>
                           </div>
                         ))}

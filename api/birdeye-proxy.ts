@@ -465,8 +465,10 @@ async function walletCurrentNetWorthHandler(req: VercelRequest, res: VercelRespo
     url.searchParams.set("wallet", wallet);
     url.searchParams.set("sort_by", (req.query.sort_by ?? "value").toString());
     url.searchParams.set("sort_type", (req.query.sort_type ?? "desc").toString());
-    url.searchParams.set("limit", String(Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? "100"), 10) || 100)));
-    url.searchParams.set("offset", String(Math.max(0, parseInt(String(req.query.offset ?? "0"), 10) || 0)));
+    const limitParam = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? "100"), 10) || 100));
+    const offsetParam = Math.max(0, parseInt(String(req.query.offset ?? "0"), 10) || 0);
+    url.searchParams.set("limit", String(limitParam));
+    url.searchParams.set("offset", String(offsetParam));
     const filterVal = req.query.filter_value;
     if (filterVal != null && filterVal !== "") {
       url.searchParams.set("filter_value", String(filterVal));

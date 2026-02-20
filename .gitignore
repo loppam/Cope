@@ -65,7 +65,7 @@ twa-build/*.aab
 twa-build/*.apk
 twa-build/*.apk.idsig
 twa-build/manifest-checksum.txt
-twa-build/
+twa-build
 
 # pnpm
 .pnpm-store

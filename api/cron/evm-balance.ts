@@ -254,18 +254,21 @@ export default async function handler(
   const authHeader = req.headers.authorization;
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
-    return res.status(401).json({ error: "Unauthorized" });
+    res.status(401).json({ error: "Unauthorized" });
+    return;
   }
   const uid = typeof req.query.uid === "string" ? req.query.uid.trim() : "";
   if (!uid) {
-    return res.status(400).json({ error: "Missing uid" });
+    res.status(400).json({ error: "Missing uid" });
+    return;
   }
 
   ensureFirebase();
   const db = getFirestore();
   const encryptionSecret = process.env.ENCRYPTION_SECRET;
   if (!encryptionSecret) {
-    return res.status(503).json({ error: "ENCRYPTION_SECRET not configured" });
+    res.status(503).json({ error: "ENCRYPTION_SECRET not configured" });
+    return;
   }
 
   try {
@@ -274,12 +277,13 @@ export default async function handler(
     const encryptedSecretKey = userData?.encryptedSecretKey;
     const encryptedMnemonic = userData?.encryptedMnemonic;
     if (!encryptedSecretKey) {
-      return res.status(200).json({
+      res.status(200).json({
         evmAddress: null,
         base: { usdc: 0, native: 0 },
         bnb: { usdc: 0, native: 0 },
         tokens: [],
       });
+      return;
     }
     const { mnemonic } = await decryptWalletCredentials(
       uid,
@@ -288,12 +292,13 @@ export default async function handler(
       encryptionSecret,
     );
     if (!mnemonic?.trim()) {
-      return res.status(200).json({
+      res.status(200).json({
         evmAddress: null,
         base: { usdc: 0, native: 0 },
         bnb: { usdc: 0, native: 0 },
         tokens: [],
       });
+      return;
     }
     const wallet = HDNodeWallet.fromPhrase(
       mnemonic.trim(),
@@ -304,7 +309,7 @@ export default async function handler(
       getEvmBalances(wallet.address),
       getEvmTokenPositions(wallet.address),
     ]);
-    return res.status(200).json({
+    res.status(200).json({
       evmAddress: wallet.address,
       base: balances.base,
       bnb: balances.bnb,
@@ -312,7 +317,7 @@ export default async function handler(
     });
   } catch (e) {
     console.error("[cron/evm-balance]", e);
-    return res.status(500).json({
+    res.status(500).json({
       error: e instanceof Error ? e.message : "EVM balance failed",
     });
   }

@@ -245,7 +245,7 @@ export function CopeWallet() {
                       )}
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-white group-hover:text-[#12d585] transition-colors truncate">
-                          {user.displayName || user.xHandle || "—"}
+                          {user.displayName || user.xHandle || "–"}
                         </div>
                         <div className="text-xs text-white/50 font-mono truncate">
                           {user.xHandle}

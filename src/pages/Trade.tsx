@@ -26,6 +26,7 @@ import {
   getPriceImpactColor,
   formatPriceImpact,
 } from "@/lib/jupiter-swap";
+import { formatSmallNumber } from "@/lib/utils";
 import { getSolBalance, getUsdcBalance } from "@/lib/rpc";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -39,7 +40,12 @@ import {
   ArrowDownUp,
   Loader2,
 } from "lucide-react";
-import { shortenAddress, getApiBase, toRawAmountString } from "@/lib/utils";
+import {
+  shortenAddress,
+  getApiBase,
+  toRawAmountString,
+  formatCurrency,
+} from "@/lib/utils";
 import { getChainId } from "@/lib/relay";
 import { SOLANA_USDC_MINT, SOL_MINT } from "@/lib/constants";
 import { toast } from "sonner";
@@ -510,16 +516,9 @@ export function Trade() {
     }
   };
 
-  const formatCurrency = (value: number | undefined) => {
-    if (!value) return "$0";
-    if (value >= 1000000) return `$${(value / 1000000).toFixed(2)}M`;
-    if (value >= 1000) return `$${(value / 1000).toFixed(2)}K`;
-    return `$${value.toFixed(2)}`;
-  };
-
   const formatPrice = (price: number | undefined) => {
     if (!price || price === 0) return "$0";
-    if (price < 0.000001) return `$${price.toExponential(2)}`;
+    if (price < 0.000001) return `$${formatSmallNumber(price)}`;
     return `$${price.toFixed(8)}`;
   };
 
@@ -1376,7 +1375,7 @@ export function Trade() {
                     <span className="text-sm text-white/70 min-w-0 truncate max-w-[50%]">
                       {usdcBalance != null
                         ? `${usdcBalance.toFixed(2)} USDC`
-                        : "—"}
+                        : "–"}
                     </span>
                   </div>
                   <Input

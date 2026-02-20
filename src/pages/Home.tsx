@@ -32,7 +32,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { WalletNotification } from "@/lib/notifications";
-import { shortenAddress, formatCurrency, formatTokenAmountCompact, getApiBase } from "@/lib/utils";
+import { shortenAddress, formatCurrency, formatTokenAmountCompact, formatSmallNumber, getApiBase } from "@/lib/utils";
 import { getWalletPortfolioWithPnL } from "@/lib/birdeye";
 import { fetchNativePrices } from "@/lib/coingecko";
 import { apiCache, UI_CACHE_TTL_MS } from "@/lib/cache";
@@ -440,18 +440,11 @@ export function Home() {
     }
   };
 
-  const formatMarketCap = (val: number) => {
-    if (!val || Number.isNaN(val)) return "—";
-    if (val >= 1_000_000) return `$${(val / 1_000_000).toFixed(2)}M`;
-    if (val >= 1_000) return `$${(val / 1_000).toFixed(2)}K`;
-    return `$${val.toFixed(2)}`;
-  };
-
   const formatPrice = (val: string) => {
-    if (!val || val === "0") return "—";
+    if (!val || val === "0") return "–";
     const n = parseFloat(val);
     if (Number.isNaN(n)) return val;
-    if (n < 0.0001) return `$${n.toExponential(2)}`;
+    if (n < 0.0001) return `$${formatSmallNumber(n)}`;
     if (n >= 1) return `$${n.toFixed(4)}`;
     return `$${n.toFixed(6)}`;
   };
@@ -662,15 +655,15 @@ export function Home() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-white truncate">
-                          {token.symbol ?? "—"}
+                          {token.symbol ?? "–"}
                         </span>
                         <span className="text-xs text-white/50 truncate hidden sm:inline">
                           {token.name}
                         </span>
                       </div>
                       <p className="text-xs text-white/50 truncate mt-0.5">
-                        {formatMarketCap(token.marketCap)} MC
-                        {token.volumeChange24 != null && (
+                      MCap: {formatCurrency(token.marketCap)}
+                         {token.volumeChange24 != null && (
                           <span
                             className={
                               token.volumeChange24 >= 0
@@ -708,7 +701,7 @@ export function Home() {
                             {` ${Math.abs(token.priceChange24).toFixed(2)}%`}
                           </>
                         ) : (
-                          "—"
+                          "–"
                         )}
                       </span>
                     </div>

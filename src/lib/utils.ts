@@ -95,9 +95,12 @@ export function formatSmallNumber(num: number, maxDecimals = 12): string {
 
 const SUBSCRIPT_DIGITS = "₀₁₂₃₄₅₆₇₈₉";
 
+/** Max significant digits to show (avoids long strings like 3678173113492357) */
+const COMPACT_SIG_DIGITS = 4;
+
 /**
- * DexScreener-style compact price: for very small numbers, use subscript to show
- * zero count and save space. e.g. 0.00000303 → $0.0₆303 (6 zeros before 303)
+ * DexScreener-style compact price: for very small numbers, subscript shows zero count.
+ * e.g. 0.0003678173113492357 → $0.0₃3678 (subscript ₃ = 3 zeros, truncated to 4 digits)
  */
 export function formatPriceCompact(
   val: string | number,
@@ -114,7 +117,8 @@ export function formatPriceCompact(
   const match = s.match(/^0\.(0+)(\d+)$/);
   if (!match) return { compact: false, str: `$${s}` };
   const zeros = match[1];
-  const sig = match[2].replace(/0+$/, "") || "0";
+  const sigRaw = match[2].replace(/0+$/, "") || "0";
+  const sig = sigRaw.slice(0, COMPACT_SIG_DIGITS);
   const zeroCount = zeros.length;
   const zeroSub =
     zeroCount <= 9

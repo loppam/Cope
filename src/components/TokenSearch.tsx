@@ -76,9 +76,9 @@ export function TokenSearch({ onSelect, placeholder = "Search token by name or s
     if (fmt.compact) {
       return (
         <>
-          <span className="text-[10px] opacity-75 align-baseline">{fmt.prefix}</span>
-          <span className="text-[10px] opacity-75 align-sub">{fmt.zeroSub}</span>
-          <span>{fmt.significant}</span>
+          {fmt.prefix}
+          <span className="align-sub">{fmt.zeroSub}</span>
+          {fmt.significant}
         </>
       );
     }

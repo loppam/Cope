@@ -48,6 +48,7 @@ import {
   savePushTokenWithPlatform,
   unregisterPushToken,
   getStoredPushToken,
+  isSafariBrowser,
 } from "@/lib/notifications";
 import { updatePublicWalletStatus } from "@/lib/auth";
 import { syncWebhook } from "@/lib/webhook";
@@ -618,6 +619,8 @@ export function Profile() {
     }
   };
 
+  const PUSH_TOKEN_TIMEOUT_MS = 18000; // 18 seconds
+
   const handleTogglePush = async () => {
     if (!user) return;
 
@@ -636,14 +639,24 @@ export function Profile() {
         const permBefore = Notification.permission;
         if (permBefore === "denied") {
           toast.error(
-            "Notification permission was denied. Please enable it in your browser settings.",
+            "Notification permission was denied. Please enable it in your device settings.",
           );
           setIsTogglingPush(false);
           return;
         }
 
-        // Get push token (automatically uses FCM or Web Push based on browser)
-        const result = await requestPermissionAndGetPushToken();
+        // Get push token with timeout to avoid indefinite hangs
+        const timeoutPromise = new Promise<null>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("SETUP_TIMEOUT")),
+            PUSH_TOKEN_TIMEOUT_MS,
+          ),
+        );
+        const result = await Promise.race([
+          requestPermissionAndGetPushToken(),
+          timeoutPromise,
+        ]);
+
         if (result && result.token) {
           setPushEnabled(true);
           await savePushTokenWithPlatform(result.token, result.platform);
@@ -653,12 +666,15 @@ export function Profile() {
           const permAfter = Notification.permission;
           if (permAfter === "denied") {
             toast.error(
-              "Notification permission denied. Please enable it in your browser settings.",
+              "Notification permission denied. Enable it in device Settings → Notifications.",
             );
           } else if (permAfter === "default") {
             toast.error("Please allow notifications when prompted");
+          } else if (isSafariBrowser()) {
+            toast.error(
+              "On iOS: add this app to Home Screen (Add to Home), then try again. Web Push works only from the installed PWA.",
+            );
           } else {
-            // Likely unsupported browser
             toast.info("Push notifications are not supported on this browser");
           }
         }
@@ -672,11 +688,19 @@ export function Profile() {
       setPushEnabled(previousValue);
       console.error("Error toggling push notifications:", error);
       const errorMessage = error?.message || "";
-      if (
+      if (errorMessage === "SETUP_TIMEOUT") {
+        toast.error(
+          "Setup took too long. Check your connection, or try again. On iOS, add the app to Home Screen first.",
+        );
+      } else if (
         errorMessage.includes("unsupported") ||
         errorMessage.includes("not supported")
       ) {
         toast.info("Push notifications are not supported on this browser");
+      } else if (isSafariBrowser()) {
+        toast.error(
+          "On iOS: add this app to Home Screen (Add to Home), then try again.",
+        );
       } else {
         toast.error("Couldn't update notifications. Please try again.");
       }
@@ -1487,7 +1511,9 @@ export function Profile() {
                     <div className="min-w-0">
                       <p className="font-medium text-sm">Push Notifications</p>
                       <p className="text-xs text-white/60">
-                        Get notified about watched wallet trades
+                        {isTogglingPush && !pushEnabled
+                          ? "Setting up notifications…"
+                          : "Get notified about watched wallet trades"}
                       </p>
                     </div>
                   </div>

@@ -166,6 +166,13 @@ async function sendToTokens(
     }
   }
 
+  const INVALID_FCM_CODES = [
+    "messaging/registration-token-not-registered",
+    "messaging/invalid-registration-token",
+    "messaging/invalid-argument",
+    "messaging/mismatched-credential",
+  ];
+
   if (fcmTokens.length > 0) {
     try {
       const data = { ...(payload.data || {}), deepLink };
@@ -176,11 +183,15 @@ async function sendToTokens(
         webpush: { fcmOptions: { link: deepLink } },
       });
       response.responses.forEach((resp, idx) => {
-        if (
-          !resp.success &&
-          resp.error?.code === "messaging/registration-token-not-registered"
-        ) {
-          invalidTokens.push(fcmTokens[idx]);
+        if (!resp.success) {
+          console.warn("[Push] FCM failed", {
+            idx,
+            code: resp.error?.code,
+            message: resp.error?.message,
+          });
+          if (INVALID_FCM_CODES.includes(resp.error?.code ?? "")) {
+            invalidTokens.push(fcmTokens[idx]);
+          }
         }
       });
     } catch (error) {
@@ -197,19 +208,28 @@ async function sendToTokens(
       icon: "/icons/icon-192x192.png",
       badge: "/icons/icon-96x96.png",
     });
+    const INVALID_WEBPUSH_STATUS = [410, 404, 400, 401, 403];
     await Promise.allSettled(
       webPushSubscriptions.map(async ({ token, subscription }) => {
         try {
-          await webpush.sendNotification(subscription, webPushPayload);
+          await webpush.sendNotification(subscription, webPushPayload, {
+            TTL: 86400, // 24 hours
+          });
           return { success: true, token };
         } catch (error: any) {
-          if ([410, 404, 400].includes(error.statusCode))
+          console.warn("[Push] Web Push failed", {
+            statusCode: error.statusCode,
+            message: error.message,
+          });
+          if (INVALID_WEBPUSH_STATUS.includes(error.statusCode ?? 0)) {
             invalidTokens.push(token);
+          }
           return { success: false, token };
         }
       }),
     );
   } else if (webPushSubscriptions.length > 0) {
+    console.warn("[Push] Web Push init failed - VAPID keys missing or invalid");
     invalidTokens.push(...webPushSubscriptions.map((s) => s.token));
   }
 

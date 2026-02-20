@@ -43,6 +43,8 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { DocumentHead } from "@/components/DocumentHead";
 import { formatCurrency } from "@/lib/utils";
+import { TokenSearch } from "@/components/TokenSearch";
+import type { TokenSearchResult } from "@/lib/solanatracker";
 
 const ANALYSIS_STEPS_SOLANA = [
   { key: "bundles", icon: Target, label: "Bundle Detection" },
@@ -201,7 +203,8 @@ function AnalysisRow({
 
 function DiscoverTabContent() {
   const navigate = useNavigate();
-  const { user, watchlist, addToWatchlist, removeFromWatchlist } = useAuth();
+  const { user, userProfile, watchlist, addToWatchlist, removeFromWatchlist } = useAuth();
+  const myWallet = userProfile?.walletAddress ?? null;
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<UserSearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -400,10 +403,12 @@ function DiscoverTabContent() {
             </div>
           )}
         </div>
-        {showDropdown && searchResults.length > 0 && (
+        {showDropdown && searchResults.filter((u) => u.walletAddress !== myWallet).length > 0 && (
           <div className="absolute z-50 w-full mt-2 max-h-[320px] overflow-y-auto rounded-xl border border-white/10 bg-[#0a0a0a] shadow-xl">
             <div className="p-2">
-              {searchResults.map((user) => (
+              {searchResults
+                .filter((u) => u.walletAddress !== myWallet)
+                .map((user) => (
                 <button
                   key={user.uid}
                   type="button"
@@ -475,11 +480,13 @@ function DiscoverTabContent() {
         </div>
       ) : (
         <div className="space-y-4">
-          {topTraders.length > 0 ? (
+          {topTraders.filter((t) => t.walletAddress !== myWallet).length > 0 ? (
             <div>
               <h3 className="text-sm font-semibold text-white/80 mb-3">Top traders</h3>
               <div className="space-y-2">
-                {topTraders.map((t) => {
+                {topTraders
+                  .filter((t) => t.walletAddress !== myWallet)
+                  .map((t) => {
                   const isFollowed = watchedAddresses.has(t.walletAddress);
                   const percentage = `${Number(t.winRate).toFixed(2)}%`;
                   return (
@@ -585,11 +592,6 @@ function DiscoverTabContent() {
   );
 }
 
-function looksLikeContractAddress(text: string): boolean {
-  const t = text.trim();
-  return t.length >= 32 && /^[A-Za-z0-9_-]+$/.test(t);
-}
-
 export function TokenScanner() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -670,14 +672,12 @@ export function TokenScanner() {
     }
   }, [tokenAddress]);
 
-  const handleTokenAddressPaste = useCallback(
-    (e: React.ClipboardEvent<HTMLInputElement>) => {
-      const pasted = e.clipboardData.getData("text").trim();
-      if (!pasted || !looksLikeContractAddress(pasted)) return;
-      e.preventDefault();
-      setTokenAddress(pasted);
+  const handleTokenSelect = useCallback(
+    (token: TokenSearchResult) => {
+      const addr = token.mint;
+      setTokenAddress(addr);
       setError(null);
-      setTimeout(() => analyzeToken(pasted), 0);
+      analyzeToken(addr);
     },
     [analyzeToken],
   );
@@ -770,36 +770,10 @@ export function TokenScanner() {
 
         <TabsContent value="token" className="mt-0">
       <div className="mb-6 rounded-xl border border-white/10 bg-white/5 p-2">
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <input
-            type="text"
-            value={tokenAddress}
-            onChange={(e) => setTokenAddress(e.target.value)}
-            onPaste={handleTokenAddressPaste}
-            onKeyDown={(e) => e.key === "Enter" && analyzeToken()}
-            placeholder="Paste token address or enter (Solana, Base, BNB)"
-            className="min-h-[44px] flex-1 rounded-lg bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-[#12d585]"
-          />
-          <button
-            type="button"
-            onClick={analyzeToken}
-            disabled={!tokenAddress.trim() || loading}
-            data-tap-haptic
-            className="tap-press flex min-h-[44px] min-w-[44px] items-center justify-center gap-2 rounded-lg bg-[#12d585] px-6 py-3 font-semibold text-black transition-opacity disabled:opacity-50"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span className="sm:inline">Scanning...</span>
-              </>
-            ) : (
-              <>
-                <Search className="h-4 w-4" />
-                Scan
-              </>
-            )}
-          </button>
-        </div>
+        <TokenSearch
+          onSelect={handleTokenSelect}
+          placeholder="Search by name, symbol, or paste address (Solana, Base, BNB)"
+        />
       </div>
 
       {loading && (
@@ -938,7 +912,7 @@ export function TokenScanner() {
                 className="tap-press flex-1 min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl bg-[#12d585] font-semibold text-black px-4 py-3"
               >
                 <ArrowDownRight className="w-4 h-4" />
-                Buy
+                 Buy
               </button>
               <button
                 type="button"

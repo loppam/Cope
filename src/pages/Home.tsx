@@ -31,7 +31,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { WalletNotification } from "@/lib/notifications";
-import { shortenAddress, formatCurrency, formatTokenAmountCompact, formatSmallNumber, getApiBase } from "@/lib/utils";
+import { shortenAddress, formatCurrency, formatTokenAmountCompact, formatPriceCompact, getApiBase } from "@/lib/utils";
 import { getWalletPortfolioWithPnL } from "@/lib/birdeye";
 import { fetchNativePrices } from "@/lib/coingecko";
 import { apiCache, UI_CACHE_TTL_MS } from "@/lib/cache";
@@ -311,6 +311,7 @@ export function Home() {
   }, [user, watchlist]);
 
   // API params: sort_by (rank|volumeUSD|liquidity), interval (1h|4h|24h)
+  // Birdeye only returns priceChange24 when interval=24h; 4h returns null
   const { sortBy: trendingSortBy, interval: trendingInterval } =
     activeFilter === "volume"
       ? { sortBy: "volumeUSD" as const, interval: "24h" as const }
@@ -318,7 +319,7 @@ export function Home() {
         ? { sortBy: "liquidity" as const, interval: "24h" as const }
         : activeFilter === "gainers"
           ? { sortBy: "rank" as const, interval: "24h" as const }
-          : { sortBy: "rank" as const, interval: "4h" as const };
+          : { sortBy: "rank" as const, interval: "24h" as const };
 
   // Fetch trending tokens (Birdeye, multi-chain). Cap at TRENDING_FETCH_CAP. Refetch every 30 mins.
   useEffect(() => {
@@ -445,13 +446,21 @@ export function Home() {
     }
   };
 
-  const formatPrice = (val: string) => {
+  const renderPrice = (val: string) => {
     if (!val || val === "0") return "–";
     const n = parseFloat(val);
     if (Number.isNaN(n)) return val;
-    if (n < 0.0001) return `$${formatSmallNumber(n)}`;
-    if (n >= 1) return `$${n.toFixed(4)}`;
-    return `$${n.toFixed(6)}`;
+    const fmt = formatPriceCompact(val);
+    if (fmt.compact) {
+      return (
+        <>
+          <span className="text-[10px] opacity-75 align-baseline">{fmt.prefix}</span>
+          <span className="text-[10px] opacity-75 align-sub">{fmt.zeroSub}</span>
+          <span>{fmt.significant}</span>
+        </>
+      );
+    }
+    return fmt.str;
   };
 
   const filterPills: { id: FilterId; icon: React.ReactNode; label: string }[] = [
@@ -679,8 +688,8 @@ export function Home() {
                       </p>
                     </div>
                     <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
-                      <span className="font-medium text-white text-sm tabular-nums">
-                        {formatPrice(token.priceUsd)}
+                      <span className="font-medium text-white text-sm tabular-nums inline-flex items-baseline min-w-0 max-w-[120px] justify-end">
+                        {renderPrice(token.priceUsd)}
                       </span>
                       <span
                         className={`text-sm font-semibold tabular-nums inline-flex items-center gap-0.5 ${

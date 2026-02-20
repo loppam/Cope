@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Search, X, Loader2 } from 'lucide-react';
 import { TokenSearchResult } from '@/lib/solanatracker';
 import { searchTokensUnified } from '@/lib/birdeye-token';
-import { shortenAddress, formatCurrency, formatSmallNumber } from '@/lib/utils';
+import { shortenAddress, formatCurrency, formatPriceCompact } from '@/lib/utils';
 
 interface TokenSearchProps {
   onSelect: (token: TokenSearchResult) => void;
@@ -70,10 +70,19 @@ export function TokenSearch({ onSelect, placeholder = "Search token by name or s
     setShowResults(false); // Close dropdown
   };
 
-  const formatPrice = (price: number | undefined) => {
+  const renderPrice = (price: number | undefined) => {
     if (!price || price === 0) return '$0';
-    if (price < 0.000001) return `$${formatSmallNumber(price)}`;
-    return `$${price.toFixed(8)}`;
+    const fmt = formatPriceCompact(price);
+    if (fmt.compact) {
+      return (
+        <>
+          <span className="text-[10px] opacity-75 align-baseline">{fmt.prefix}</span>
+          <span className="text-[10px] opacity-75 align-sub">{fmt.zeroSub}</span>
+          <span>{fmt.significant}</span>
+        </>
+      );
+    }
+    return fmt.str;
   };
 
   return (
@@ -145,7 +154,7 @@ export function TokenSearch({ onSelect, placeholder = "Search token by name or s
                       <div className="flex flex-wrap gap-x-3 gap-y-0 text-xs text-white/50 overflow-hidden">
                         <span className="font-mono truncate">{shortenAddress(token.mint)}</span>
                         {token.priceUsd != null && token.priceUsd > 0 && (
-                          <span className="truncate">{formatPrice(token.priceUsd)}</span>
+                          <span className="truncate inline-flex items-baseline min-w-0">{renderPrice(token.priceUsd)}</span>
                         )}
                         {token.marketCapUsd != null && token.marketCapUsd > 0 && (
                           <span className="truncate">MCap: {formatCurrency(token.marketCapUsd)}</span>

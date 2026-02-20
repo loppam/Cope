@@ -26,7 +26,7 @@ import {
   getPriceImpactColor,
   formatPriceImpact,
 } from "@/lib/jupiter-swap";
-import { formatSmallNumber } from "@/lib/utils";
+import { formatPriceCompact } from "@/lib/utils";
 import { getSolBalance, getUsdcBalance } from "@/lib/rpc";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -516,10 +516,19 @@ export function Trade() {
     }
   };
 
-  const formatPrice = (price: number | undefined) => {
+  const renderPrice = (price: number | undefined) => {
     if (!price || price === 0) return "$0";
-    if (price < 0.000001) return `$${formatSmallNumber(price)}`;
-    return `$${price.toFixed(8)}`;
+    const fmt = formatPriceCompact(price);
+    if (fmt.compact) {
+      return (
+        <>
+          <span className="text-[10px] opacity-75 align-baseline">{fmt.prefix}</span>
+          <span className="text-[10px] opacity-75 align-sub">{fmt.zeroSub}</span>
+          <span>{fmt.significant}</span>
+        </>
+      );
+    }
+    return fmt.str;
   };
 
   const getTokenAge = (createdAt?: number) => {
@@ -1175,8 +1184,8 @@ export function Trade() {
                     <div className="grid grid-cols-2 gap-2 sm:gap-3 mb-4">
                       <div className="bg-white/5 rounded-lg p-2 sm:p-3">
                         <div className="text-xs text-white/60 mb-1">Price</div>
-                        <div className="text-sm sm:text-lg font-semibold truncate">
-                          {formatPrice(token.priceUsd)}
+                        <div className="text-sm sm:text-lg font-semibold overflow-hidden flex items-baseline">
+                          {renderPrice(token.priceUsd)}
                         </div>
                       </div>
                       <div className="bg-white/5 rounded-lg p-2 sm:p-3">

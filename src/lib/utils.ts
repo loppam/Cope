@@ -93,6 +93,41 @@ export function formatSmallNumber(num: number, maxDecimals = 12): string {
   return fixed.replace(/\.?0+$/, "") || "0";
 }
 
+const SUBSCRIPT_DIGITS = "₀₁₂₃₄₅₆₇₈₉";
+
+/**
+ * DexScreener-style compact price: for very small numbers, use subscript to show
+ * zero count and save space. e.g. 0.00000303 → $0.0₆303 (6 zeros before 303)
+ */
+export function formatPriceCompact(
+  val: string | number,
+): { compact: true; prefix: string; zeroSub: string; significant: string } | { compact: false; str: string } {
+  const n = typeof val === "string" ? parseFloat(val) : val;
+  if (!Number.isFinite(n) || n < 0) {
+    return { compact: false, str: typeof val === "string" ? val : "$0" };
+  }
+  if (n >= 0.001) {
+    if (n >= 1) return { compact: false, str: `$${n.toFixed(4)}` };
+    return { compact: false, str: `$${n.toFixed(6)}` };
+  }
+  const s = formatSmallNumber(n);
+  const match = s.match(/^0\.(0+)(\d+)$/);
+  if (!match) return { compact: false, str: `$${s}` };
+  const zeros = match[1];
+  const sig = match[2].replace(/0+$/, "") || "0";
+  const zeroCount = zeros.length;
+  const zeroSub =
+    zeroCount <= 9
+      ? SUBSCRIPT_DIGITS[zeroCount]
+      : zeroCount <= 99
+        ? String(zeroCount)
+            .split("")
+            .map((d) => SUBSCRIPT_DIGITS[parseInt(d, 10)])
+            .join("")
+        : String(zeroCount);
+  return { compact: true, prefix: "$0.0", zeroSub, significant: sig };
+}
+
 /**
  * Convert UI amount to raw integer string for APIs (Relay, etc).
  * Avoids scientific notation for large values (e.g. EVM 18-decimals).

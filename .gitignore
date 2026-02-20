@@ -69,3 +69,6 @@ twa-build
 
 # pnpm
 .pnpm-store
+
+# Investor documentation (sensitive build details)
+docs/PITCH_DECK.md

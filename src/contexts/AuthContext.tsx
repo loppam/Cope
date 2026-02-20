@@ -211,7 +211,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ) {
         const callbackUrl = getFirebaseCallbackUrl();
         toast.error(
-          `Twitter blocked the login. Add this callback URL to Twitter Developer Portal: ${callbackUrl}. See TWITTER_OAUTH_MOBILE_FIX.md for details.`,
+          `Twitter blocked the login. Add this callback URL to Twitter Developer Portal: ${callbackUrl}`,
           { duration: 10000 },
         );
       } else if (!errorMessage.includes("cancelled")) {

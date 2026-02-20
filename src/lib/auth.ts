@@ -118,7 +118,7 @@ export async function signInWithTwitter(): Promise<User | void> {
       errorMessage.includes("prevented")
     ) {
       throw new Error(
-        "Twitter blocked the login attempt. Please check TWITTER_OAUTH_MOBILE_FIX.md for configuration steps. You may need to wait 24 hours before trying again.",
+        "Twitter blocked the login attempt. Add the callback URL to Twitter Developer Portal. You may need to wait 24 hours before trying again.",
       );
     }
 
@@ -249,7 +249,7 @@ export async function handleRedirectResult(): Promise<User | null> {
       errorMessage.includes("prevented")
     ) {
       throw new Error(
-        "Twitter blocked the login attempt. Please check TWITTER_OAUTH_MOBILE_FIX.md for configuration steps. You may need to wait 24 hours before trying again.",
+        "Twitter blocked the login attempt. Add the callback URL to Twitter Developer Portal. You may need to wait 24 hours before trying again.",
       );
     }
 

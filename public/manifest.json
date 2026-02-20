@@ -85,8 +85,26 @@
     {
       "form_factor": "narrow",
       "label": "Home",
-      "sizes": "1080x1920",
+      "sizes": "1242x2570",
       "src": "/screenshots/home.png"
+    },
+    {
+      "form_factor": "narrow",
+      "label": "Trade",
+      "sizes": "1242x2562",
+      "src": "/screenshots/trade.png"
+    },
+    {
+      "form_factor": "narrow",
+      "label": "Scanner",
+      "sizes": "1242x2575",
+      "src": "/screenshots/scanner.png"
+    },
+    {
+      "form_factor": "narrow",
+      "label": "Profile",
+      "sizes": "1233x2581",
+      "src": "/screenshots/profile.png"
     }
   ],
   "categories": ["finance", "business"],

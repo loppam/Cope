@@ -16,7 +16,6 @@ import {
   Star,
   BadgeCheck,
   Flame,
-  Users,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -42,7 +41,7 @@ import { PullToRefresh } from "@/components/PullToRefresh";
 import type { TrendingToken } from "../../api/trending-tokens";
 
 type TabId = "plays" | "trending";
-type FilterId = "star" | "verified" | "trending" | "held";
+type FilterId = "trending" | "gainers" | "volume" | "liquidity";
 
 const TRENDING_FETCH_CAP = 25;
 const TRENDING_REFETCH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
@@ -311,16 +310,22 @@ export function Home() {
     };
   }, [user, watchlist]);
 
-  // sort_by for API: liquidity helps Verified/Most held; rank for Trending/Top gainers
-  const trendingSortBy =
-    activeFilter === "verified" || activeFilter === "held" ? "liquidity" : "rank";
+  // API params: sort_by (rank|volumeUSD|liquidity), interval (1h|4h|24h)
+  const { sortBy: trendingSortBy, interval: trendingInterval } =
+    activeFilter === "volume"
+      ? { sortBy: "volumeUSD" as const, interval: "24h" as const }
+      : activeFilter === "liquidity"
+        ? { sortBy: "liquidity" as const, interval: "24h" as const }
+        : activeFilter === "gainers"
+          ? { sortBy: "rank" as const, interval: "24h" as const }
+          : { sortBy: "rank" as const, interval: "4h" as const };
 
   // Fetch trending tokens (Birdeye, multi-chain). Cap at TRENDING_FETCH_CAP. Refetch every 30 mins.
   useEffect(() => {
     let cancelled = false;
     const base = getApiBase();
-    const cacheKey = `trending_tokens_${trendingSortBy}`;
-    if (refreshTrendingTrigger > 0) apiCache.clear(cacheKey);
+    const cacheKey = `trending_tokens_${trendingSortBy}_${trendingInterval}`;
+    if (refreshTrendingTrigger > 0) apiCache.clearByPrefix("trending_tokens_");
     const cached = apiCache.get<{ tokens: TrendingToken[] }>(cacheKey);
     if (cached?.tokens?.length) {
       setTrending(cached.tokens);
@@ -332,7 +337,7 @@ export function Home() {
     async function fetchTrending() {
       try {
         const res = await fetch(
-          `${base}/api/trending-tokens?offset=0&limit=${TRENDING_FETCH_CAP}&sort_by=${trendingSortBy}&interval=4h`,
+          `${base}/api/trending-tokens?offset=0&limit=${TRENDING_FETCH_CAP}&sort_by=${trendingSortBy}&interval=${trendingInterval}`,
         );
         const data = await res.json().catch(() => ({}));
         if (cancelled) return;
@@ -354,7 +359,7 @@ export function Home() {
       cancelled = true;
       clearInterval(intervalId);
     };
-  }, [trendingSortBy, refreshTrendingTrigger]);
+  }, [trendingSortBy, trendingInterval, refreshTrendingTrigger]);
 
   const formatTime = (timestamp: any) => {
     if (!timestamp) return "Just now";
@@ -450,29 +455,22 @@ export function Home() {
   };
 
   const filterPills: { id: FilterId; icon: React.ReactNode; label: string }[] = [
-    { id: "star", icon: <Star className="w-3.5 h-3.5" />, label: "Top gainers" },
-    { id: "verified", icon: <BadgeCheck className="w-3.5 h-3.5" />, label: "Verified" },
     { id: "trending", icon: <Flame className="w-3.5 h-3.5" />, label: "Trending" },
-    { id: "held", icon: <Users className="w-3.5 h-3.5" />, label: "Most held" },
+    { id: "gainers", icon: <Star className="w-3.5 h-3.5" />, label: "Top gainers" },
+    { id: "volume", icon: <TrendingUp className="w-3.5 h-3.5" />, label: "Volume" },
+    { id: "liquidity", icon: <BadgeCheck className="w-3.5 h-3.5" />, label: "Liquidity" },
   ];
 
   const filteredTrending = useMemo(() => {
     const list = [...trending];
-    switch (activeFilter) {
-      case "star":
-        return list.sort((a, b) => {
-          const ah = a.priceChange24 ?? -Infinity;
-          const bh = b.priceChange24 ?? -Infinity;
-          return bh - ah;
-        });
-      case "verified":
-        return list.filter((t) => t.marketCap >= 500_000);
-      case "held":
-        return list.sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0));
-      case "trending":
-      default:
-        return list;
+    if (activeFilter === "gainers") {
+      return list.sort((a, b) => {
+        const ah = a.priceChange24 ?? -Infinity;
+        const bh = b.priceChange24 ?? -Infinity;
+        return bh - ah;
+      });
     }
+    return list;
   }, [trending, activeFilter]);
 
   const handlePullRefresh = useCallback(async () => {
@@ -543,7 +541,8 @@ export function Home() {
           </button>
         </div>
 
-        {/* Filter pills */}
+        {/* Filter pills – only when Trending tab active */}
+        {activeTab === "trending" && (
         <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 scrollbar-hide mb-4">
           {filterPills.map(({ id, icon, label }) => (
             <button
@@ -561,8 +560,9 @@ export function Home() {
             </button>
           ))}
         </div>
+        )}
 
-        {/* Tabs: Your Plays | Trending */}
+        {/* Tabs: Trending | Your Plays */}
         <div className="flex gap-1 p-1 rounded-xl bg-white/5 border border-white/5 mb-4">
           <button
             onClick={() => setActiveTab("trending")}
@@ -683,7 +683,7 @@ export function Home() {
                         {formatPrice(token.priceUsd)}
                       </span>
                       <span
-                        className={`text-xs font-medium tabular-nums inline-flex items-center gap-0.5 ${
+                        className={`text-sm font-semibold tabular-nums inline-flex items-center gap-0.5 ${
                           token.priceChange24 != null
                             ? token.priceChange24 >= 0
                               ? "text-[#12d585]"
@@ -698,10 +698,11 @@ export function Home() {
                             ) : (
                               <span aria-hidden>▼</span>
                             )}
-                            {` ${Math.abs(token.priceChange24).toFixed(2)}%`}
+                            {token.priceChange24 >= 0 ? "+" : ""}
+                            {token.priceChange24.toFixed(2)}%
                           </>
                         ) : (
-                          "–"
+                          <span className="text-white/40">—</span>
                         )}
                       </span>
                     </div>

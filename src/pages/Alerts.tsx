@@ -10,9 +10,8 @@ import {
   markAllNotificationsAsRead,
   deleteNotification,
   WalletNotification,
-  requestPermissionAndGetFcmToken,
-  savePushToken,
   getPushNotificationStatus,
+  getStoredPushToken,
 } from "@/lib/notifications";
 import {
   collection,
@@ -105,7 +104,12 @@ export function Alerts() {
     fetchNotifications();
 
     getPushNotificationStatus().then((status) => {
-      setPushEnabled(status.enabled && status.permission === "granted");
+      const hasLocalToken = !!getStoredPushToken();
+      setPushEnabled(
+        hasLocalToken &&
+          status.enabled &&
+          status.permission === "granted",
+      );
     });
 
     const onVisibilityChange = () => {
@@ -122,30 +126,6 @@ export function Alerts() {
       clearInterval(intervalId);
     };
   }, [user, isAuthenticated, refreshTrigger]);
-
-  // Request push notification permission on first visit
-  useEffect(() => {
-    if (!user || !isAuthenticated || pushEnabled) return;
-
-    const requestPushPermission = async () => {
-      try {
-        const token = await requestPermissionAndGetFcmToken();
-        if (token) {
-          await savePushToken(token);
-          setPushEnabled(true);
-          toast.success("Push notifications enabled");
-        }
-      } catch (error) {
-        console.error("Error setting up push notifications:", error);
-      }
-    };
-
-    const timer = setTimeout(() => {
-      requestPushPermission();
-    }, 2000);
-
-    return () => clearTimeout(timer);
-  }, [user, isAuthenticated, pushEnabled]);
 
   const handleMarkAsRead = async (notificationId: string) => {
     try {

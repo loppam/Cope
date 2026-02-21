@@ -50,7 +50,6 @@ import {
   getStoredPushToken,
   isSafariBrowser,
 } from "@/lib/notifications";
-import { deleteFirebaseMessagingToken } from "@/lib/firebase";
 import { updatePublicWalletStatus } from "@/lib/auth";
 import { syncWebhook } from "@/lib/webhook";
 import { getFollowersCount } from "@/lib/profile";
@@ -425,7 +424,12 @@ export function Profile() {
   useEffect(() => {
     if (user) {
       getPushNotificationStatus().then((status) => {
-        setPushEnabled(status.enabled && status.permission === "granted");
+        const hasLocalToken = !!getStoredPushToken();
+        setPushEnabled(
+          hasLocalToken &&
+            status.enabled &&
+            status.permission === "granted",
+        );
       });
 
       user.getIdToken().then((token) => {
@@ -671,7 +675,6 @@ export function Profile() {
         const token = getStoredPushToken();
         setPushEnabled(false);
         await unregisterPushToken(token || "");
-        await deleteFirebaseMessagingToken();
         toast.success("Push notifications disabled");
       }
     } catch (error: any) {

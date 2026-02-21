@@ -1,5 +1,6 @@
 {
   "id": "https://trycope.com/",
+  "gcm_sender_id": "646639664214",
   "name": "COPE - Social Trading App",
   "short_name": "COPE",
   "description": "Social trading app for cryptocurrency trading and wallet management",

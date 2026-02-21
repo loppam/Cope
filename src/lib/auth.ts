@@ -28,6 +28,9 @@ function isUserPublic(data: { isPublic?: boolean }): boolean {
 
 // Twitter OAuth Provider
 const twitterProvider = new TwitterAuthProvider();
+// Force account selection on every sign-in (allows switching accounts in TWA/embedded contexts
+// where X session persists in Chrome even after app reinstall)
+twitterProvider.setCustomParameters({ force_login: "true" });
 
 // Get the Firebase callback URL that needs to be configured in Twitter Developer Portal
 export function getFirebaseCallbackUrl(): string {

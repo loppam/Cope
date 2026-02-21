@@ -10,6 +10,7 @@ import {
 import {
   getMessaging,
   getToken,
+  deleteToken,
   onMessage,
   Messaging,
 } from "firebase/messaging";
@@ -114,6 +115,16 @@ export async function requestFirebaseMessagingToken(
     // Log other errors but don't throw
     console.error("[Firebase] Failed to get messaging token:", error);
     return null;
+  }
+}
+
+/** Clear FCM token from client (call when user disables push to avoid stale state on re-enable). */
+export async function deleteFirebaseMessagingToken(): Promise<void> {
+  if (!messaging) return;
+  try {
+    await deleteToken(messaging);
+  } catch (e) {
+    console.warn("[Firebase] deleteToken:", e);
   }
 }
 

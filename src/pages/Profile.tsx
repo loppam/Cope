@@ -50,6 +50,7 @@ import {
   getStoredPushToken,
   isSafariBrowser,
 } from "@/lib/notifications";
+import { deleteFirebaseMessagingToken } from "@/lib/firebase";
 import { updatePublicWalletStatus } from "@/lib/auth";
 import { syncWebhook } from "@/lib/webhook";
 import { getFollowersCount } from "@/lib/profile";
@@ -619,8 +620,6 @@ export function Profile() {
     }
   };
 
-  const PUSH_TOKEN_TIMEOUT_MS = 18000; // 18 seconds
-
   const handleTogglePush = async () => {
     if (!user) return;
 
@@ -645,21 +644,11 @@ export function Profile() {
           return;
         }
 
-        // Get push token with timeout to avoid indefinite hangs
-        const timeoutPromise = new Promise<null>((_, reject) =>
-          setTimeout(
-            () => reject(new Error("SETUP_TIMEOUT")),
-            PUSH_TOKEN_TIMEOUT_MS,
-          ),
-        );
-        const result = await Promise.race([
-          requestPermissionAndGetPushToken(),
-          timeoutPromise,
-        ]);
+        const result = await requestPermissionAndGetPushToken();
 
         if (result && result.token) {
-          setPushEnabled(true);
           await savePushTokenWithPlatform(result.token, result.platform);
+          setPushEnabled(true);
           toast.success("Push notifications enabled");
         } else {
           // Token is null - re-check permission (may have changed during request)
@@ -682,17 +671,14 @@ export function Profile() {
         const token = getStoredPushToken();
         setPushEnabled(false);
         await unregisterPushToken(token || "");
+        await deleteFirebaseMessagingToken();
         toast.success("Push notifications disabled");
       }
     } catch (error: any) {
       setPushEnabled(previousValue);
       console.error("Error toggling push notifications:", error);
       const errorMessage = error?.message || "";
-      if (errorMessage === "SETUP_TIMEOUT") {
-        toast.error(
-          "Setup took too long. Check your connection, or try again. On iOS, add the app to Home Screen first.",
-        );
-      } else if (
+      if (
         errorMessage.includes("unsupported") ||
         errorMessage.includes("not supported")
       ) {
@@ -701,8 +687,14 @@ export function Profile() {
         toast.error(
           "On iOS: add this app to Home Screen (Add to Home), then try again.",
         );
+      } else if (errorMessage.includes("User not authenticated")) {
+        toast.error("Please sign in and try again.");
+      } else if (errorMessage.includes("fetch") || errorMessage.includes("Connection")) {
+        toast.error("Connection failed. Check your internet and try again.");
       } else {
-        toast.error("Couldn't update notifications. Please try again.");
+        toast.error(
+          toUserMessage(error) || "Couldn't update notifications. Please try again.",
+        );
       }
     } finally {
       setIsTogglingPush(false);

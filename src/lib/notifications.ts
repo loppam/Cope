@@ -52,13 +52,16 @@ async function getIdToken(): Promise<string | null> {
   return await auth.currentUser.getIdToken();
 }
 
-async function sendAuthRequest(method: string, body?: Record<string, any>) {
+async function sendAuthRequest(
+  method: string,
+  body?: Record<string, any>,
+): Promise<Response> {
   const idToken = await getIdToken();
   if (!idToken) {
     throw new Error("User not authenticated");
   }
 
-  return fetch(PUSH_REGISTER_URL, {
+  const response = await fetch(PUSH_REGISTER_URL, {
     method,
     headers: {
       "Content-Type": "application/json",
@@ -66,6 +69,14 @@ async function sendAuthRequest(method: string, body?: Record<string, any>) {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Push registration failed (${response.status}): ${text || response.statusText}`,
+    );
+  }
+  return response;
 }
 
 /**

@@ -16,6 +16,9 @@ export default defineConfig({
       includeAssets: ["favicon.ico", "icons/*.png", "icons/favicon.svg", "offline.html"],
       manifest: {
         id: "https://trycope.com/",
+        ...(process.env.VITE_FIREBASE_MESSAGING_SENDER_ID && {
+          gcm_sender_id: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+        }),
         name: "COPE - Social Trading App",
         short_name: "COPE",
         description:

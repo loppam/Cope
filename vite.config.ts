@@ -13,7 +13,7 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["favicon.ico", "icons/*.png", "icons/favicon.svg", "offline.html"],
+      includeAssets: ["favicon.ico", "icons/*.png", "offline.html"],
       manifest: {
         id: "https://trycope.com/",
         ...(process.env.VITE_FIREBASE_MESSAGING_SENDER_ID && {

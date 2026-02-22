@@ -25,6 +25,7 @@ import {
   formatTokenAmount,
   getPriceImpactColor,
   formatPriceImpact,
+  getSwapQuote,
 } from "@/lib/jupiter-swap";
 import { formatPriceCompact } from "@/lib/utils";
 import { getSolBalance, getUsdcBalance } from "@/lib/rpc";
@@ -69,6 +70,7 @@ export function Trade() {
   const [swapping, setSwapping] = useState(false);
   const [swapQuote, setSwapQuote] = useState<SwapQuote | null>(null);
   const [relayQuote, setRelayQuote] = useState<unknown>(null);
+  const [swapProvider, setSwapProvider] = useState<"jupiter" | "relay">("relay");
   const [showQuoteModal, setShowQuoteModal] = useState(false);
   const [swapDirection, setSwapDirection] = useState<"buy" | "sell">("buy");
   const [tradeChain, setTradeChain] = useState<TradeChain>("solana");
@@ -564,7 +566,7 @@ export function Trade() {
   };
 
   const handleBuy = async () => {
-    // Use Relay for all swaps: SOL USDC -> Base/BNB, SOL USDC -> SPL
+    // Jupiter for Solana-only (USDC -> SOL/SPL). Relay for cross-chain (Base/BNB).
     const outputIsEvm =
       tradeChain === "base" ||
       tradeChain === "bnb" ||
@@ -605,65 +607,84 @@ export function Trade() {
 
     setSwapping(true);
     try {
-      const tokenId = await user.getIdToken();
-      const base = getApiBase();
       const outputMint = isCrossChain
         ? (crossChainToken?.address ?? token!.mint)
         : token!.mint;
       const amountRaw = Math.floor(amountNum * 1e6).toString();
 
-      const buyBody: Record<string, unknown> = {
-        inputMint: SOLANA_USDC_MINT,
-        outputMint,
-        amount: amountRaw,
-        userWallet: userProfile.walletAddress,
-        tradeType: "buy",
-      };
-      if (isCrossChain) {
+      if (!isCrossChain) {
+        // Jupiter: Solana USDC -> SOL/SPL
+        const quote = await getSwapQuote(
+          SOLANA_USDC_MINT,
+          outputMint,
+          parseInt(amountRaw, 10),
+          userProfile.walletAddress,
+          100,
+          6,
+          token!.decimals ?? 6,
+        );
+        if (!quote.transaction || !quote.requestId) {
+          throw new Error("Invalid Jupiter quote");
+        }
+        setSwapQuote(quote);
+        setRelayQuote(null);
+        setSwapProvider("jupiter");
+      } else {
+        // Relay: cross-chain
+        const tokenId = await user.getIdToken();
+        const base = getApiBase();
+        const buyBody: Record<string, unknown> = {
+          inputMint: SOLANA_USDC_MINT,
+          outputMint,
+          amount: amountRaw,
+          userWallet: userProfile.walletAddress,
+          tradeType: "buy",
+        };
         buyBody.outputChainId = getChainId(tradeChain);
         buyBody.recipient = evmAddress;
+        const res = await fetch(`${base}/api/relay/swap-quote`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${tokenId}`,
+          },
+          body: JSON.stringify(buyBody),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to get quote");
+        setRelayQuote(data);
+        const details = data?.details || {};
+        const currencyIn = details.currencyIn || {};
+        const currencyOut = details.currencyOut || {};
+        setSwapQuote({
+          inputMint: SOLANA_USDC_MINT,
+          outputMint,
+          inputAmount:
+            parseInt(currencyIn.amount || "0", 10) || parseInt(amountRaw, 10),
+          outputAmount: parseInt(currencyOut.amount || "0", 10),
+          inputAmountUi:
+            parseFloat(currencyIn.amountFormatted || "0") || amountNum,
+          outputAmountUi: parseFloat(currencyOut.amountFormatted || "0"),
+          inUsdValue:
+            currencyIn.amountUsd != null
+              ? parseFloat(currencyIn.amountUsd)
+              : undefined,
+          outUsdValue:
+            currencyOut.amountUsd != null
+              ? parseFloat(currencyOut.amountUsd)
+              : undefined,
+          priceImpact:
+            details.totalImpact?.percent != null
+              ? parseFloat(details.totalImpact.percent)
+              : 0,
+          feeBps: 0,
+          feeMint: SOLANA_USDC_MINT,
+          requestId: data?.steps?.[0]?.requestId || "",
+          transaction: "",
+          slippage: 100,
+        } as SwapQuote);
+        setSwapProvider("relay");
       }
-      const res = await fetch(`${base}/api/relay/swap-quote`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${tokenId}`,
-        },
-        body: JSON.stringify(buyBody),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to get quote");
-      setRelayQuote(data);
-      const details = data?.details || {};
-      const currencyIn = details.currencyIn || {};
-      const currencyOut = details.currencyOut || {};
-      setSwapQuote({
-        inputMint: SOLANA_USDC_MINT,
-        outputMint,
-        inputAmount:
-          parseInt(currencyIn.amount || "0", 10) || parseInt(amountRaw, 10),
-        outputAmount: parseInt(currencyOut.amount || "0", 10),
-        inputAmountUi:
-          parseFloat(currencyIn.amountFormatted || "0") || amountNum,
-        outputAmountUi: parseFloat(currencyOut.amountFormatted || "0"),
-        inUsdValue:
-          currencyIn.amountUsd != null
-            ? parseFloat(currencyIn.amountUsd)
-            : undefined,
-        outUsdValue:
-          currencyOut.amountUsd != null
-            ? parseFloat(currencyOut.amountUsd)
-            : undefined,
-        priceImpact:
-          details.totalImpact?.percent != null
-            ? parseFloat(details.totalImpact.percent)
-            : 0,
-        feeBps: 0,
-        feeMint: SOLANA_USDC_MINT,
-        requestId: data?.steps?.[0]?.requestId || "",
-        transaction: "",
-        slippage: 100,
-      } as SwapQuote);
       setSwapDirection("buy");
       setShowQuoteModal(true);
     } catch (error: unknown) {
@@ -713,64 +734,83 @@ export function Trade() {
           ? Math.min(amountNum, sellableBalance)
           : amountNum;
       const amountRaw = toRawAmountString(amountToSwap, token.decimals);
-      const tokenId = await user.getIdToken();
-      const base = getApiBase();
+      const amountRawNum = parseInt(amountRaw, 10);
 
-      const sellBody: Record<string, unknown> = {
-        inputMint: token.mint,
-        outputMint: SOLANA_USDC_MINT,
-        amount: amountRaw,
-        userWallet: isEvmSell ? evmAddress : userProfile.walletAddress,
-        recipient: userProfile.walletAddress,
-        tradeType: "sell",
-      };
-      if (isEvmSell) {
+      if (!isEvmSell) {
+        // Jupiter: Solana SOL/SPL -> USDC
+        const quote = await getSwapQuote(
+          token.mint,
+          SOLANA_USDC_MINT,
+          amountRawNum,
+          userProfile.walletAddress,
+          100,
+          token.decimals ?? 6,
+          6,
+        );
+        if (!quote.transaction || !quote.requestId) {
+          throw new Error("Invalid Jupiter quote");
+        }
+        setSwapQuote({ ...quote, inputAmountRaw: amountRaw } as SwapQuote);
+        setRelayQuote(null);
+        setSwapProvider("jupiter");
+      } else {
+        // Relay: cross-chain EVM sell
+        const tokenId = await user.getIdToken();
+        const base = getApiBase();
+        const sellBody: Record<string, unknown> = {
+          inputMint: token.mint,
+          outputMint: SOLANA_USDC_MINT,
+          amount: amountRaw,
+          userWallet: evmAddress,
+          recipient: userProfile.walletAddress,
+          tradeType: "sell",
+        };
         sellBody.inputChainId = getChainId(token.chain === "bnb" ? "bnb" : "base");
         sellBody.inputChain = token.chain ?? "solana";
+        const res = await fetch(`${base}/api/relay/swap-quote`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${tokenId}`,
+          },
+          body: JSON.stringify(sellBody),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to get quote");
+        setRelayQuote(data);
+        const details = data?.details || {};
+        const currencyIn = details.currencyIn || {};
+        const currencyOut = details.currencyOut || {};
+        setSwapQuote({
+          inputMint: token.mint,
+          outputMint: SOLANA_USDC_MINT,
+          inputAmount:
+            parseInt(currencyIn.amount || "0", 10) || parseInt(amountRaw, 10),
+          outputAmount: parseInt(currencyOut.amount || "0", 10),
+          inputAmountUi:
+            parseFloat(currencyIn.amountFormatted || "0") || amountNum,
+          outputAmountUi: parseFloat(currencyOut.amountFormatted || "0"),
+          inUsdValue:
+            currencyIn.amountUsd != null
+              ? parseFloat(currencyIn.amountUsd)
+              : undefined,
+          outUsdValue:
+            currencyOut.amountUsd != null
+              ? parseFloat(currencyOut.amountUsd)
+              : undefined,
+          priceImpact:
+            details.totalImpact?.percent != null
+              ? parseFloat(details.totalImpact.percent)
+              : 0,
+          feeBps: 0,
+          feeMint: token.mint,
+          requestId: data?.steps?.[0]?.requestId || "",
+          transaction: "",
+          slippage: 100,
+          inputAmountRaw: amountRaw,
+        } as SwapQuote);
+        setSwapProvider("relay");
       }
-      const res = await fetch(`${base}/api/relay/swap-quote`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${tokenId}`,
-        },
-        body: JSON.stringify(sellBody),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to get quote");
-      setRelayQuote(data);
-      const details = data?.details || {};
-      const currencyIn = details.currencyIn || {};
-      const currencyOut = details.currencyOut || {};
-      setSwapQuote({
-        inputMint: token.mint,
-        outputMint: SOLANA_USDC_MINT,
-        inputAmount:
-          parseInt(currencyIn.amount || "0", 10) || parseInt(amountRaw, 10),
-        outputAmount: parseInt(currencyOut.amount || "0", 10),
-        inputAmountUi:
-          parseFloat(currencyIn.amountFormatted || "0") || amountNum,
-        outputAmountUi: parseFloat(currencyOut.amountFormatted || "0"),
-        inUsdValue:
-          currencyIn.amountUsd != null
-            ? parseFloat(currencyIn.amountUsd)
-            : undefined,
-        outUsdValue:
-          currencyOut.amountUsd != null
-            ? parseFloat(currencyOut.amountUsd)
-            : undefined,
-        priceImpact:
-          details.totalImpact?.percent != null
-            ? parseFloat(details.totalImpact.percent)
-            : 0,
-        feeBps: 0,
-        feeMint: token.mint,
-        requestId: data?.steps?.[0]?.requestId || "",
-        transaction: "",
-        slippage: 100,
-        // Use our sent amount for refresh so 100% sells use exact balance, not relay's possibly rounded value
-        inputAmountRaw: amountRaw,
-      } as SwapQuote);
       setSwapDirection("sell");
       setShowQuoteModal(true);
     } catch (error: unknown) {
@@ -790,13 +830,8 @@ export function Trade() {
   };
 
   const handleConfirmSwap = async () => {
-    if (
-      !relayQuote ||
-      !user ||
-      !swapQuote ||
-      !userProfile?.walletAddress
-    )
-      return;
+    if (!user || !swapQuote || !userProfile?.walletAddress) return;
+    if (swapProvider === "relay" && !relayQuote) return;
 
     setSwapping(true);
     setShowQuoteModal(false);
@@ -808,110 +843,134 @@ export function Trade() {
       let lastSignature: string | null = null;
       let lastChainId: number | undefined;
 
-      // Relay flow: refresh quote then execute-step loop
-      let quoteToExecute = relayQuote;
-      const q = swapQuote as { inputAmountRaw?: string };
-      const amountRaw =
-        q.inputAmountRaw ??
-        (swapDirection === "sell" &&
-        token &&
-        swapQuote.inputAmountUi != null &&
-        swapQuote.inputAmountUi > 0
-          ? toRawAmountString(swapQuote.inputAmountUi, token.decimals)
-          : String(swapQuote.inputAmount ?? ""));
-      const isEvmSell =
-        swapDirection === "sell" &&
-        (token?.chain === "base" || token?.chain === "bnb");
-      const canRefresh =
-        amountRaw &&
-        swapQuote.inputMint &&
-        swapQuote.outputMint &&
-        (!isEvmSell || evmAddress);
-      if (canRefresh) {
-        const body: Record<string, unknown> = {
-          inputMint: swapQuote.inputMint,
-          outputMint: swapQuote.outputMint,
-          amount: amountRaw,
-          userWallet: isEvmSell ? evmAddress : userProfile.walletAddress,
-          tradeType: swapDirection === "buy" ? "buy" : "sell",
-        };
-        if (
-          swapDirection === "buy" &&
-          (tradeChain === "base" || tradeChain === "bnb")
-        ) {
-          body.outputChainId = tradeChain === "base" ? 8453 : 56;
-          body.recipient = evmAddress ?? undefined;
+      if (swapProvider === "jupiter") {
+        // Jupiter: sign + execute via relay/jupiter-execute
+        if (!swapQuote.transaction || !swapQuote.requestId) {
+          throw new Error("Invalid quote. Please get a new quote.");
         }
-        if (isEvmSell) {
-          body.inputChainId = getChainId(
-            token?.chain === "bnb" ? "bnb" : "base",
-          );
-          body.inputChain = token?.chain ?? "solana";
-          body.recipient = userProfile.walletAddress;
-        }
-        const refreshRes = await fetch(`${base}/api/relay/swap-quote`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${tokenId}`,
-          },
-          body: JSON.stringify(body),
-        });
-        const freshQuote = await refreshRes.json();
-        const hasValidSteps =
-          Array.isArray(freshQuote?.steps) && freshQuote.steps.length > 0;
-        if (!refreshRes.ok || !hasValidSteps) {
-          const errMsg =
-            (freshQuote as { error?: string })?.error ||
-            "Quote expired or failed to refresh. Please get a new quote and try again.";
-          throw new Error(errMsg);
-        }
-        quoteToExecute = freshQuote;
-      } else {
-        throw new Error(
-          "Cannot refresh quote. Please get a new quote and try again.",
-        );
-      }
-
-      const steps = Array.isArray(
-        (quoteToExecute as { steps?: unknown[] })?.steps,
-      )
-        ? (quoteToExecute as { steps: unknown[] }).steps
-        : [];
-      console.log(
-        "[trade] relay step summary",
-        steps.map((step) => {
-          const s = step as {
-            kind?: unknown;
-            items?: Array<{ data?: unknown; check?: unknown }>;
-          };
-          return {
-            kind: typeof s.kind === "string" ? s.kind : "unknown",
-            hasData: Boolean(s.items?.[0]?.data),
-            hasCheck: Boolean(s.items?.[0]?.check),
-          };
-        }),
-      );
-
-      for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
-        const res = await fetch(`${base}/api/relay/execute-step`, {
+        const res = await fetch(`${base}/api/relay/jupiter-execute`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${tokenId}`,
           },
           body: JSON.stringify({
-            quoteResponse: quoteToExecute,
-            stepIndex,
+            transaction: swapQuote.transaction,
+            requestId: swapQuote.requestId,
           }),
         });
         const result = await res.json();
-
-        if (result.status === "Success" && result.signature) {
-          lastSignature = result.signature;
-          lastChainId = result.chainId;
-        } else {
+        if (result.status !== "Success" || !result.signature) {
           throw new Error(result.error || "Swap failed");
+        }
+        lastSignature = result.signature;
+        lastChainId = undefined; // Solana
+      } else {
+        // Relay flow: refresh quote then execute-step loop
+        let quoteToExecute = relayQuote;
+        const q = swapQuote as { inputAmountRaw?: string };
+        const amountRaw =
+          q.inputAmountRaw ??
+          (swapDirection === "sell" &&
+          token &&
+          swapQuote.inputAmountUi != null &&
+          swapQuote.inputAmountUi > 0
+            ? toRawAmountString(swapQuote.inputAmountUi, token.decimals)
+            : String(swapQuote.inputAmount ?? ""));
+        const isEvmSell =
+          swapDirection === "sell" &&
+          (token?.chain === "base" || token?.chain === "bnb");
+        const canRefresh =
+          amountRaw &&
+          swapQuote.inputMint &&
+          swapQuote.outputMint &&
+          (!isEvmSell || evmAddress);
+        if (canRefresh) {
+          const body: Record<string, unknown> = {
+            inputMint: swapQuote.inputMint,
+            outputMint: swapQuote.outputMint,
+            amount: amountRaw,
+            userWallet: isEvmSell ? evmAddress : userProfile.walletAddress,
+            tradeType: swapDirection === "buy" ? "buy" : "sell",
+          };
+          if (
+            swapDirection === "buy" &&
+            (tradeChain === "base" || tradeChain === "bnb")
+          ) {
+            body.outputChainId = tradeChain === "base" ? 8453 : 56;
+            body.recipient = evmAddress ?? undefined;
+          }
+          if (isEvmSell) {
+            body.inputChainId = getChainId(
+              token?.chain === "bnb" ? "bnb" : "base",
+            );
+            body.inputChain = token?.chain ?? "solana";
+            body.recipient = userProfile.walletAddress;
+          }
+          const refreshRes = await fetch(`${base}/api/relay/swap-quote`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${tokenId}`,
+            },
+            body: JSON.stringify(body),
+          });
+          const freshQuote = await refreshRes.json();
+          const hasValidSteps =
+            Array.isArray(freshQuote?.steps) && freshQuote.steps.length > 0;
+          if (!refreshRes.ok || !hasValidSteps) {
+            const errMsg =
+              (freshQuote as { error?: string })?.error ||
+              "Quote expired or failed to refresh. Please get a new quote and try again.";
+            throw new Error(errMsg);
+          }
+          quoteToExecute = freshQuote;
+        } else {
+          throw new Error(
+            "Cannot refresh quote. Please get a new quote and try again.",
+          );
+        }
+
+        const steps = Array.isArray(
+          (quoteToExecute as { steps?: unknown[] })?.steps,
+        )
+          ? (quoteToExecute as { steps: unknown[] }).steps
+          : [];
+        console.log(
+          "[trade] relay step summary",
+          steps.map((step) => {
+            const s = step as {
+              kind?: unknown;
+              items?: Array<{ data?: unknown; check?: unknown }>;
+            };
+            return {
+              kind: typeof s.kind === "string" ? s.kind : "unknown",
+              hasData: Boolean(s.items?.[0]?.data),
+              hasCheck: Boolean(s.items?.[0]?.check),
+            };
+          }),
+        );
+
+        for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
+          const res = await fetch(`${base}/api/relay/execute-step`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${tokenId}`,
+            },
+            body: JSON.stringify({
+              quoteResponse: quoteToExecute,
+              stepIndex,
+            }),
+          });
+          const result = await res.json();
+
+          if (result.status === "Success" && result.signature) {
+            lastSignature = result.signature;
+            lastChainId = result.chainId;
+          } else {
+            throw new Error(result.error || "Swap failed");
+          }
         }
       }
 
@@ -998,6 +1057,7 @@ export function Trade() {
       setSellAmount("");
       setSwapQuote(null);
       setRelayQuote(null);
+      setSwapProvider("relay");
     } catch (error: unknown) {
       console.error("Error executing swap:", error);
       toast.error("Swap failed", {
@@ -1626,6 +1686,7 @@ export function Trade() {
                         setShowQuoteModal(false);
                         setSwapQuote(null);
                         setRelayQuote(null);
+                        setSwapProvider("relay");
                       }}
                       disabled={swapping}
                     >

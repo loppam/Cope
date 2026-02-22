@@ -2238,8 +2238,15 @@ async function evmBalancesPublicHandler(
       .json({ error: "Invalid address; provide 0x-prefixed 40-char hex" });
   }
   try {
-    const balances = await getEvmBalances(address);
-    return res.status(200).json({ base: balances.base, bnb: balances.bnb });
+    const [balances, tokenPositions] = await Promise.all([
+      getEvmBalances(address),
+      getEvmTokenPositions(address),
+    ]);
+    return res.status(200).json({
+      base: balances.base,
+      bnb: balances.bnb,
+      tokens: tokenPositions,
+    });
   } catch (e: unknown) {
     console.error("evm-balances-public error:", e);
     return res.status(500).json({

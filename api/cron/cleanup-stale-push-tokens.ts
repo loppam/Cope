@@ -55,10 +55,10 @@ export default async function handler(
       Date.now() - STALE_DAYS * 24 * 60 * 60 * 1000,
     );
     const indexRef = db.collection(PUSH_TOKEN_INDEX);
-    const q = indexRef.where("lastSeenAt", "<", cutoff);
-    const snap = await q.get();
-    let deleted = 0;
-    for (const doc of snap.docs) {
+
+    let deletedStale = 0;
+    const staleSnap = await indexRef.where("lastSeenAt", "<", cutoff).get();
+    for (const doc of staleSnap.docs) {
       const data = doc.data();
       const uid = data.uid as string | undefined;
       const docId = doc.id;
@@ -71,11 +71,33 @@ export default async function handler(
           .delete();
       }
       await indexRef.doc(docId).delete();
-      deleted++;
+      deletedStale++;
     }
+
+    let deletedLegacy = 0;
+    const allSnap = await indexRef.get();
+    for (const doc of allSnap.docs) {
+      const data = doc.data();
+      if (data.lastSeenAt != null) continue;
+      const uid = data.uid as string | undefined;
+      const docId = doc.id;
+      if (uid) {
+        await db
+          .collection("users")
+          .doc(uid)
+          .collection("pushTokens")
+          .doc(docId)
+          .delete();
+      }
+      await indexRef.doc(docId).delete();
+      deletedLegacy++;
+    }
+
     res.status(200).json({
       ok: true,
-      deleted,
+      deletedStale,
+      deletedLegacy,
+      deleted: deletedStale + deletedLegacy,
       staleDays: STALE_DAYS,
     });
   } catch (error: unknown) {

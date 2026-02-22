@@ -66,7 +66,7 @@ export function PublicProfile() {
   const [usdcBalance, setUsdcBalance] = useState<number>(0);
   const [usdcBalanceLoading, setUsdcBalanceLoading] = useState(true);
   const [openPositions, setOpenPositions] = useState<TokenPosition[]>([]);
-  const [closedPositions] = useState<TokenPosition[]>([]);
+  const [closedPositions, setClosedPositions] = useState<TokenPosition[]>([]);
   const [followLoading, setFollowLoading] = useState(false);
 
   const isFollowed =
@@ -123,6 +123,7 @@ export function PublicProfile() {
   useEffect(() => {
     if (!profile?.walletAddress) {
       setOpenPositions([]);
+      setClosedPositions([]);
       return;
     }
     let cancelled = false;
@@ -145,12 +146,9 @@ export function PublicProfile() {
         if (cancelled) return;
 
         const evmAddress = profile!.evmAddress;
-        const [evmPnlBase, evmPnlBnb] = await Promise.all([
+        const [evmPnlBase] = await Promise.all([
           evmAddress
             ? getWalletProfitability(evmAddress, "base")
-            : Promise.resolve([]),
-          evmAddress
-            ? getWalletProfitability(evmAddress, "bsc")
             : Promise.resolve([]),
         ]);
 
@@ -160,7 +158,7 @@ export function PublicProfile() {
           string,
           { pnl: number; pnlPercent?: number }
         >();
-        for (const item of [...evmPnlBase, ...evmPnlBnb]) {
+        for (const item of evmPnlBase) {
           evmPnlByMint.set(item.mint, {
             pnl: item.pnl,
             pnlPercent: item.pnlPercent,
@@ -168,76 +166,63 @@ export function PublicProfile() {
         }
 
         const combined: TokenPosition[] = [];
-        const solanaUsdc = portfolio.usdcBalance;
+        const closed: TokenPosition[] = [];
+        const solanaUsdc = Number.isFinite(portfolio.usdcBalance)
+          ? portfolio.usdcBalance
+          : 0;
         const baseBal = evmData?.base ?? { usdc: 0, native: 0 };
         const bnbBal = evmData?.bnb ?? { usdc: 0, native: 0 };
 
-        // 1) USDC first: Solana + Base + BNB combined (one row)
-        const totalUsdc =
-          (Number.isFinite(solanaUsdc) ? solanaUsdc : 0) +
-          (baseBal.usdc ?? 0) +
-          (bnbBal.usdc ?? 0);
-        if (totalUsdc > 0) {
+        // 1) USDC: Solana only (Base/BNB USDC auto-bridges to Solana)
+        if (solanaUsdc > 0) {
           combined.push({
             mint: SOLANA_USDC_MINT,
             symbol: "USDC",
             name: "USDC",
-            amount: totalUsdc,
-            value: totalUsdc,
+            amount: solanaUsdc,
+            value: solanaUsdc,
           });
         }
-        if (!cancelled) setUsdcBalance(totalUsdc);
+        if (!cancelled) setUsdcBalance(solanaUsdc);
 
-        // 2) SOL is in portfolio.positions (handled in step 4)
+        // 2) SOL is in portfolio.positions (handled in step 5)
 
-        // 3) EVM (ETH, BNB, other tokens) — always add native when > 0; add Moralis tokens with dedupe
+        // 3) EVM (ETH, BNB, other tokens) — open when amount>0 value>0 sellable>0; else closed
         if (evmAddress && evmData) {
           const addedMints = new Set<string>();
           if (baseBal.native > 0) {
             addedMints.add("base-eth");
+            const val = baseBal.native * nativePrices.eth;
             const pos = {
               mint: "base-eth",
+              symbol: "ETH",
+              name: "Ethereum (Base)",
               amount: baseBal.native,
-              value: baseBal.native * nativePrices.eth,
+              value: val,
               pnl: evmPnlByMint.get("base-eth")?.pnl,
               pnlPercent: evmPnlByMint.get("base-eth")?.pnlPercent,
               chain: "base" as const,
+              image: undefined as string | undefined,
             };
-            if (sellableAmount(pos) > 0) {
-              combined.push({
-                mint: pos.mint,
-                symbol: "ETH",
-                name: "Ethereum (Base)",
-                amount: pos.amount,
-                value: pos.value,
-                pnl: pos.pnl,
-                pnlPercent: pos.pnlPercent,
-                chain: pos.chain,
-              });
-            }
+            if (val > 0 && sellableAmount(pos) > 0) combined.push(pos);
+            else closed.push(pos);
           }
           if (bnbBal.native > 0) {
             addedMints.add("bnb-bnb");
+            const val = bnbBal.native * nativePrices.bnb;
             const pos = {
               mint: "bnb-bnb",
+              symbol: "BNB",
+              name: "BNB",
               amount: bnbBal.native,
-              value: bnbBal.native * nativePrices.bnb,
+              value: val,
               pnl: evmPnlByMint.get("bnb-bnb")?.pnl,
               pnlPercent: evmPnlByMint.get("bnb-bnb")?.pnlPercent,
               chain: "bnb" as const,
+              image: undefined as string | undefined,
             };
-            if (sellableAmount(pos) > 0) {
-              combined.push({
-                mint: pos.mint,
-                symbol: "BNB",
-                name: "BNB",
-                amount: pos.amount,
-                value: pos.value,
-                pnl: pos.pnl,
-                pnlPercent: pos.pnlPercent,
-                chain: pos.chain,
-              });
-            }
+            if (val > 0 && sellableAmount(pos) > 0) combined.push(pos);
+            else closed.push(pos);
           }
           const BASE_USDC_ADDR = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
           const BNB_USDC_ADDR = "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d";
@@ -245,14 +230,12 @@ export function PublicProfile() {
             for (const t of evmData.tokens) {
               const amount = t.amount ?? 0;
               const value = t.value ?? 0;
-              if (amount <= 0 || value <= 0) continue;
               const m = (t.mint ?? "").toLowerCase();
               if (addedMints.has(m)) continue;
-              // Skip USDC (already in combined USDC row); support both address and normalized mint
               if (m === BASE_USDC_ADDR || m === BNB_USDC_ADDR || m === "base-usdc" || m === "bnb-usdc") continue;
               addedMints.add(m);
               const evmPnl = evmPnlByMint.get(m);
-              combined.push({
+              const pos: TokenPosition = {
                 mint: m,
                 symbol: t.symbol ?? "???",
                 name: t.name ?? "Unknown Token",
@@ -262,18 +245,17 @@ export function PublicProfile() {
                 pnl: evmPnl?.pnl,
                 pnlPercent: evmPnl?.pnlPercent,
                 chain: t.chain ?? "base",
-              });
+              };
+              if (amount > 0 && value > 0) combined.push(pos);
+              else closed.push(pos);
             }
           }
         }
 
-        // 4) SPL tokens from Birdeye portfolio (exclude USDC; hide SOL when sellable <= 0)
+        // 4) SPL tokens from Birdeye — open when amount>0 value>0 sellable>0; else closed
         for (const t of portfolio.positions) {
           if (t.mint === SOLANA_USDC_MINT) continue;
-          if (t.amount <= 0 || t.value <= 0) continue;
-          const pos = { mint: t.mint, amount: t.amount };
-          if (sellableAmount(pos) <= 0) continue;
-          combined.push({
+          const pos: TokenPosition = {
             mint: t.mint,
             symbol: t.symbol || t.mint.slice(0, 8),
             name: t.name || "Unknown",
@@ -282,11 +264,21 @@ export function PublicProfile() {
             value: t.value,
             pnl: t.pnl,
             pnlPercent: t.pnlPercent,
-          });
+          };
+          const hasSellable = sellableAmount(pos) > 0;
+          if (t.amount > 0 && t.value > 0 && hasSellable) combined.push(pos);
+          else closed.push(pos);
         }
-        if (!cancelled) setOpenPositions(combined);
+
+        if (!cancelled) {
+          setOpenPositions(combined);
+          setClosedPositions(closed);
+        }
       } catch {
-        if (!cancelled) setOpenPositions([]);
+        if (!cancelled) {
+          setOpenPositions([]);
+          setClosedPositions([]);
+        }
       }
     })();
 

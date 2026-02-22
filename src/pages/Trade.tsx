@@ -361,7 +361,11 @@ export function Trade() {
     setLoading(true);
     const chainId = getChainId(chain);
     const nativeDecimals =
-      address === "base-eth" || address === "bnb-bnb" ? 18 : 6;
+      address === SOL_MINT
+        ? 9
+        : address === "base-eth" || address === "bnb-bnb"
+          ? 18
+          : 6;
     const base: TokenSearchResult =
       currentToken?.mint === address
         ? currentToken
@@ -380,17 +384,21 @@ export function Trade() {
               id: `${chainId}-${address}`,
               mint: address,
               name:
-                address === "base-eth"
-                  ? "Ethereum (Base)"
-                  : address === "bnb-bnb"
-                    ? "BNB"
-                    : "",
+                address === SOL_MINT
+                  ? "Solana"
+                  : address === "base-eth"
+                    ? "Ethereum (Base)"
+                    : address === "bnb-bnb"
+                      ? "BNB"
+                      : "",
               symbol:
-                address === "base-eth"
-                  ? "ETH"
-                  : address === "bnb-bnb"
-                    ? "BNB"
-                    : "",
+                address === SOL_MINT
+                  ? "SOL"
+                  : address === "base-eth"
+                    ? "ETH"
+                    : address === "bnb-bnb"
+                      ? "BNB"
+                      : "",
               decimals: nativeDecimals,
               hasSocials: false,
               chain,
@@ -435,12 +443,14 @@ export function Trade() {
       if (isStale()) return;
       const fields = birdeyeOverviewToTokenFields(overview.data);
       if (Object.keys(fields).length > 0) {
+        const decimals =
+          address === SOL_MINT ? 9 : (fields.decimals ?? base.decimals);
         setToken({
           ...base,
           name: base.name || fields.name || "",
           symbol: base.symbol || fields.symbol || "",
           image: base.image || fields.image,
-          decimals: fields.decimals ?? base.decimals,
+          decimals,
           priceUsd: fields.priceUsd,
           marketCapUsd: fields.marketCapUsd,
           liquidityUsd: fields.liquidityUsd,
@@ -467,7 +477,12 @@ export function Trade() {
       const tokenInfo = await getTokenInfo(address);
       if (isStale()) return;
       const tokenData = convertTokenInfoToSearchResult(tokenInfo);
-      setToken({ ...tokenData, chain: "solana", chainId: 792703809 });
+      setToken({
+        ...tokenData,
+        chain: "solana",
+        chainId: 792703809,
+        ...(address === SOL_MINT ? { decimals: 9 } : {}),
+      });
     } catch (error) {
       if (isStale()) return;
       console.error("Error fetching token details:", error);
@@ -481,6 +496,7 @@ export function Trade() {
           setToken({
             ...response.data[0],
             chain: "solana",
+            ...(address === SOL_MINT ? { decimals: 9 } : {}),
             chainId: 792703809,
           });
         } else {
@@ -752,7 +768,8 @@ export function Trade() {
         requestId: data?.steps?.[0]?.requestId || "",
         transaction: "",
         slippage: 100,
-        inputAmountRaw: currencyIn.amount || amountRaw,
+        // Use our sent amount for refresh so 100% sells use exact balance, not relay's possibly rounded value
+        inputAmountRaw: amountRaw,
       } as SwapQuote);
       setSwapDirection("sell");
       setShowQuoteModal(true);

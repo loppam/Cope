@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { Card } from '@/components/Card';
 import { CheckCircle2, Loader2 } from 'lucide-react';
-import { scanWalletsForTokens, ScannerWallet } from '@/lib/birdeye';
+import { scanWalletsForTokens, type ScannerProgress } from '@/lib/scanner';
+import type { ScannerWallet } from '@/lib/birdeye';
 import { toUserMessage } from '@/lib/user-errors';
+import { formatNumber } from '@/lib/utils';
 import { toast } from 'sonner';
 
 interface LocationState {
@@ -13,11 +15,29 @@ interface LocationState {
   minTrades: number;
 }
 
+function buildProgressText(p: ScannerProgress): string {
+  const tx = formatNumber(p.transactionsScanned, 0);
+  const wallets = formatNumber(p.uniqueWalletsSeen, 0);
+  if (p.phase === 'fetching') {
+    return `${tx} transactions scanned • ${wallets} wallets seen • Token ${p.currentToken}/${p.totalTokens}`;
+  }
+  if (p.phase === 'finding') {
+    return `${tx} transactions • ${wallets} unique wallets • Finding matches...`;
+  }
+  if (p.phase === 'ranking') {
+    const m = p.matchedWallets ?? 0;
+    return `${tx} scanned • ${wallets} wallets • ${m} matches • Ranking PnL & ROI...`;
+  }
+  return 'Scanning...';
+}
+
 export function ScannerLoading() {
   const navigate = useNavigate();
   const location = useLocation();
   const state = location.state as LocationState;
   const [progress, setProgress] = useState(0);
+  const [progressText, setProgressText] = useState('');
+  const [progressData, setProgressData] = useState<ScannerProgress | null>(null);
   const [phase, setPhase] = useState<'fetching' | 'finding' | 'ranking'>('fetching');
   const [wallets, setWallets] = useState<ScannerWallet[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -30,38 +50,34 @@ export function ScannerLoading() {
 
     const scanWallets = async () => {
       try {
-        // Phase 1: Fetching
-        setPhase('fetching');
-        setProgress(33);
-        
-        // Phase 2: Finding wallets
-        setPhase('finding');
-        setProgress(66);
-        
-        // Scan wallets using Birdeye token transactions
+        setProgressText('Connecting to Solana Tracker...');
+        setProgress(5);
+
         const results = await scanWalletsForTokens(
           state.mints,
           state.minMatches,
-          state.minTrades
+          state.minTrades,
+          (p) => {
+            setPhase(p.phase);
+            setProgressData(p);
+            setProgressText(buildProgressText(p));
+            const fetchPct = p.totalTokens > 0 ? (p.currentToken / p.totalTokens) * 70 : 20;
+            const phaseBonus = p.phase === 'finding' ? 75 : p.phase === 'ranking' ? 90 : fetchPct;
+            setProgress(Math.min(95, phaseBonus));
+          }
         );
-        
-        // Phase 3: Ranking
+
         setPhase('ranking');
-        setProgress(90);
-        
-        // Small delay to show ranking phase
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        
+        setProgressText(`${formatNumber(results.length, 0)} wallets matched • Almost done...`);
+        setProgress(98);
         setWallets(results);
+
+        await new Promise((r) => setTimeout(r, 400));
         setProgress(100);
-        
-        // Navigate to results
+
         setTimeout(() => {
-          navigate('/scanner/results', { 
-            state: { 
-              ...state, 
-              wallets: results 
-            } 
+          navigate('/scanner/results', {
+            state: { ...state, wallets: results },
           });
         }, 500);
       } catch (err: any) {
@@ -69,8 +85,7 @@ export function ScannerLoading() {
         const friendly = toUserMessage(err, 'Couldn\'t scan wallets. Please try again.');
         setError(friendly);
         toast.error(friendly);
-        
-        // Navigate back to input after error
+
         setTimeout(() => {
           navigate('/scanner');
         }, 2000);
@@ -81,9 +96,9 @@ export function ScannerLoading() {
   }, [navigate, state]);
 
   const phaseText = {
-    fetching: 'Fetching token transactions...',
-    finding: 'Finding recurring wallets...',
-    ranking: 'Calculating PnL & ROI...',
+    fetching: progressText || 'Fetching token transactions...',
+    finding: progressText || 'Finding recurring wallets...',
+    ranking: progressText || 'Calculating PnL & ROI...',
   };
 
   if (error) {
@@ -109,13 +124,17 @@ export function ScannerLoading() {
             <Loader2 className="w-8 h-8 text-[#000000] animate-spin" />
           </div>
           <h2 className="text-xl font-bold mb-2">Scanning Wallets</h2>
-          <p className="text-white/60">{phaseText[phase]}</p>
+          <p className="text-white/60 text-sm min-h-[2.5rem] flex items-center justify-center">
+            {phaseText[phase]}
+          </p>
         </div>
 
         <div className="space-y-3 mb-8">
-          {state?.mints.slice(0, 3).map((mint, index) => (
-            <Card key={index} className="flex items-center gap-3">
-              {phase !== 'fetching' || index < progress / 33 ? (
+          {state?.mints.slice(0, 5).map((mint, index) => {
+            const fetched = progressData && index < progressData.currentToken;
+            return (
+            <Card key={index} className="flex items-center gap-3 min-h-[44px]">
+              {fetched ? (
                 <CheckCircle2 className="w-5 h-5 text-[#12d585] flex-shrink-0" />
               ) : (
                 <Loader2 className="w-5 h-5 text-white/30 animate-spin flex-shrink-0" />
@@ -124,7 +143,8 @@ export function ScannerLoading() {
                 {mint.slice(0, 8)}...{mint.slice(-6)}
               </code>
             </Card>
-          ))}
+          );
+          })}
         </div>
 
         <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">

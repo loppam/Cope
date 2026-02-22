@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * COPE Scanner – interactive terminal script
- * Finds wallets that traded multiple tokens using Birdeye API (same as app scanner).
+ * Finds wallets that traded multiple tokens using Solana Tracker Data API only.
  *
  * Usage:
  *   node scripts/copescanner.mjs
@@ -9,7 +9,7 @@
  *
  * Paste 2+ mint addresses (one per line or comma/space separated), then Enter twice to scan.
  *
- * Env: BIRDEYE_API_KEY
+ * Env: SOLANATRACKER_API_KEY
  */
 
 import { readFileSync, existsSync } from "fs";
@@ -31,75 +31,92 @@ if (existsSync(envPath)) {
   }
 }
 
-const BIRDEYE_API_BASE = "https://public-api.birdeye.so";
-const MAX_PAGES_PER_TOKEN = 100; // 100 × 10 = 1000 trades per token (matches birdeye.ts)
-const DELAY_MS = 600; // Matches birdeye.ts rate limit
+const SOLANATRACKER_API_BASE = "https://data.solanatracker.io";
+const DELAY_MS = 700; // Between requests to respect rate limits
 
 function delay(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// --- Birdeye ---
-
 /**
- * Fetch token trades from Birdeye API (offset pagination, 100 per page)
+ * Solana Tracker TokenTrade (from docs):
+ * tx, amount (token qty), priceUsd, volume (USD), volumeSol, type (buy|sell), wallet, time, program, pools
+ * volume = USD value of the trade (amount * priceUsd when price available)
  */
-async function getTokenTradesFromBirdeye(tokenAddress, apiKey, maxPages = MAX_PAGES_PER_TOKEN, onProgress = null) {
+async function getTokenTradesFromSolanaTracker(
+  tokenAddress,
+  apiKey,
+  onProgress = null
+) {
   const allTrades = [];
-  const limit = 100;
+  let cursor = null;
+  let page = 0;
 
-  for (let page = 0; page < maxPages; page++) {
-    const offset = page * limit;
-    const url = new URL(`${BIRDEYE_API_BASE}/defi/v3/token/txs`);
-    url.searchParams.set("address", tokenAddress);
-    url.searchParams.set("limit", String(limit));
-    url.searchParams.set("offset", String(offset));
-    url.searchParams.set("sort_by", "block_unix_time");
-    url.searchParams.set("sort_type", "desc");
-    url.searchParams.set("tx_type", "swap");
-    url.searchParams.set("ui_amount_mode", "scaled");
+  while (true) {
+    const url = new URL(
+      `${SOLANATRACKER_API_BASE}/trades/${encodeURIComponent(tokenAddress)}`
+    );
+    if (cursor != null) url.searchParams.set("cursor", String(cursor));
 
     const res = await fetch(url.toString(), {
       method: "GET",
       headers: {
+        "x-api-key": apiKey,
         "Content-Type": "application/json",
-        "X-API-KEY": apiKey,
-        "x-chain": "solana",
       },
     });
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`Birdeye API ${res.status}: ${text.slice(0, 200)}`);
+      throw new Error(`Solana Tracker API ${res.status}: ${text.slice(0, 200)}`);
     }
 
     const data = await res.json();
-    const items = data?.data?.items ?? [];
-    allTrades.push(...items);
+    const trades = data?.trades ?? [];
+    allTrades.push(...trades);
 
-    if (onProgress) onProgress(tokenAddress, page + 1, items.length);
+    if (onProgress) onProgress(tokenAddress, page + 1, trades.length);
 
-    if (items.length < limit) break;
-    if (page < maxPages - 1) await delay(DELAY_MS);
+    const hasNext = data?.hasNextPage === true;
+    const nextCursor = data?.nextCursor;
+    if (!hasNext || nextCursor == null || trades.length === 0) break;
+
+    cursor = nextCursor;
+    page++;
+    await delay(DELAY_MS);
   }
 
   return allTrades;
 }
 
-/** Birdeye items already match scanner format (owner, side, volume_usd, from, to) */
-function birdeyeToScannerTx(item) {
+/**
+ * Map Solana Tracker trade to scanner format.
+ * Per docs: volume = USD value of trade. Use it directly for invested/removed.
+ * Fallback: amount * priceUsd when volume is 0 but we have both (e.g. priceUsd was null at index time).
+ */
+function solanaTrackerToScannerTx(trade) {
+  const volUsd =
+    trade?.volume ??
+    (trade?.amount != null &&
+    trade?.priceUsd != null &&
+    trade?.priceUsd > 0 &&
+    Number.isFinite(trade.amount) &&
+    Number.isFinite(trade.priceUsd)
+      ? Math.abs(trade.amount) * trade.priceUsd
+      : 0);
+
   return {
-    owner: item?.owner ?? "",
-    side: item?.side ?? "buy",
-    tx_type: item?.side ?? "buy",
-    volume_usd: item?.volume_usd ?? 0,
-    from: item?.from,
-    to: item?.to,
+    owner: trade?.wallet ?? "",
+    side: trade?.type === "sell" ? "sell" : "buy",
+    tx_type: trade?.type === "sell" ? "sell" : "buy",
+    volume_usd: volUsd,
   };
 }
 
 /**
- * Scan for wallets that traded multiple tokens (same logic as birdeye.ts scanWalletsForTokens)
+ * Scan for wallets that traded multiple tokens.
+ * invested = sum of volume for buys, removed = sum of volume for sells.
+ * ROI = (removed - invested) / invested * 100 when invested > 0.
  */
 async function scanWalletsForTokens(
   tokenMints,
@@ -113,10 +130,14 @@ async function scanWalletsForTokens(
   for (let i = 0; i < tokenMints.length; i++) {
     const mint = tokenMints[i];
     try {
-      const trades = await getTokenTradesFromBirdeye(mint, apiKey, MAX_PAGES_PER_TOKEN, (addr, page, count) => {
-        if (onProgress) onProgress(`Fetching ${addr.slice(0, 8)}...`, page, count);
-      });
-      const txs = trades.map((t) => birdeyeToScannerTx(t));
+      const trades = await getTokenTradesFromSolanaTracker(
+        mint,
+        apiKey,
+        (addr, page, count) => {
+          if (onProgress) onProgress(`Fetching ${addr.slice(0, 8)}...`, page, count);
+        }
+      );
+      const txs = trades.map((t) => solanaTrackerToScannerTx(t));
       allTransactionsByToken.push(txs);
     } catch (err) {
       console.error(`Error fetching trades for ${mint}:`, err.message);
@@ -149,14 +170,14 @@ async function scanWalletsForTokens(
       }
       walletTransactionCount.set(wallet, walletTransactionCount.get(wallet) + 1);
 
+      // Per Solana Tracker docs: volume = USD value. Buy = invested, sell = removed.
+      const volUsd = tx.volume_usd ?? 0;
       let investedUsd = 0;
       let removedUsd = 0;
       if (tx.side === "buy" || tx.tx_type === "buy") {
-        investedUsd = tx.from?.price * Math.abs(tx.from?.ui_change_amount ?? 0) || tx.volume_usd || 0;
+        investedUsd = volUsd;
       } else if (tx.side === "sell" || tx.tx_type === "sell") {
-        removedUsd = tx.to?.price * (tx.to?.ui_change_amount ?? 0) || tx.volume_usd || 0;
-      } else {
-        investedUsd = tx.volume_usd || 0;
+        removedUsd = volUsd;
       }
 
       const tokenMap = walletTokenStats.get(wallet);
@@ -183,13 +204,19 @@ async function scanWalletsForTokens(
       const s = tokenMap.get(mint) ?? { invested: 0, removed: 0 };
       const totalInvested = s.invested;
       const totalPnl = s.removed - s.invested;
-      const roiPct = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : null;
+      const roiPct =
+        totalInvested > 0 ? (totalPnl / totalInvested) * 100 : null;
       return { mint, totalInvested, totalPnl, roiPct };
     });
     const totalInvested = tokenStats.reduce((a, t) => a + t.totalInvested, 0);
-    const totalRemoved = tokenStats.reduce((a, t) => a + t.totalInvested + t.totalPnl, 0);
-    const roiValues = tokenStats.map((t) => t.roiPct).filter((r) => r !== null);
-    const averageRoiPct = roiValues.length > 0 ? roiValues.reduce((a, b) => a + b, 0) / roiValues.length : null;
+    const totalRemoved = tokenStats.reduce(
+      (a, t) => a + (t.totalInvested + t.totalPnl),
+      0
+    );
+    const roiPct =
+      totalInvested > 0
+        ? ((totalRemoved - totalInvested) / totalInvested) * 100
+        : null;
 
     return {
       address: wallet,
@@ -199,7 +226,7 @@ async function scanWalletsForTokens(
       totalInvested,
       totalRemoved,
       tokenStats,
-      averageRoiPct,
+      roiPct,
     };
   });
 
@@ -223,18 +250,24 @@ function formatUsd(n) {
 }
 
 async function main() {
-  const apiKey = process.env.BIRDEYE_API_KEY;
+  const apiKey = process.env.SOLANATRACKER_API_KEY;
   if (!apiKey) {
-    console.error("ERROR: BIRDEYE_API_KEY not set. Add it to .env");
+    console.error("ERROR: SOLANATRACKER_API_KEY not set. Add it to .env");
     process.exit(1);
   }
 
-  console.log("\n  COPE Scanner (Birdeye API)");
+  console.log("\n  COPE Scanner (Solana Tracker API)");
   console.log("  ———————————————————————————————————");
-  console.log("  Paste 2+ mint addresses (one per line, or comma/space separated)");
+  console.log(
+    "  Paste 2+ mint addresses (one per line, or comma/space separated)"
+  );
   console.log("  Then press Enter twice to scan.\n");
 
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: true,
+  });
 
   const lines = [];
   const waitForInput = () => {
@@ -299,14 +332,21 @@ async function main() {
 
     wallets.slice(0, 20).forEach((w, i) => {
       const pnl = w.totalRemoved - w.totalInvested;
-      const roiStr = w.averageRoiPct != null ? `${w.averageRoiPct >= 0 ? "+" : ""}${w.averageRoiPct.toFixed(1)}%` : "—";
-      console.log(`  ${(i + 1).toString().padStart(2)}  ${shortenAddress(w.address)}  matched ${w.matched}/${w.total}  PnL ${formatUsd(pnl)}  ROI ${roiStr}`);
+      const roiStr =
+        w.roiPct != null
+          ? `${w.roiPct >= 0 ? "+" : ""}${w.roiPct.toFixed(1)}%`
+          : "—";
+      console.log(
+        `  ${(i + 1).toString().padStart(2)}  ${shortenAddress(w.address)}  matched ${w.matched}/${w.total}  PnL ${formatUsd(pnl)}  ROI ${roiStr}`
+      );
     });
 
     if (wallets.length > 20) {
       console.log(`  ... and ${wallets.length - 20} more`);
     }
-    console.log(`\n  Top GMGN: https://gmgn.ai/sol/address/${wallets[0]?.address ?? ""}\n`);
+    console.log(
+      `\n  Top GMGN: https://gmgn.ai/sol/address/${wallets[0]?.address ?? ""}\n`
+    );
   } catch (err) {
     console.error("\nError:", err.message);
     process.exit(1);

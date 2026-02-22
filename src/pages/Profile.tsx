@@ -259,16 +259,11 @@ export function Profile() {
 
         if (cancelled) return;
 
-        // Phase 2: Moralis EVM PnL only (Solana PnL already in portfolio)
+        // Phase 2: Moralis EVM PnL (Base only; BSC not supported by profitability API)
         const evmAddress = evmData?.evmAddress;
-        const [evmPnlBase, evmPnlBnb] = await Promise.all([
-          evmAddress
-            ? getWalletProfitability(evmAddress, "base")
-            : Promise.resolve([]),
-          evmAddress
-            ? getWalletProfitability(evmAddress, "bsc")
-            : Promise.resolve([]),
-        ]);
+        const evmPnlBase = evmAddress
+          ? await getWalletProfitability(evmAddress, "base")
+          : [];
 
         if (cancelled) return;
 
@@ -277,7 +272,7 @@ export function Profile() {
           string,
           { pnl: number; pnlPercent?: number }
         >();
-        for (const item of [...evmPnlBase, ...evmPnlBnb]) {
+        for (const item of evmPnlBase) {
           evmPnlByMint.set(item.mint, {
             pnl: item.pnl,
             pnlPercent: item.pnlPercent,
@@ -289,24 +284,22 @@ export function Profile() {
         const SOLANA_LOGO =
           "https://assets.coingecko.com/coins/images/4128/small/solana.png";
 
-        // 1) USDC first: Solana + Base + BNB combined (one row)
+        // 1) USDC: Solana only (Base/BNB USDC auto-bridges to Solana)
         const solBalance = portfolio.solBalance;
-        const solanaUsdc = portfolio.usdcBalance;
-        const baseUsdc = evmData?.base?.usdc ?? 0;
-        const bnbUsdc = evmData?.bnb?.usdc ?? 0;
-        const totalUsdc =
-          (Number.isFinite(solanaUsdc) ? solanaUsdc : 0) + baseUsdc + bnbUsdc;
-        if (totalUsdc > 0) {
+        const solanaUsdc = Number.isFinite(portfolio.usdcBalance)
+          ? portfolio.usdcBalance
+          : 0;
+        if (solanaUsdc > 0) {
           combined.push({
             mint: SOLANA_USDC_MINT,
             symbol: "USDC",
             name: "USDC",
             image: undefined,
-            amount: totalUsdc,
-            value: totalUsdc,
+            amount: solanaUsdc,
+            value: solanaUsdc,
           });
         }
-        setUsdcBalance(totalUsdc);
+        setUsdcBalance(solanaUsdc);
 
         // 2) SOL is in portfolio.positions (handled in step 5)
 

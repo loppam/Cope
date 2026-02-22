@@ -4,7 +4,8 @@
  * Same flow as the cron but logs to stdout in real time (no HTTP).
  *
  * Prerequisites: .env with FIREBASE_SERVICE_ACCOUNT, API_BASE_URL,
- * WEBHOOK_EVM_DEPOSIT_SECRET, BASE_RPC_URL, BNB_RPC_URL (optional)
+ * WEBHOOK_EVM_DEPOSIT_SECRET. BASE_RPC_URL and BNB_RPC_URL recommended
+ * (public RPCs are rate-limited; use Alchemy/Infura for reliability).
  *
  * Usage:
  *   node --env-file=.env scripts/bridge-evm-usdc-to-sol.mjs
@@ -39,35 +40,43 @@ const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const BNB_USDC = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d";
 const ERC20_ABI = ["function balanceOf(address) view returns (uint256)"];
 const MIN_USDC_RAW = 500_000; // $0.50 minimum
+const BALANCE_RETRIES = 3;
+const RETRY_DELAY_MS = 800;
 
-async function getEvmBalances(address) {
+async function callWithRetry(fn) {
+  for (let attempt = 1; attempt <= BALANCE_RETRIES; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const isLast = attempt === BALANCE_RETRIES;
+      if (isLast) throw e;
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
+    }
+  }
+}
+
+async function getEvmBalances(address, baseProvider, bnbProvider) {
   const result = {
     base: { usdc: 0, usdcRaw: 0n },
     bnb: { usdc: 0, usdcRaw: 0n },
   };
   try {
-    const baseProvider = new JsonRpcProvider(
-      process.env.BASE_RPC_URL || "https://mainnet.base.org"
+    const baseUsdcRaw = await callWithRetry(
+      () =>
+        new Contract(BASE_USDC, ERC20_ABI, baseProvider).balanceOf(address),
+      "Base USDC"
     );
-    const baseUsdcRaw = await new Contract(
-      BASE_USDC,
-      ERC20_ABI,
-      baseProvider
-    ).balanceOf(address);
     result.base.usdcRaw = baseUsdcRaw;
     result.base.usdc = Number(baseUsdcRaw) / 1e6;
   } catch (e) {
     console.warn("[bridge-evm-usdc] Base balance fetch failed:", e?.message || e);
   }
   try {
-    const bnbProvider = new JsonRpcProvider(
-      process.env.BNB_RPC_URL || "https://bsc-dataseed.binance.org"
+    const bnbUsdcRaw = await callWithRetry(
+      () =>
+        new Contract(BNB_USDC, ERC20_ABI, bnbProvider).balanceOf(address),
+      "BNB USDC"
     );
-    const bnbUsdcRaw = await new Contract(
-      BNB_USDC,
-      ERC20_ABI,
-      bnbProvider
-    ).balanceOf(address);
     result.bnb.usdcRaw = bnbUsdcRaw;
     result.bnb.usdc = Number(bnbUsdcRaw) / 1e18;
   } catch (e) {
@@ -139,6 +148,16 @@ async function main() {
     `[bridge-evm-usdc] ${usersWithEvm.length} users with evmAddress+walletAddress\n`
   );
 
+  const baseRpc = process.env.BASE_RPC_URL || "https://mainnet.base.org";
+  const bnbRpc = process.env.BNB_RPC_URL || "https://bsc-dataseed.binance.org";
+  if (!process.env.BASE_RPC_URL) {
+    console.warn(
+      "[bridge-evm-usdc] BASE_RPC_URL not set; using public RPC (rate-limited). Set BASE_RPC_URL to Alchemy/Infura for reliability.\n"
+    );
+  }
+  const baseProvider = new JsonRpcProvider(baseRpc);
+  const bnbProvider = new JsonRpcProvider(bnbRpc);
+
   const toProcess = [];
 
   for (const doc of usersWithEvm) {
@@ -146,7 +165,12 @@ async function main() {
     const evmAddress = doc.data().evmAddress.toLowerCase();
     const walletAddress = doc.data().walletAddress;
 
-    const balances = await getEvmBalances(evmAddress);
+    const balances = await getEvmBalances(
+      evmAddress,
+      baseProvider,
+      bnbProvider
+    );
+    await new Promise((r) => setTimeout(r, 120));
 
     const chains = [
       { network: "base", raw: balances.base.usdcRaw, usdc: balances.base.usdc },

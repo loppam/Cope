@@ -689,6 +689,7 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
     let amountRaw: string;
     let tokenAddress: string;
     let network: "base" | "bnb";
+    let fallbackLookupAddr: string | undefined;
 
     // Alchemy Address Activity: { event: { network, activity: [...] } }; also support flat body.activity
     const bodyEvent = body.event as { activity?: unknown } | undefined;
@@ -739,20 +740,49 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
         console.log("[evm-deposit] skipped: unsupported chain (activity)", { chain: chainStr || chain });
         return res.status(200).json({ received: true, skipped: "unsupported chain" });
       }
-      const toAddr = String(first.to ?? first.toAddress ?? "").trim().toLowerCase();
-      const fromAddr = String(first.from ?? first.fromAddress ?? "").trim().toLowerCase();
+      // Find the USDC transfer in the activity array (Alchemy may include ETH + ERC20; first item might not be USDC)
+      const expectedUsdc = network === "base" ? BASE_USDC : BNB_USDC;
+      let chosen: Record<string, unknown> | null = null;
+      for (const act of activityArr) {
+        const rawContract = act.rawContract as { rawValue?: string; address?: string } | undefined;
+        const addr = String(
+          rawContract?.address ?? act.contract ?? act.tokenAddress ?? act.asset ?? ""
+        )
+          .trim()
+          .toLowerCase();
+        if (addr !== expectedUsdc) continue;
+        const rawVal = rawContract?.rawValue;
+        let amt: bigint;
+        if (rawVal && typeof rawVal === "string") {
+          amt = BigInt(rawVal);
+        } else {
+          const val = act.value ?? act.tokenAmount;
+          const num = typeof val === "string" ? parseFloat(val) : typeof val === "number" ? val : 0;
+          amt = network === "base" ? BigInt(Math.floor(num * 1e6)) : BigInt(Math.floor(num * 1e18));
+        }
+        if (amt <= 0n) continue;
+        chosen = act;
+        break;
+      }
+      if (!chosen) {
+        console.log("[evm-deposit] skipped: no USDC transfer in activity array");
+        return res.status(200).json({ received: true, skipped: "not USDC" });
+      }
+      const toAddr = String(chosen.to ?? chosen.toAddress ?? "").trim().toLowerCase();
+      const fromAddr = String(chosen.from ?? chosen.fromAddress ?? "").trim().toLowerCase();
       // When user sends TO bridge (useDepositAddress: false), from=custodial to=contract. When someone sends TO custodial, to=custodial.
       to = toAddr || fromAddr;
-      const rawContract = first.rawContract as { rawValue?: string; address?: string } | undefined;
+      fallbackLookupAddr = fromAddr || toAddr;
+      const rawContract = chosen.rawContract as { rawValue?: string; address?: string } | undefined;
       const rawVal = rawContract?.rawValue;
       if (rawVal && typeof rawVal === "string") {
         amountRaw = BigInt(rawVal).toString();
       } else {
-        const val = first.value ?? first.tokenAmount;
-        amountRaw = typeof val === "string" ? val : typeof val === "number" ? String(Math.floor(val * 1e6)) : "";
+        const val = chosen.value ?? chosen.tokenAmount;
+        amountRaw = typeof val === "string" ? val : typeof val === "number" ? String(Math.floor(val * (network === "base" ? 1e6 : 1e18))) : "";
       }
       tokenAddress = String(
-        rawContract?.address ?? first.contract ?? first.tokenAddress ?? first.asset ?? ""
+        rawContract?.address ?? chosen.contract ?? chosen.tokenAddress ?? chosen.asset ?? ""
       )
         .trim()
         .toLowerCase();
@@ -782,18 +812,14 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
 
     // Look up by to (incoming to custodial) or from (user sends to bridge); Alchemy fires when watched address is in either role
     let usersSnap = await db.collection("users").where("evmAddress", "==", to).limit(1).get();
-    if (usersSnap.empty && activityArr?.[0]) {
-      const first = activityArr[0] as Record<string, unknown>;
-      const fromAddr = String(first.from ?? first.fromAddress ?? "").trim().toLowerCase();
-      if (fromAddr && fromAddr.length >= 40) {
-        usersSnap = await db.collection("users").where("evmAddress", "==", fromAddr).limit(1).get();
-        if (!usersSnap.empty) {
-          console.log("[evm-deposit] resolved user by from (outgoing to bridge)", { from: fromAddr.slice(0, 10) + "..." });
-        }
+    if (usersSnap.empty && fallbackLookupAddr && fallbackLookupAddr.length >= 40) {
+      usersSnap = await db.collection("users").where("evmAddress", "==", fallbackLookupAddr).limit(1).get();
+      if (!usersSnap.empty) {
+        console.log("[evm-deposit] resolved user by fallback address (outgoing to bridge)", { addr: fallbackLookupAddr.slice(0, 10) + "..." });
       }
     }
     if (usersSnap.empty) {
-      console.log("[evm-deposit] skipped: unknown address", { to: to?.slice(0, 10) + "...", from: activityArr?.[0] ? String((activityArr[0] as Record<string, unknown>).from ?? "").slice(0, 10) + "..." : "n/a" });
+      console.log("[evm-deposit] skipped: unknown address", { to: to?.slice(0, 10) + "...", fallback: fallbackLookupAddr ? fallbackLookupAddr.slice(0, 10) + "..." : "n/a" });
       return res.status(200).json({ received: true, skipped: "unknown address" });
     }
     const userDoc = usersSnap.docs[0];

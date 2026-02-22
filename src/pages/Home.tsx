@@ -18,21 +18,10 @@ import {
   Flame,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import {
-  collection,
-  query,
-  where,
-  orderBy,
-  limit,
-  getDocs,
-  doc,
-  getDoc,
-  Timestamp,
-} from "firebase/firestore";
+import { doc, getDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { WalletNotification } from "@/lib/notifications";
-import { shortenAddress, formatCurrency, formatTokenAmountCompact, formatPriceCompact, getApiBase } from "@/lib/utils";
-import { getWalletPortfolioWithPnL } from "@/lib/birdeye";
+import { formatCurrency, formatTokenAmountCompact, formatPriceCompact, getApiBase } from "@/lib/utils";
+import { getWalletPortfolioWithPnL, getWalletTradesMultiChain, type UserTrade } from "@/lib/birdeye";
 import { fetchNativePrices } from "@/lib/coingecko";
 import { apiCache, UI_CACHE_TTL_MS } from "@/lib/cache";
 import { toast } from "sonner";
@@ -48,25 +37,26 @@ const TRENDING_REFETCH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
 export function Home() {
   const navigate = useNavigate();
-  const { user, userProfile, watchlist } = useAuth();
-  const [notifications, setNotifications] = useState<WalletNotification[]>([]);
+  const { user, userProfile } = useAuth();
+  const [userTrades, setUserTrades] = useState<UserTrade[]>([]);
+  const [playsLoading, setPlaysLoading] = useState(true);
   const [trending, setTrending] = useState<TrendingToken[]>([]);
   const [trendingLoading, setTrendingLoading] = useState(true);
-  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>("trending");
   const [activeFilter, setActiveFilter] = useState<FilterId>("trending");
   const [refreshTrendingTrigger, setRefreshTrendingTrigger] = useState(0);
+  const [refreshPlaysTrigger, setRefreshPlaysTrigger] = useState(0);
 
   // Balance header (when wallet connected)
   const [totalBalance, setTotalBalance] = useState<number | null>(null);
   const [balance24h, setBalance24h] = useState<number | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
 
-  const REFETCH_INTERVAL_MS = 60 * 1000;
-  const NOTIFICATIONS_LIMIT = 50;
-
   const walletAddress = userProfile?.walletAddress ?? null;
   const walletConnected = userProfile?.walletConnected ?? false;
+
+  // EVM address for Base/BNB trades: from profile or fetched when balance loads
+  const [evmAddressFetched, setEvmAddressFetched] = useState<string | null>(null);
 
   function evmBalanceUsd(
     evmData: {
@@ -114,13 +104,13 @@ export function Home() {
 
     (async () => {
       try {
-        const tokenPromise = user.getIdToken().then((t) =>
-          fetch(`${base}/api/relay/evm-balances`, {
+        const tokenPromise = user.getIdToken().then(async (t) => {
+          const res = await fetch(`${base}/api/relay/evm-balances`, {
             headers: { Authorization: `Bearer ${t}` },
-          })
-            .then((r) => r.json())
-            .catch(() => null),
-        );
+          }).then((r) => r.json()).catch(() => null);
+          if (res?.evmAddress && !cancelled) setEvmAddressFetched(res.evmAddress);
+          return res;
+        });
 
         const [portfolio, nativePrices, evmData] = await Promise.all([
           getWalletPortfolioWithPnL(walletAddress).catch(() => ({
@@ -228,87 +218,53 @@ export function Home() {
     return () => window.removeEventListener("cope-refresh-balance", onRefresh);
   }, [walletAddress, user]);
 
-  // Fetch notifications (cache-first: 30s cache on page enter, then refetch in background)
+  // Fetch user's own trades for "Your Plays" (Solana + Base + BNB, cache-first)
+  const evmAddress = userProfile?.evmAddress ?? evmAddressFetched ?? null;
   useEffect(() => {
-    if (!user) {
-      setLoading(false);
+    if (!walletAddress) {
+      setUserTrades([]);
+      setPlaysLoading(false);
       return;
     }
 
-    const watchedAddresses = watchlist.map((w) => w.address);
-    if (watchedAddresses.length === 0) {
-      setNotifications([]);
-      setLoading(false);
-      return;
+    const cacheKey = `user_trades_${walletAddress}_${evmAddress ?? "sol"}`;
+    const cached = apiCache.get<UserTrade[]>(cacheKey);
+    if (cached?.length !== undefined) {
+      setUserTrades(cached);
+      setPlaysLoading(false);
+    } else {
+      setPlaysLoading(true);
     }
 
-    const cacheKey = `notifications_${user.uid}`;
-    const cached = apiCache.get<WalletNotification[]>(cacheKey);
-    if (cached) {
-      const filtered = cached.filter((n) => watchedAddresses.includes(n.walletAddress));
-      setNotifications(filtered);
-      setLoading(false);
-    }
-
-    const notificationsRef = collection(db, "notifications");
-
-    async function fetchNotifications() {
+    let cancelled = false;
+    async function fetchUserTrades() {
       try {
-        const q = query(
-          notificationsRef,
-          where("userId", "==", user!.uid),
-          orderBy("createdAt", "desc"),
-          limit(NOTIFICATIONS_LIMIT),
-        );
-        let snapshot;
-        try {
-          snapshot = await getDocs(q);
-        } catch (err: any) {
-          if (err?.code === "failed-precondition") {
-            const fallbackQ = query(
-              notificationsRef,
-              where("userId", "==", user!.uid),
-              limit(NOTIFICATIONS_LIMIT),
-            );
-            snapshot = await getDocs(fallbackQ);
-          } else {
-            throw err;
-          }
+        const { items } = await getWalletTradesMultiChain(walletAddress!, evmAddress);
+        if (cancelled) return;
+        setUserTrades(items);
+        apiCache.set(cacheKey, items, UI_CACHE_TTL_MS);
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Error fetching user trades:", err);
+          setUserTrades([]);
         }
-        const rawList = snapshot.docs
-          .map((doc) => ({ id: doc.id, ...doc.data() }))
-          .filter((n: any) => !n.deleted)
-          .sort((a: any, b: any) => {
-            const aTime = a.createdAt?.toDate?.()?.getTime() || 0;
-            const bTime = b.createdAt?.toDate?.()?.getTime() || 0;
-            return bTime - aTime;
-          }) as WalletNotification[];
-        apiCache.set(cacheKey, rawList, UI_CACHE_TTL_MS);
-        const filtered = rawList.filter((n) => watchedAddresses.includes(n.walletAddress));
-        setNotifications(filtered);
-      } catch (error) {
-        console.error("Error fetching notifications:", error);
       } finally {
-        setLoading(false);
+        if (!cancelled) setPlaysLoading(false);
       }
     }
 
-    fetchNotifications();
+    fetchUserTrades();
 
     const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") fetchNotifications();
+      if (document.visibilityState === "visible") fetchUserTrades();
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
 
-    const intervalId = setInterval(() => {
-      if (document.visibilityState === "visible") fetchNotifications();
-    }, REFETCH_INTERVAL_MS);
-
     return () => {
+      cancelled = true;
       document.removeEventListener("visibilitychange", onVisibilityChange);
-      clearInterval(intervalId);
     };
-  }, [user, watchlist]);
+  }, [walletAddress, evmAddress, refreshPlaysTrigger]);
 
   // API params: sort_by (rank|volumeUSD|liquidity), interval (1h|4h|24h)
   // Birdeye only returns priceChange24 when interval=24h; 4h returns null
@@ -363,8 +319,8 @@ export function Home() {
   }, [trendingSortBy, trendingInterval, refreshTrendingTrigger]);
 
   const formatTime = (timestamp: any) => {
-    if (!timestamp) return "Just now";
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    if (timestamp == null) return "Just now";
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(typeof timestamp === "number" && timestamp < 1e12 ? timestamp * 1000 : timestamp);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / 60000);
@@ -377,34 +333,18 @@ export function Home() {
     return date.toLocaleDateString();
   };
 
-  const getAmountLabel = (notification: WalletNotification) => {
-    if (notification.amount != null && notification.amountSymbol) {
-      const formatted = formatTokenAmountCompact(notification.amount);
-      return formatted ? `${formatted} ${notification.amountSymbol}` : null;
-    }
-    if (notification.amountUsd != null) {
-      return formatCurrency(notification.amountUsd);
-    }
-    return null;
-  };
-
-  const getWalletNickname = (walletAddress: string) => {
-    const watched = watchlist.find((w) => w.address === walletAddress);
-    return watched?.nickname || shortenAddress(walletAddress);
-  };
-
-  const handleCopyTrade = (e: React.MouseEvent, notification: WalletNotification) => {
+  const handleTradeClick = (e: React.MouseEvent, trade: UserTrade) => {
     e.stopPropagation();
-    if (!notification.tokenAddress) {
+    const mint = trade.toAddress ?? trade.fromAddress;
+    if (!mint) {
       toast.error("No token address for this trade");
       return;
     }
     navigate("/app/trade", {
       state: {
-        mint: notification.tokenAddress,
-        chain: "solana",
+        mint,
+        chain: trade.chain ?? "solana",
         fromFeed: true,
-        walletNickname: getWalletNickname(notification.walletAddress),
       },
     });
   };
@@ -485,14 +425,18 @@ export function Home() {
   const handlePullRefresh = useCallback(async () => {
     window.dispatchEvent(new CustomEvent("cope-refresh-balance"));
     setRefreshTrendingTrigger((t) => t + 1);
-  }, []);
+    setRefreshPlaysTrigger((t) => t + 1);
+    if (walletAddress) {
+      apiCache.clear(`user_trades_${walletAddress}_${evmAddress ?? "sol"}`);
+    }
+  }, [walletAddress, evmAddress]);
 
   return (
     <PullToRefresh onRefresh={handlePullRefresh}>
       <>
         <DocumentHead
           title="Home"
-          description="Trending tokens and your followed plays on COPE"
+          description="Trending tokens and your plays on COPE"
         />
         <div className="p-4 sm:p-6 max-w-[720px] mx-auto pb-8">
         {/* Wallet balance header – when connected */}
@@ -723,15 +667,38 @@ export function Home() {
           </>
         )}
 
-        {/* Your Plays feed */}
+        {/* Your Plays feed – user's own transactions */}
         {activeTab === "plays" && (
           <>
-            {loading ? (
+            {!walletAddress ? (
+              <Card glass className="overflow-hidden">
+                <div className="h-0.5 bg-gradient-to-r from-accent-primary/30 to-transparent" />
+                <div className="p-6 sm:p-8 text-center">
+                  <div className="w-16 h-16 rounded-2xl bg-accent-primary/10 flex items-center justify-center mx-auto mb-4">
+                    <TrendingUp className="w-8 h-8 text-accent-primary" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-white mb-2">
+                    Connect Your Wallet
+                  </h3>
+                  <p className="text-white/60 text-sm max-w-sm mx-auto mb-6">
+                    Connect your wallet to see your trades and plays here
+                  </p>
+                  <Button
+                    onClick={() => navigate("/app/profile")}
+                    variant="primary"
+                    size="sm"
+                    className="min-h-[44px]"
+                  >
+                    Connect Wallet
+                  </Button>
+                </div>
+              </Card>
+            ) : playsLoading ? (
               <div className="flex flex-col items-center justify-center py-16">
                 <Loader2 className="w-8 h-8 animate-spin text-accent-primary mb-4" />
                 <p className="text-white/60 text-sm">Loading your plays...</p>
               </div>
-            ) : notifications.length === 0 ? (
+            ) : userTrades.length === 0 ? (
               <Card glass className="overflow-hidden">
                 <div className="h-0.5 bg-gradient-to-r from-accent-primary/30 to-transparent" />
                 <div className="p-6 sm:p-8 text-center">
@@ -742,28 +709,16 @@ export function Home() {
                     No Plays Yet
                   </h3>
                   <p className="text-white/60 text-sm max-w-sm mx-auto mb-6">
-                    Follow wallets or run the Scanner to see their trades here
+                    Make your first trade to see your plays here
                   </p>
-                  <div className="flex flex-col sm:flex-row gap-2 justify-center">
-                    <Button
-                      onClick={() => navigate("/cope/wallet")}
-                      variant="primary"
-                      size="sm"
-                      className="min-h-[44px]"
-                    >
-                      <Search className="w-4 h-4" />
-                      Scan a Wallet
-                    </Button>
-                    <Button
-                      onClick={() => navigate("/scanner")}
-                      variant="secondary"
-                      size="sm"
-                      className="min-h-[44px]"
-                    >
-                      <ScanLine className="w-4 h-4 text-accent-purple" />
-                      COPE Scanner
-                    </Button>
-                  </div>
+                  <Button
+                    onClick={() => navigate("/app/trade")}
+                    variant="primary"
+                    size="sm"
+                    className="min-h-[44px]"
+                  >
+                    Start Trading
+                  </Button>
                 </div>
               </Card>
             ) : (
@@ -780,11 +735,20 @@ export function Home() {
                   },
                 }}
               >
-                {notifications.map((notification) => {
-                  const amountLabel = getAmountLabel(notification);
+                {userTrades.map((trade) => {
+                  const amountStr =
+                    trade.toAmount != null && trade.toSymbol
+                      ? `${formatTokenAmountCompact(trade.toAmount)} ${trade.toSymbol}`
+                      : trade.volumeUsd > 0
+                        ? formatCurrency(trade.volumeUsd)
+                        : null;
+                  const swapDesc =
+                    trade.fromSymbol && trade.toSymbol
+                      ? `${trade.fromSymbol} → ${trade.toSymbol}`
+                      : trade.toSymbol ?? "Swap";
                   return (
                     <motion.div
-                      key={notification.id}
+                      key={trade.id}
                       variants={{
                         initial: { opacity: 0, y: 12 },
                         animate: {
@@ -803,47 +767,50 @@ export function Home() {
                           <div className="flex items-start gap-3">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1">
-                                {getTradeIcon(notification.type)}
+                                {getTradeIcon(trade.type)}
                                 <span className="text-xs font-medium text-white/70 uppercase">
-                                  {getTradeTypeLabel(notification.type)}
+                                  {getTradeTypeLabel(trade.type)}
                                 </span>
-                              </div>
-                              <h3 className="font-semibold text-white truncate">
-                                {getWalletNickname(notification.walletAddress)}
-                              </h3>
-                              <p className="text-sm text-white/70 line-clamp-2 mt-1">
-                                {notification.message}
-                              </p>
-                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/50 mt-2">
-                                {amountLabel && (
-                                  <span className="font-medium text-white/70">
-                                    {amountLabel}
+                                {trade.chain && trade.chain !== "solana" && (
+                                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-white/10 text-white/60 uppercase">
+                                    {trade.chain}
                                   </span>
                                 )}
-                                {notification.tokenAddress && (
-                                  <code className="font-mono">
-                                    {shortenAddress(notification.tokenAddress)}
-                                  </code>
-                                )}
-                                <span>{formatTime(notification.createdAt)}</span>
                               </div>
-                              {notification.txHash && (
-                                <a
-                                  href={`https://solscan.io/tx/${notification.txHash}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 text-xs text-accent-primary hover:text-accent-hover mt-2"
-                                >
-                                  View TX
-                                  <ExternalLink className="w-3 h-3" />
-                                </a>
-                              )}
+                              <h3 className="font-semibold text-white truncate">
+                                {swapDesc}
+                              </h3>
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/50 mt-2">
+                                {amountStr && (
+                                  <span className="font-medium text-white/70">
+                                    {amountStr}
+                                  </span>
+                                )}
+                                <span>{formatTime(trade.blockUnixTime)}</span>
+                              </div>
+                              {trade.txHash && (() => {
+                                const explorerUrl =
+                                  trade.chain === "base"
+                                    ? `https://basescan.org/tx/${trade.txHash}`
+                                    : trade.chain === "bnb"
+                                      ? `https://bscscan.com/tx/${trade.txHash}`
+                                      : `https://solscan.io/tx/${trade.txHash}`;
+                                return (
+                                  <a
+                                    href={explorerUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 text-xs text-accent-primary hover:text-accent-hover mt-2"
+                                  >
+                                    View TX
+                                    <ExternalLink className="w-3 h-3" />
+                                  </a>
+                                );
+                              })()}
                             </div>
-                            {notification.tokenAddress && (
+                            {(trade.toAddress ?? trade.fromAddress) && (
                               <Button
-                                onClick={(e) =>
-                                  handleCopyTrade(e, notification)
-                                }
+                                onClick={(e) => handleTradeClick(e, trade)}
                                 variant="primary"
                                 size="sm"
                                 className="flex-shrink-0 min-h-[44px] min-w-[44px]"

@@ -236,6 +236,52 @@ async function sendToTokens(
   return invalidTokens;
 }
 
+async function handleDiag(req: VercelRequest, res: VercelResponse) {
+  if (
+    process.env.NODE_ENV === "production" &&
+    req.query.secret !== process.env.PUSH_DIAG_SECRET
+  ) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  const vapidPublic = !!process.env.VITE_FIREBASE_VAPID_KEY;
+  const vapidPrivate = !!process.env.FIREBASE_VAPID_PRIVATE_KEY;
+  const vapidInitOk = vapidPublic && vapidPrivate && initWebPush();
+  const firebaseAdminOk = !!(
+    process.env.FIREBASE_SERVICE_ACCOUNT ||
+    (process.env.FIREBASE_ADMIN_PROJECT_ID &&
+      process.env.FIREBASE_ADMIN_CLIENT_EMAIL &&
+      process.env.FIREBASE_ADMIN_PRIVATE_KEY)
+  );
+  let fcmCount = 0;
+  let webPushCount = 0;
+  try {
+    const snap = await adminDb.collection(PUSH_TOKEN_INDEX).get();
+    snap.forEach((doc) => {
+      const d = doc.data();
+      const platform = (d.platform as string) || "web";
+      const isWeb =
+        platform === "webpush" || isWebPushSubscription(d.token as string);
+      if (isWeb) webPushCount++;
+      else fcmCount++;
+    });
+  } catch {
+    /* ignore */
+  }
+  return res.status(200).json({
+    vapidPublic,
+    vapidPrivate,
+    vapidInitOk,
+    firebaseAdminOk,
+    tokenCounts: {
+      fcm: fcmCount,
+      webpush: webPushCount,
+      total: fcmCount + webPushCount,
+    },
+    env: { nodeEnv: process.env.NODE_ENV ?? "undefined" },
+    note: "Set PUSH_DIAG_SECRET in production to use ?secret=...",
+  });
+}
+
 async function handleRegister(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST" && req.method !== "DELETE") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -243,7 +289,10 @@ async function handleRegister(req: VercelRequest, res: VercelResponse) {
   const uid = await getUidFromHeader(req);
   if (!uid) return res.status(401).json({ error: "Unauthorized" });
 
-  const { token, platform } = req.body || {};
+  const token =
+    (req.body as { token?: string } | undefined)?.token ||
+    (req.query.token as string | undefined);
+  const platform = (req.body as { platform?: string } | undefined)?.platform;
   if (!token) return res.status(400).json({ error: "Token is required" });
 
   const tokenRef = adminDb
@@ -256,16 +305,20 @@ async function handleRegister(req: VercelRequest, res: VercelResponse) {
     .doc(pushTokenDocId(token));
   if (req.method === "POST") {
     const platformVal = platform || "web";
+    const now = FieldValue.serverTimestamp();
     await tokenRef.set(
       {
         token,
         platform: platformVal,
-        createdAt: FieldValue.serverTimestamp(),
-        lastSeenAt: FieldValue.serverTimestamp(),
+        createdAt: now,
+        lastSeenAt: now,
       },
       { merge: true },
     );
-    await indexRef.set({ uid, token, platform: platformVal }, { merge: true });
+    await indexRef.set(
+      { uid, token, platform: platformVal, lastSeenAt: now },
+      { merge: true },
+    );
   } else {
     await tokenRef.delete();
     await indexRef.delete();
@@ -352,10 +405,11 @@ async function handleSend(req: VercelRequest, res: VercelResponse) {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = (req.query.action as string) || "";
-  if (!["register", "send", "status"].includes(action)) {
+  if (!["register", "send", "status", "diag"].includes(action)) {
     return res.status(400).json({ error: "Invalid action" });
   }
 
+  if (action === "diag") return handleDiag(req, res);
   if (action === "register") return handleRegister(req, res);
   if (action === "status") return handleStatus(req, res);
   return handleSend(req, res);

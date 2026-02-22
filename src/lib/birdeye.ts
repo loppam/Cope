@@ -330,6 +330,142 @@ export interface TokenTransactionsResponse {
 }
 
 /**
+ * User trade from Birdeye defi/v3/txs (wallet transaction history)
+ */
+export interface UserTrade {
+  id: string;
+  txHash: string;
+  blockUnixTime: number;
+  type: "swap";
+  volumeUsd: number;
+  volume: number;
+  owner: string;
+  source?: string;
+  /** Token received (bought) - primary display token */
+  toSymbol?: string;
+  toAddress?: string;
+  toAmount?: number;
+  /** Token spent (sold) */
+  fromSymbol?: string;
+  fromAddress?: string;
+  fromAmount?: number;
+  chain?: "solana" | "base" | "bnb";
+}
+
+/** Raw item from Birdeye defi/v3/txs */
+interface BirdeyeWalletTxItem {
+  base?: { symbol?: string; address?: string; ui_change_amount?: number; type_swap?: string };
+  quote?: { symbol?: string; address?: string; ui_change_amount?: number; type_swap?: string };
+  tx_hash?: string;
+  block_unix_time?: number;
+  volume_usd?: number;
+  volume?: number;
+  owner?: string;
+  source?: string;
+}
+
+function mapBirdeyeTxToUserTrade(
+  item: BirdeyeWalletTxItem,
+  owner: string,
+  chain: "solana" | "base" | "bnb",
+  index: number,
+): UserTrade {
+  const baseSide = item.base;
+  const quoteSide = item.quote;
+  const toSide = baseSide?.type_swap === "to" ? baseSide : quoteSide?.type_swap === "to" ? quoteSide : baseSide;
+  const fromSide = baseSide?.type_swap === "from" ? baseSide : quoteSide?.type_swap === "from" ? quoteSide : quoteSide;
+  const primaryToken = toSide ?? baseSide ?? quoteSide;
+  return {
+    id: `${chain}-${item.tx_hash ?? index}-${index}`,
+    txHash: item.tx_hash ?? "",
+    blockUnixTime: item.block_unix_time ?? 0,
+    type: "swap",
+    volumeUsd: item.volume_usd ?? 0,
+    volume: item.volume ?? 0,
+    owner: item.owner ?? owner,
+    source: item.source,
+    toSymbol: toSide?.symbol ?? primaryToken?.symbol,
+    toAddress: toSide?.address ?? primaryToken?.address,
+    toAmount: toSide?.ui_change_amount ?? primaryToken?.ui_change_amount,
+    fromSymbol: fromSide?.symbol,
+    fromAddress: fromSide?.address,
+    fromAmount: fromSide?.ui_change_amount,
+    chain: chain === "bnb" ? "bnb" : chain,
+  };
+}
+
+/**
+ * Get wallet's own trades (swaps) for a single chain - proxied via /api/birdeye/wallet-txs
+ */
+export async function getWalletTrades(
+  walletAddress: string,
+  chain: "solana" | "base" | "bnb" = "solana",
+  limit: number = 50,
+  offset: number = 0,
+): Promise<{ items: UserTrade[]; hasNext?: boolean }> {
+  const base = getApiBase();
+  const params = new URLSearchParams({
+    owner: walletAddress,
+    limit: String(Math.max(1, Math.min(100, limit))),
+    offset: String(Math.max(0, offset)),
+    chain,
+  });
+  const res = await fetch(`${base}/api/birdeye/wallet-txs?${params.toString()}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(
+      (err as { message?: string })?.message ?? (err as { error?: string })?.error ?? `Wallet trades: ${res.status}`,
+    );
+  }
+  const data = (await res.json()) as {
+    success?: boolean;
+    data?: { items?: BirdeyeWalletTxItem[]; hasNext?: boolean; has_next?: boolean };
+  };
+  const rawItems = data?.data?.items ?? [];
+  const items: UserTrade[] = rawItems.map((item, i) =>
+    mapBirdeyeTxToUserTrade(item, walletAddress, chain === "bnb" ? "bnb" : chain, i),
+  );
+  return {
+    items,
+    hasNext: data?.data?.hasNext ?? data?.data?.has_next,
+  };
+}
+
+/** Per-chain limit when fetching multi-chain to keep total ~50 */
+const MULTI_CHAIN_LIMIT = 20;
+
+/**
+ * Get wallet's own trades across Solana, Base, and BNB.
+ * Uses Solana wallet for Solana, EVM address for Base/BNB.
+ */
+export async function getWalletTradesMultiChain(
+  walletAddress: string,
+  evmAddress: string | null,
+  limitPerChain: number = MULTI_CHAIN_LIMIT,
+): Promise<{ items: UserTrade[] }> {
+  const chains: Array<{ chain: "solana" | "base" | "bnb"; address: string }> = [
+    { chain: "solana", address: walletAddress },
+  ];
+  if (evmAddress && evmAddress.length >= 40) {
+    chains.push({ chain: "base", address: evmAddress });
+    chains.push({ chain: "bnb", address: evmAddress });
+  }
+
+  const results = await Promise.allSettled(
+    chains.map(({ chain, address }) => getWalletTrades(address, chain, limitPerChain, 0)),
+  );
+
+  const allItems: UserTrade[] = [];
+  for (const result of results) {
+    if (result.status === "fulfilled" && result.value.items.length > 0) {
+      allItems.push(...result.value.items);
+    }
+  }
+  allItems.sort((a, b) => b.blockUnixTime - a.blockUnixTime);
+  return { items: allItems.slice(0, 60) };
+}
+
+/**
  * Get token transactions - proxied via /api/birdeye/token-txs
  */
 export async function getTokenTransactions(

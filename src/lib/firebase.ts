@@ -67,6 +67,9 @@ if (typeof window !== "undefined" && firebaseConfig.measurementId) {
 }
 export { analytics };
 
+/** Timeout for FCM getToken - prevents indefinite hang on mobile PWA/TWA */
+const FCM_GET_TOKEN_TIMEOUT_MS = 12_000;
+
 export async function requestFirebaseMessagingToken(
   vapidKey?: string,
 ): Promise<string | null> {
@@ -88,17 +91,27 @@ export async function requestFirebaseMessagingToken(
       registration = await navigator.serviceWorker.ready;
     }
 
-    return await getToken(messaging, {
+    // Race getToken with timeout - FCM can hang indefinitely on mobile PWA/TWA
+    const tokenPromise = getToken(messaging, {
       vapidKey: resolvedVapidKey,
       serviceWorkerRegistration: registration || undefined,
     });
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(
+        () =>
+          reject(new Error("getToken timed out (FCM often hangs on mobile)")),
+        FCM_GET_TOKEN_TIMEOUT_MS
+      )
+    );
+    return await Promise.race([tokenPromise, timeoutPromise]);
   } catch (error: any) {
     // Handle specific Firebase messaging errors
     const errorCode = error?.code || "";
     const errorMessage = error?.message || "";
 
-    // Check for permission denied or unsupported browser errors
-    if (
+    if (errorMessage.includes("timed out")) {
+      console.warn("[Firebase] getToken timed out - caller will try Web Push");
+    } else if (
       errorCode === "messaging/permission-blocked" ||
       errorCode === "messaging/permission-default" ||
       errorMessage.includes("permission") ||
@@ -109,11 +122,9 @@ export async function requestFirebaseMessagingToken(
         errorCode,
         errorMessage,
       );
-      return null;
+    } else {
+      console.error("[Firebase] Failed to get messaging token:", error);
     }
-
-    // Log other errors but don't throw
-    console.error("[Firebase] Failed to get messaging token:", error);
     return null;
   }
 }

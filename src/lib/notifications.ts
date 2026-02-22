@@ -13,6 +13,7 @@ import { auth, db } from "./firebase";
 import { requestFirebaseMessagingToken } from "./firebase";
 
 const PUSH_TOKEN_KEY = "cope_push_token";
+const PUSH_META_KEY = "cope_push_meta"; // { token, platform } for same-device replacement
 const PUSH_REGISTER_URL = "/api/push/register";
 const PUSH_STATUS_URL = "/api/push/status";
 
@@ -61,7 +62,13 @@ async function sendAuthRequest(
     throw new Error("User not authenticated");
   }
 
-  const response = await fetch(PUSH_REGISTER_URL, {
+  let url = PUSH_REGISTER_URL;
+  const token = body?.token as string | undefined;
+  if (method === "DELETE" && token && token.length < 2000) {
+    url += `?token=${encodeURIComponent(token)}`;
+  }
+
+  const response = await fetch(url, {
     method,
     headers: {
       "Content-Type": "application/json",
@@ -210,9 +217,18 @@ export async function requestPermissionAndGetPushToken(): Promise<{
 
   const isSafariBrowser = isSafari();
 
-  // For Safari/iOS: Use Web Push API
+  // For Safari/iOS: Web Push requires PWA installed (Add to Home Screen), iOS 16.4+
   if (isSafariBrowser) {
-    console.info("[Notifications] Using Web Push API for Safari/iOS");
+    const isInstalled =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (window.navigator as { standalone?: boolean }).standalone === true;
+    if (!isInstalled) {
+      console.warn(
+        "[Notifications] iOS Web Push requires Add to Home Screen first"
+      );
+      return null;
+    }
+    console.info("[Notifications] Using Web Push API for Safari/iOS (installed)");
     const subscription = await subscribeToWebPush();
     if (subscription) {
       return { token: subscription, platform: "webpush" };
@@ -220,29 +236,51 @@ export async function requestPermissionAndGetPushToken(): Promise<{
     return null;
   }
 
-  // For other browsers: Try FCM first
+  // On mobile standalone/TWA, FCM often hangs or fails - use Web Push directly
+  const isMobileStandalone =
+    window.matchMedia("(display-mode: standalone)").matches ||
+    (window.navigator as { standalone?: boolean }).standalone === true ||
+    document.referrer.includes("android-app://");
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent
+  );
+  if (isMobile && isMobileStandalone) {
+    console.info(
+      "[Notifications] Mobile standalone/TWA - using Web Push directly (FCM unreliable)"
+    );
+    const subscription = await subscribeToWebPush();
+    if (subscription) {
+      return { token: subscription, platform: "webpush" };
+    }
+    return null;
+  }
+
+  // For desktop/browser: Try FCM first, fall back to Web Push on any failure
   try {
     const fcmToken = await requestFirebaseMessagingToken();
     if (fcmToken) {
       return { token: fcmToken, platform: "fcm" };
     }
-  } catch (error: any) {
-    const errorCode = error?.code || "";
-    const errorMessage = error?.message || "";
-
-    // If FCM fails, try Web Push as fallback
-    if (
-      errorCode === "messaging/unsupported-browser" ||
-      errorMessage.includes("unsupported")
-    ) {
-      console.info("[Notifications] FCM not supported, trying Web Push API...");
-      const subscription = await subscribeToWebPush();
-      if (subscription) {
-        return { token: subscription, platform: "webpush" };
-      }
-    } else {
-      console.error("[Notifications] Error requesting FCM token:", error);
+    // FCM returned null - try Web Push as fallback
+    console.info(
+      "[Notifications] FCM returned null, trying Web Push API..."
+    );
+    const subscription = await subscribeToWebPush();
+    if (subscription) {
+      return { token: subscription, platform: "webpush" };
     }
+  } catch (error: any) {
+    // FCM threw (e.g. timeout) - try Web Push as fallback
+    console.info(
+      "[Notifications] FCM failed:",
+      error?.message,
+      "- trying Web Push API..."
+    );
+    const subscription = await subscribeToWebPush();
+    if (subscription) {
+      return { token: subscription, platform: "webpush" };
+    }
+    console.error("[Notifications] Web Push fallback also failed:", error);
   }
 
   return null;
@@ -266,17 +304,32 @@ export function isSafariBrowser(): boolean {
 
 export function getStoredPushToken(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem(PUSH_TOKEN_KEY);
+  const meta = getStoredPushMeta();
+  return meta?.token ?? localStorage.getItem(PUSH_TOKEN_KEY);
 }
 
-function setStoredPushToken(token: string) {
+function getStoredPushMeta(): { token: string; platform: string } | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(PUSH_META_KEY);
+  if (!raw) return null;
+  try {
+    const meta = JSON.parse(raw) as { token?: string; platform?: string };
+    return meta?.token ? { token: meta.token, platform: meta.platform || "web" } : null;
+  } catch {
+    return null;
+  }
+}
+
+function setStoredPushMeta(meta: { token: string; platform: string }) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(PUSH_TOKEN_KEY, token);
+  localStorage.setItem(PUSH_META_KEY, JSON.stringify(meta));
+  localStorage.setItem(PUSH_TOKEN_KEY, meta.token); // keep legacy key for getStoredPushToken
 }
 
 function clearStoredPushToken() {
   if (typeof window === "undefined") return;
   localStorage.removeItem(PUSH_TOKEN_KEY);
+  localStorage.removeItem(PUSH_META_KEY);
 }
 
 export async function savePushToken(
@@ -284,8 +337,16 @@ export async function savePushToken(
   platform: string = "web",
 ): Promise<void> {
   if (!token) return;
+  const oldMeta = getStoredPushMeta();
+  if (oldMeta && oldMeta.token !== token) {
+    try {
+      await sendAuthRequest("DELETE", { token: oldMeta.token });
+    } catch (e) {
+      console.warn("[Notifications] Failed to unregister old token:", e);
+    }
+  }
   await sendAuthRequest("POST", { token, platform });
-  setStoredPushToken(token);
+  setStoredPushMeta({ token, platform });
 }
 
 /**
@@ -300,8 +361,11 @@ export async function savePushTokenWithPlatform(
 
 export async function unregisterPushToken(token: string): Promise<void> {
   if (!token) return;
-  await sendAuthRequest("DELETE", { token });
-  clearStoredPushToken();
+  try {
+    await sendAuthRequest("DELETE", { token });
+  } finally {
+    clearStoredPushToken();
+  }
 }
 
 export async function getPushNotificationStatus(): Promise<{
@@ -311,10 +375,24 @@ export async function getPushNotificationStatus(): Promise<{
   const permission =
     typeof Notification !== "undefined" ? Notification.permission : "denied";
 
+  const hasLocalToken = !!getStoredPushToken();
+
+  if (isSafari()) {
+    const isInstalled =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (window.navigator as { standalone?: boolean }).standalone === true;
+    if (!isInstalled) {
+      return {
+        enabled: false,
+        permission,
+      };
+    }
+  }
+
   try {
     const idToken = await getIdToken();
     if (!idToken) {
-      return { enabled: !!getStoredPushToken(), permission };
+      return { enabled: hasLocalToken, permission };
     }
     const response = await fetch(PUSH_STATUS_URL, {
       headers: {
@@ -322,18 +400,22 @@ export async function getPushNotificationStatus(): Promise<{
       },
     });
     if (!response.ok) {
-      return { enabled: !!getStoredPushToken(), permission };
+      return { enabled: hasLocalToken, permission };
     }
     const contentType = response.headers.get("content-type");
     if (!contentType || !contentType.includes("application/json")) {
-      return { enabled: !!getStoredPushToken(), permission };
+      return { enabled: hasLocalToken, permission };
     }
     const data = await response.json();
-    return { enabled: data.enabled, permission };
+    const serverEnabled = !!data.enabled;
+    return {
+      enabled: hasLocalToken && serverEnabled && permission === "granted",
+      permission,
+    };
   } catch (error) {
     console.error("Error getting push notification status:", error);
     return {
-      enabled: !!getStoredPushToken(),
+      enabled: hasLocalToken && permission === "granted",
       permission,
     };
   }

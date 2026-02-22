@@ -13,6 +13,10 @@
       "schedule": "15 */6 * * *"
     },
     {
+      "path": "/api/cron/cleanup-stale-push-tokens",
+      "schedule": "0 3 * * 0"
+    },
+    {
       "path": "/api/trending-tokens",
       "schedule": "*/30 * * * *"
     }
@@ -81,6 +85,10 @@
     {
       "source": "/api/push/status",
       "destination": "/api/push-handler?action=status"
+    },
+    {
+      "source": "/api/push/diag",
+      "destination": "/api/push-handler?action=diag"
     },
     {
       "source": "/((?!api/|__/|\\.well-known).*)",

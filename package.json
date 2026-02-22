@@ -19,7 +19,8 @@
     "get-sol-usdc-balance": "node scripts/get-sol-usdc-balance.mjs",
     "fund-existing-wallets-sol": "node scripts/fund-existing-wallets-sol.mjs",
     "sol-funder-loop": "node scripts/sol-funder-loop.mjs",
-    "recover-deleted-wallet": "node scripts/recover-deleted-wallet.mjs"
+    "recover-deleted-wallet": "node scripts/recover-deleted-wallet.mjs",
+    "copescanner": "node scripts/copescanner.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

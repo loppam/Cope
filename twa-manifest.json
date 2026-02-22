@@ -20,8 +20,8 @@
     "path": "/Users/macbook2020m1/Desktop/cope/android.keystore",
     "alias": "android"
   },
-  "appVersionName": "1",
-  "appVersionCode": 1,
+  "appVersionName": "2",
+  "appVersionCode": 2,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://trycope.com/manifest.json",
@@ -56,5 +56,5 @@
     "window-controls-overlay",
     "standalone"
   ],
-  "appVersion": "1"
+  "appVersion": "2"
 }

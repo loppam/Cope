@@ -500,6 +500,47 @@ async function walletCurrentNetWorthHandler(req: VercelRequest, res: VercelRespo
   }
 }
 
+async function walletTxsHandler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "GET")
+    return res.status(405).json({ error: "Method not allowed" });
+  try {
+    const apiKey = process.env.BIRDEYE_API_KEY;
+    if (!apiKey)
+      return res.status(503).json({ error: "BIRDEYE_API_KEY not configured" });
+    const owner = (req.query.owner ?? req.query.wallet ?? "").toString().trim();
+    const limit = Math.min(Math.max(1, parseInt(String(req.query.limit ?? "50"), 10) || 50), 100);
+    const offset = Math.max(0, parseInt(String(req.query.offset ?? "0"), 10) || 0);
+    const chain = (req.query.chain ?? req.headers["x-chain"] ?? "solana").toString().toLowerCase();
+    const birdeyeChain = chain === "bnb" ? "bsc" : chain;
+    if (!owner) return res.status(400).json({ error: "Missing owner (wallet address)" });
+
+    const url = new URL(`${BIRDEYE_API_BASE}/defi/v3/txs`);
+    url.searchParams.set("owner", owner);
+    url.searchParams.set("limit", String(limit));
+    url.searchParams.set("offset", String(offset));
+    url.searchParams.set("sort_by", "block_unix_time");
+    url.searchParams.set("sort_type", "desc");
+    url.searchParams.set("tx_type", "swap");
+
+    const r = await fetch(url.toString(), {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": apiKey,
+        "x-chain": birdeyeChain,
+      },
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok)
+      return res.status(r.status >= 500 ? 502 : 400).json(data?.detail ?? data);
+    return res.status(200).json(data);
+  } catch (e: unknown) {
+    return res.status(500).json({
+      error: e instanceof Error ? e.message : "Internal server error",
+    });
+  }
+}
+
 async function tokenTxsHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET")
     return res.status(405).json({ error: "Method not allowed" });
@@ -557,6 +598,7 @@ const ROUTES: Record<
   ohlcv: ohlcvHandler,
   "history-price": historyPriceHandler,
   "pnl-summary": pnlSummaryHandler,
+  "wallet-txs": walletTxsHandler,
   "token-txs": tokenTxsHandler,
 };
 
@@ -575,7 +617,7 @@ export default async function handler(
   if (!routeHandler) {
     res.status(404).json({
       error: "Not found",
-      message: `Birdeye action '${action || ""}' not found. Use: search, token-overview, wallet-token-balance, wallet-token-list, wallet-current-net-worth, wallet-pnl, ohlcv, history-price, pnl-summary, token-txs`,
+      message: `Birdeye action '${action || ""}' not found. Use: search, token-overview, wallet-token-balance, wallet-token-list, wallet-current-net-worth, wallet-pnl, ohlcv, history-price, pnl-summary, wallet-txs, token-txs`,
     });
     return;
   }

@@ -635,7 +635,9 @@ async function transactionHandler(req: VercelRequest, res: VercelResponse) {
 }
 
 const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913".toLowerCase();
+const BASE_USDC_E = "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA".toLowerCase(); // USDbC bridged
 const BNB_USDC = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d".toLowerCase();
+const BASE_ACCEPTED_USDC = new Set([BASE_USDC, BASE_USDC_E]);
 
 async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
@@ -741,16 +743,17 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
         return res.status(200).json({ received: true, skipped: "unsupported chain" });
       }
       // Find the USDC transfer in the activity array (Alchemy may include ETH + ERC20; first item might not be USDC)
-      const expectedUsdc = network === "base" ? BASE_USDC : BNB_USDC;
+      const baseAccepted = network === "base" ? BASE_ACCEPTED_USDC : new Set([BNB_USDC]);
       let chosen: Record<string, unknown> | null = null;
       for (const act of activityArr) {
         const rawContract = act.rawContract as { rawValue?: string; address?: string } | undefined;
+        const logAddr = (act.log as { address?: string } | undefined)?.address;
         const addr = String(
-          rawContract?.address ?? act.contract ?? act.tokenAddress ?? act.asset ?? ""
+          rawContract?.address ?? logAddr ?? act.contract ?? act.tokenAddress ?? ""
         )
           .trim()
           .toLowerCase();
-        if (addr !== expectedUsdc) continue;
+        if (!addr || !baseAccepted.has(addr)) continue;
         const rawVal = rawContract?.rawValue;
         let amt: bigint;
         if (rawVal && typeof rawVal === "string") {
@@ -765,7 +768,23 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
         break;
       }
       if (!chosen) {
-        console.log("[evm-deposit] skipped: no USDC transfer in activity array");
+        const activityDebug = activityArr.map((act, i) => {
+          const rc = act.rawContract as { address?: string } | undefined;
+          const logAddr = (act.log as { address?: string } | undefined)?.address;
+          const addr =
+            (rc?.address ?? logAddr ?? act.contract ?? act.tokenAddress ?? "")?.toString().toLowerCase() || "";
+          return {
+            i,
+            addr: addr ? addr.slice(0, 24) + "..." : "(empty)",
+            asset: act.asset,
+            category: act.category,
+          };
+        });
+        console.log("[evm-deposit] skipped: no USDC transfer in activity array", {
+          network,
+          activityCount: activityArr.length,
+          activities: activityDebug,
+        });
         return res.status(200).json({ received: true, skipped: "not USDC" });
       }
       const toAddr = String(chosen.to ?? chosen.toAddress ?? "").trim().toLowerCase();
@@ -781,8 +800,9 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
         const val = chosen.value ?? chosen.tokenAmount;
         amountRaw = typeof val === "string" ? val : typeof val === "number" ? String(Math.floor(val * (network === "base" ? 1e6 : 1e18))) : "";
       }
+      const chosenLog = chosen.log as { address?: string } | undefined;
       tokenAddress = String(
-        rawContract?.address ?? chosen.contract ?? chosen.tokenAddress ?? chosen.asset ?? ""
+        rawContract?.address ?? chosenLog?.address ?? chosen.contract ?? chosen.tokenAddress ?? ""
       )
         .trim()
         .toLowerCase();
@@ -796,7 +816,7 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ received: true, skipped: "invalid to" });
     }
     const token = tokenAddress || "";
-    if (network === "base" && token !== BASE_USDC) {
+    if (network === "base" && !BASE_ACCEPTED_USDC.has(token)) {
       console.log("[evm-deposit] skipped: not USDC (base)");
       return res.status(200).json({ received: true, skipped: "not USDC" });
     }

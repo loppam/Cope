@@ -1,6 +1,7 @@
 // Single file for all webhook routes (Vercel counts each api/*.ts as a function).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createHash } from "crypto";
+import { Contract, JsonRpcProvider } from "ethers";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore, type DocumentReference, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
@@ -638,6 +639,21 @@ const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913".toLowerCase();
 const BASE_USDC_E = "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA".toLowerCase(); // USDbC bridged
 const BNB_USDC = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d".toLowerCase();
 const BASE_ACCEPTED_USDC = new Set([BASE_USDC, BASE_USDC_E]);
+const EVM_DEPOSIT_FALLBACK_MIN_RAW = 500_000; // $0.50
+const ERC20_ABI = ["function balanceOf(address) view returns (uint256)"] as const;
+
+function getBaseRpcUrl(): string {
+  if (process.env.BASE_RPC_URL?.trim()) return process.env.BASE_RPC_URL.trim();
+  const key = process.env.ALCHEMY_API_KEY?.trim();
+  if (key) return `https://base-mainnet.g.alchemy.com/v2/${key}`;
+  return "https://mainnet.base.org";
+}
+function getBnbRpcUrl(): string {
+  if (process.env.BNB_RPC_URL?.trim()) return process.env.BNB_RPC_URL.trim();
+  const key = process.env.ALCHEMY_API_KEY?.trim();
+  if (key) return `https://bnb-mainnet.g.alchemy.com/v2/${key}`;
+  return "https://bsc-dataseed.binance.org";
+}
 
 async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
@@ -785,6 +801,58 @@ async function evmDepositHandler(req: VercelRequest, res: VercelResponse) {
           activityCount: activityArr.length,
           activities: activityDebug,
         });
+        const addresses = new Set<string>();
+        for (const act of activityArr) {
+          const to = String(act.to ?? act.toAddress ?? "").trim().toLowerCase();
+          const from = String(act.from ?? act.fromAddress ?? "").trim().toLowerCase();
+          if (to.length >= 40) addresses.add(to);
+          if (from.length >= 40) addresses.add(from);
+        }
+        const addressList = [...addresses].slice(0, 10);
+        if (addressList.length > 0) {
+          const usersSnap = await db.collection("users").where("evmAddress", "in", addressList).get();
+          const apiBase = process.env.API_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+          const relaySecret = process.env.WEBHOOK_EVM_DEPOSIT_SECRET || process.env.RELAY_INTERNAL_SECRET;
+          if (!usersSnap.empty && apiBase && relaySecret) {
+            (async () => {
+              const relayHeaders: Record<string, string> = {
+                "Content-Type": "application/json",
+                "x-webhook-secret": relaySecret,
+              };
+              for (const doc of usersSnap.docs) {
+                const userId = doc.id;
+                const evmAddress = (doc.get("evmAddress") as string)?.toLowerCase();
+                const walletAddress = doc.get("walletAddress") as string;
+                if (!evmAddress || !walletAddress) continue;
+                try {
+                  const provider = new JsonRpcProvider(
+                    network === "base" ? getBaseRpcUrl() : getBnbRpcUrl()
+                  );
+                  const usdcAddr = network === "base" ? "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" : "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d";
+                  const raw = await new Contract(usdcAddr, ERC20_ABI, provider).balanceOf(evmAddress);
+                  if (raw <= BigInt(EVM_DEPOSIT_FALLBACK_MIN_RAW)) continue;
+                  const execRes = await fetch(`${apiBase}/api/relay/execute-bridge-custodial`, {
+                    method: "POST",
+                    headers: relayHeaders,
+                    body: JSON.stringify({
+                      userId,
+                      network,
+                      amountRaw: raw.toString(),
+                      recipientSolAddress: walletAddress,
+                    }),
+                  });
+                  if (execRes.ok) {
+                    console.log("[evm-deposit] fallback bridged", { userId, network, amountRaw: raw.toString() });
+                  } else {
+                    console.warn("[evm-deposit] fallback bridge failed", { userId, network, status: execRes.status });
+                  }
+                } catch (e) {
+                  console.warn("[evm-deposit] fallback balance/bridge error", { userId, network, err: (e as Error)?.message });
+                }
+              }
+            })();
+          }
+        }
         return res.status(200).json({ received: true, skipped: "not USDC" });
       }
       const toAddr = String(chosen.to ?? chosen.toAddress ?? "").trim().toLowerCase();
